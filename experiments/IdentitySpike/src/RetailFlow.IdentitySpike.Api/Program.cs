@@ -131,6 +131,32 @@ storeCustomerGroup.MapGet(
         });
     });
 
+var backOfficeGroup = app
+    .MapGroup("/api/backoffice")
+    .WithMetadata(
+        new IdentityScopeMetadata(
+            AccountKind.BackOffice));
+
+backOfficeGroup.MapGet(
+    "/scope",
+    (IIdentityLookupScopeAccessor scopeAccessor) =>
+    {
+        var currentScope = scopeAccessor.Current;
+
+        if (currentScope is null)
+        {
+            return Results.Problem(
+                "Identity scope was not established.",
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+
+        return Results.Ok(new
+        {
+            StoreId = currentScope.StoreId,
+            AccountKind = currentScope.AccountKind.ToString()
+        });
+    });
+
 // -----------------------------------------------------------------------------
 // Run Application
 // -----------------------------------------------------------------------------

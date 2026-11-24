@@ -3,8 +3,8 @@
 - **المسار التجريبي:** `experiments/IdentitySpike/`
 - **المرجع المعماري:** دراسة إثبات المفهوم لتعدد هوية العملاء (`Phase 06 — v1.0 — 22 نوفمبر 2026`)
 - **تاريخ آخر تحديث للتقرير:** `2026-11-24`
-- **نقطة التوقف الحالية:** اكتمل تنفيذ واختبار `IdentityScopeResolver` و`IdentityScopeMiddleware` وربطهما بـ Route Group الفعلي (`/api/stores/{slug}/customers`) في `Program.cs` مع إثبات عزل الطلبات واستقلال مثيل `IdentityLookupScopeAccessor` عبر `WebApplicationFactory` وSQL Server.
-- **الخطوة التالية بعد تثبيت هذه النقطة:** استكمال `Authentication` و`Authorization` داخل `Program.cs` (بعد حسم `AUTH-ADR-01`) وبناء Minimal APIs (`register`, `login`, `confirm-email`, `forgot/reset-password`, `me`).
+- **نقطة التوقف الحالية:** اكتمل تنفيذ واختبار `IdentityScopeResolver` و`IdentityScopeMiddleware` وربطهما بـ Route Groups الفعلية لـ `StoreCustomer` (`/api/stores/{slug}/customers`) و`BackOffice` (`/api/backoffice`) في `Program.cs`، مع إثبات عزل الطلبات واستقلال مثيل `IdentityLookupScopeAccessor` عبر `WebApplicationFactory` وSQL Server.
+- **الخطوة التالية بعد تثبيت هذه النقطة:** حسم `AUTH-ADR-01` (`Cookies` مقابل `Standard JWT`) قبل البدء في تنفيذ `Authentication` و`Authorization` داخل `Program.cs` وبناء Minimal Auth APIs.
 
 ### ملخص حالة المراحل
 
@@ -12,11 +12,11 @@
 | :--- | :--- |
 | **0 — Baseline** | الأساس المحلي منجز، وCI متبقٍ |
 | **1 — Model** | نموذج Identity الأساسي منجز، وقرارات Profile/Membership متبقية |
-| **2 — Scoped Store** | منجزة، بما في ذلك Resolve/Scope Middleware وربط Route Group الفعلي لعملاء المتاجر |
-| **3 — Managers & APIs** | جزئية: Managers وRoute Group النطاق منفذة؛ Minimal Auth APIs وSignInManager في التطبيق متبقية |
+| **2 — Scoped Store** | منجزة، بما في ذلك Resolve/Scope Middleware وربط Route Groups الفعلية (`StoreCustomer` و`BackOffice`) |
+| **3 — Managers & APIs** | جزئية: Managers وRoute Groups النطاق (`StoreCustomer` و`BackOffice`) منفذة ومختبرة في التطبيق الفعلي؛ Minimal Auth APIs وSignInManager في التطبيق متبقية |
 | **4 — Lifecycle** | إثبات الخدمات منجز؛ HTTP endpoints والسياسات متبقية |
 | **5 — Security** | لم تبدأ كتنفيذ إنتاجي؛ اختبار ترتيب Authentication مع Scope منفذ في TestServer فقط |
-| **6 — SQL/CI** | جزئية: 33 اختبار تكامل ناجحاً؛ CI والتزامن وShared Key Ring متبقية |
+| **6 — SQL/CI** | جزئية: 34 اختبار تكامل ناجحاً؛ CI والتزامن وShared Key Ring متبقية |
 
 ---
 
@@ -78,7 +78,7 @@
   - تسجيل `IIdentityLookupScopeAccessor` و `IIdentityScopeResolver` كـ `Scoped`، وإضافة `AddDataProtection()`.
   - تسجيل `ScopedUserStore` و `AddIdentityCore<ApplicationUser>` مع `options.User.RequireUniqueEmail = false` و `.AddUserStore<ScopedUserStoreFacade>()` و `.AddTokenProvider<DataProtectorTokenProvider<ApplicationUser>>(TokenOptions.DefaultProvider)`.
   - إضافة نقطة فحص اتصال قاعدة البيانات `GET /diagnostics/database` في بيئة التطوير.
-  - إضافة `UseRouting()` صراحةً ثم `UseMiddleware<IdentityScopeMiddleware>()` بعد `UseHttpsRedirection()`، وربط Route Group `/api/stores/{slug}/customers` بـ `IdentityScopeMetadata(AccountKind.StoreCustomer)` مع نقطة `/scope` للتحقق؛ لم تتم إضافة `UseAuthentication()` أو `UseAuthorization()` إلى التطبيق الفعلي بعد.
+  - إضافة `UseRouting()` صراحةً ثم `UseMiddleware<IdentityScopeMiddleware>()` بعد `UseHttpsRedirection()`، وربط Route Group `/api/stores/{slug}/customers` بـ `IdentityScopeMetadata(AccountKind.StoreCustomer)` وRoute Group `/api/backoffice` بـ `IdentityScopeMetadata(AccountKind.BackOffice)` مع نقطتي `/scope` للتحقق؛ لم تتم إضافة `UseAuthentication()` أو `UseAuthorization()` إلى التطبيق الفعلي بعد.
 
 ---
 
@@ -88,7 +88,7 @@
    - [`IdentityLookupScopeAccessorTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentityScopeUnitTests/Infrastructure/Identity/IdentityLookupScopeAccessorTests.cs) (5 اختبارات شاملة رفض التعيين المكرر `SetCurrent` والتحقق من نص الخطأ والحفاظ على مرجع النطاق الأصلي).
    - `UserStoreCapabilitiesTests.cs` (اختبار واحد يتحقق من حصر قدرات `UserManager` في قدرات MVP فقط).
    - [`IdentityScopeResolverContractTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentityScopeUnitTests/Infrastructure/Identity/IdentityScopeResolverContractTests.cs) (5 حالات: رفض slug الفارغ/المسافات، واحترام `CancellationToken`).
-2. **اختبارات التكامل مع SQL Server وHTTP TestServer (`IdentitySqlServerIntegrationTests` — 33 اختباراً):**
+2. **اختبارات التكامل مع SQL Server وHTTP TestServer (`IdentitySqlServerIntegrationTests` — 34 اختباراً):**
    - [`TestAssemblyConfiguration.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/TestAssemblyConfiguration.cs): تعطيل التوازي (`DisableTestParallelization = true`) لتجنب Deadlocks عند مشاركة قاعدة بيانات واحدة بين مجموعات الاختبار.
    - `ScopedUserStoreLookupTests.cs` (اختباران): عزل `Users` و `FindById/Email/Name`، وعزل `BackOffice`، واختبار Fail-Closed.
    - `ScopedUserStoreClaimsTests.cs` (اختباران): منع قراءة/إضافة/استبدال/حذف Claims لمتجر آخر أو لكائن مزور، واختبار `UserManagerGetUsersForClaimAsync_ReturnsOnlyUsersFromCurrentStore` الذي يثبت أن `UserManager.GetUsersForClaimAsync` لا يعيد مستخدمين من متجر آخر رغم تطابق الـ Claim.
@@ -103,11 +103,12 @@
    - [`IdentitySpikeApiFactory.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/IdentitySpikeApiFactory.cs) و `IdentitySpikeApiFactoryTests.cs` (اختباران باستخدام `WebApplicationFactory`): تشغيل API الفعلي داخل TestServer والتحقق من اتصال قاعدة البيانات، والتحقق من تسجيل Resolver وAccessor كـ Scoped عبر DI scopes مستقلة.
    - [`IdentityScopeRouteGroupIntegrationTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/IdentityScopeRouteGroupIntegrationTests.cs) (5 اختبارات باستخدام `WebApplicationFactory` وSQL Server الفعلي): حل المتجر النشط عبر `/api/stores/{slug}/customers/scope`، إرجاع `404` للمتجر غير الموجود وغير النشط، عزل Scope لمتجرين متزامنين، واستقلال الطلبات المتعاقبة (`A → B → A`).
    - [`IdentityLookupScopeAccessorLifetimeTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/IdentityLookupScopeAccessorLifetimeTests.cs) و [`AccessorInstanceTracker.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/AccessorInstanceTracker.cs) (اختبار واحد): إثبات إنشاء مثيل مستقل من `IIdentityLookupScopeAccessor` لكل طلب HTTP (`Assert.NotSame`) واحتفاظ كل مثيل بحالة متجره عبر SQL Server الفعلي.
+   - [`BackOfficeRouteGroupIntegrationTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/BackOfficeRouteGroupIntegrationTests.cs) (اختبار واحد باستخدام `WebApplicationFactory`): إثبات إنشاء `BackOffice` Identity Scope في `Program.cs` دون استدعاء `IdentityScopeResolver`.
 
 > **نتائج التشغيل الفعلي بتاريخ `2026-11-24`:**
 > - **`IdentityScopeUnitTests`: `14 / 14` Passed، `0 Failed · 0 Skipped`.**
-> - **`IdentitySqlServerIntegrationTests`: `33 / 33` Passed، `0 Failed · 0 Skipped`.** وتشمل اختبارات SQL Server الفعلية واختبارات HTTP باستخدام `TestServer` و `WebApplicationFactory`.
-> - **Full Solution Regression (`RetailFlow.IdentitySpike.slnx`): `47 / 47` Passed (`0 Failed · 0 Skipped`)** ضمن تشغيل واحد كامل للحل بعد جميع التعديلات.
+> - **`IdentitySqlServerIntegrationTests`: `34 / 34` Passed، `0 Failed · 0 Skipped`.** وتشمل اختبارات SQL Server الفعلية واختبارات HTTP باستخدام `TestServer` و `WebApplicationFactory`.
+> - **Full Solution Regression (`RetailFlow.IdentitySpike.slnx`): `48 / 48` Passed (`0 Failed · 0 Skipped`)** ضمن تشغيل واحد كامل للحل بعد جميع التعديلات.
 > - اختبار API Factory نفذ `SELECT 1` على قاعدة SQL Server.
 > - تحذير `Failed to determine the https port for redirect` ظهر في `TestServer` لأن الاختبار لا يهيئ منفذ HTTPS؛ لم يمنع اختبار الاتصال أو نجاح الاختبارات، لكنه لا يثبت سلوك HTTPS Redirection.
 
@@ -118,7 +119,7 @@
 - `SecurityStamp` تم التحقق من تغييره وحفظه في SQL Server وإبطال Reset Token السابق.
 - `Claims`: تم إثبات عزل عمليات Claims المرتبطة بمستخدم محدد، وكذلك مسار البحث `UserManager.GetUsersForClaimAsync` باستخدام SQL Server الفعلي عبر `ScopedUserStoreFacade` و `ScopedUserStore`.
 - `Data Protection` مفعّل في الـ DI، لكن `Shared Persistent Key Ring` لتعدد النسخ لم يُنفذ بعد.
-- اختبارات `IdentityScopeAuthenticationOrderingTests` تستخدم `TestServer` وFake Authentication Handler؛ وهي تثبت الترتيب الصريح في الـ Pipeline الاختباري، بينما اختبارات `IdentityScopeRouteGroupIntegrationTests` و `IdentityLookupScopeAccessorLifetimeTests` تثبت تكامل Route Group لعملاء المتاجر (`/api/stores/{slug}/customers/scope`) مع `Program.cs` وSQL Server الفعلي.
+- اختبارات `IdentityScopeAuthenticationOrderingTests` تستخدم `TestServer` وFake Authentication Handler؛ وهي تثبت الترتيب الصريح في الـ Pipeline الاختباري، بينما اختبارات `IdentityScopeRouteGroupIntegrationTests` و `BackOfficeRouteGroupIntegrationTests` و `IdentityLookupScopeAccessorLifetimeTests` تثبت تكامل Route Groups لكل من `StoreCustomer` (`/api/stores/{slug}/customers/scope`) و`BackOffice` (`/api/backoffice/scope`) مع `Program.cs` وSQL Server الفعلي.
 - `UseAuthentication()` و`UseAuthorization()` لم تتم إضافتهما إلى الـ Pipeline الفعلي في `Program.cs`، ولم تُحسم استراتيجية Cookies مقابل JWT (`AUTH-ADR-01`).
 - اختبار `IdentityScopeAuthenticationOrderingTests` لا يثبت سلوك الإضافة التلقائية للـ Middleware بواسطة `WebApplication`؛ بل يثبت الترتيب الصريح الذي سنعتمده عند تفعيل Authentication.
 
@@ -132,10 +133,10 @@
 - *(ملاحظة: تم إكمال تغطية `IUserLoginStore` بالكامل وتنظيف ملفات القالب `UnitTest1.cs` و `/weatherforecast`.)*
 
 ### ب. المرحلة 3 — Managers & Minimal APIs (الخطوة القادمة مباشرة)
-- *(منجز على مستوى `UserManager`/`SignInManager`: إنشاء المستخدمين بنطاق المتجر عبر `UserManager.CreateAsync`، والتحقق من كلمة المرور مع Lockout عبر `SignInManager.CheckPasswordSignInAsync`.)*
+- *(منجز على مستوى `UserManager`/`SignInManager` وRoute Groups: إنشاء المستخدمين بنطاق المتجر عبر `UserManager.CreateAsync`، والتحقق من كلمة المرور مع Lockout عبر `SignInManager.CheckPasswordSignInAsync`، وربط واختبار Route Groups لكل من `StoreCustomer` و`BackOffice` في `Program.cs`.)*
 - **المتبقي:**
-  - إضافة/تهيئة `AddAuthentication()` و `.AddSignInManager()` في `Program.cs` بعد حسم استراتيجية `Cookies` مقابل `JWT` في `AUTH-ADR-01`، وإضافة `AddHttpContextAccessor()` فقط إذا أثبت تصميم الخدمات حاجته إليه. كما يجب وضع `UseAuthentication()` و`UseAuthorization()` صراحة بعد `IdentityScopeMiddleware` واختبار الترتيب داخل التطبيق الفعلي.
-  - إضافة Route Group خاص بـ `BackOffice` في `Program.cs` مع `WithMetadata(new IdentityScopeMetadata(AccountKind.BackOffice))` واختباره عبر `WebApplicationFactory` *(تم إنجاز واختبار Route Group الخاص بـ `StoreCustomer` بالفعل مع SQL Server الفعلي)*.
+  - حسم استراتيجية `Cookies` مقابل `Standard JWT` في `AUTH-ADR-01` قبل تنفيذ `Authentication`.
+  - إضافة/تهيئة `AddAuthentication()` و `.AddSignInManager()` في `Program.cs`، وإضافة `AddHttpContextAccessor()` فقط إذا أثبت تصميم الخدمات حاجته إليه. كما يجب وضع `UseAuthentication()` و`UseAuthorization()` صراحة بعد `IdentityScopeMiddleware` واختبار الترتيب داخل التطبيق الفعلي.
   - تنفيذ الـ Minimal Endpoints واختبارات التكامل عبر HTTP (`WebApplicationFactory`):
     - `POST /api/stores/{slug}/customers/register` (حل `StoreId` من `{slug}`، توليد `UserName` عشوائي فريد عالمياً، معالجة أخطاء التزامن `2601/2627` بأمان).
     - `POST /api/stores/{slug}/customers/login` (جلب المستخدم عبر `FindByEmailAsync` المقيد بالنطاق ثم `CheckPasswordSignInAsync`/`PasswordSignInAsync` برسالة فشل عامة موحدة).
@@ -160,9 +161,12 @@
 - تشغيل كامل مصفوفة الاختبارات (`01`–`16`) على SQL Server حقيقي، وتوثيق تقرير النتائج النهائي (مع أرقام الاختبارات وSQL schema وCommit SHA).
 
 ### و. نقطة الاستئناف بعد تثبيت هذا التحديث
-- الحالة الحالية: `IdentityScopeResolver` و `IdentityScopeMiddleware` منفذان ومختبران، ومسجلان في DI وPipeline داخل `Program.cs` مع ربط Route Group لعملاء المتاجر (`/api/stores/{slug}/customers`).
-- آخر Regression كامل ناجح للحل (`RetailFlow.IdentitySpike.slnx`): **`47 / 47` Passed** (`IdentityScopeUnitTests` = `14 / 14`، و `IdentitySqlServerIntegrationTests` = `33 / 33`، `0 Failed · 0 Skipped`).
-- الخطوة التالية بعد Commit وPush: إضافة `BackOffice` Route Group في `Program.cs`، ثم استكمال `Authentication` و`Authorization` داخل `Program.cs` وبناء Minimal Auth APIs.
+- `StoreCustomer Route Group`: Implemented and tested.
+- `BackOffice Route Group`: Implemented and tested.
+- `IdentityScopeMiddleware`: Tested.
+- `IdentityLookupScopeAccessor lifecycle`: Verified.
+- آخر Regression كامل ناجح للحل (`RetailFlow.IdentitySpike.slnx`): **`48 / 48` Passed** (`IdentityScopeUnitTests` = `14 / 14`، و `IdentitySqlServerIntegrationTests` = `34 / 34`، `0 Failed · 0 Skipped`).
+- **Next:** Resolve `AUTH-ADR-01` before implementing Authentication.
 - لا يُعد Identity Scope أو Authentication/Authorization مكتملًا إنتاجيًا حتى تنجح اختبارات التكامل السابقة وتُنفذ اختبارات الصلاحيات المطلوبة في المراحل اللاحقة.
 
 ### ز. بوابة القبول قبل Phase 07
