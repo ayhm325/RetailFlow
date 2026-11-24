@@ -2,9 +2,9 @@
 
 | الحقل | القيمة |
 |---|---|
-| **الحالة** | **Proposed — Session Transport Spike (المرحلة الأولية منفذة ومختبرة)** |
-| **الإصدار** | 0.2 |
-| **التاريخ** | 24 نوفمبر 2026 |
+| **الحالة** | **Proposed — Session Transport Spike قيد التنفيذ (CSRF + Per-Session `ITicketStore` منفذة ومختبرة؛ اختبارات `Sliding Renewal` والتزامن متبقية)** |
+| **الإصدار** | 0.5 |
+| **التاريخ** | 25 نوفمبر 2026 |
 | **النطاق** | Browser Authentication · StoreCustomer · BackOffice boundary |
 | **المنصة** | .NET 10 · ASP.NET Core Identity · React + TypeScript · SQL Server |
 | **القرار المرتبط** | Phase 06 — Identity PoC |
@@ -54,7 +54,7 @@ GET  /api/stores/{slug}/customers/me
 
 - `IdentityScopeResolver` و`IdentityScopeMiddleware` و`ScopedUserStore` منفذة ومختبرة ضمن Identity Spike (مع إغلاق فجوات خصائص المستخدم في `ScopedUserStore` ونجاح Regression **`49 / 49`**).
 - Route Group الخاص بعملاء المتاجر وRoute Group الخاص بـ BackOffice مربوطان في `Program.cs`.
-- أُنشئت تجربة [`SessionTransportSpike`](../experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.slnx) المعزولة لإثبات نقل الجلسات بالـ Cookies لكل متجر، ونجحت اختبارات **`14 / 14`** (`12` Unit + `2` Integration على SQL Server و`WebApplicationFactory`).
+- أُنشئت تجربة [`SessionTransportSpike`](../experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.slnx) المعزولة لإثبات نقل الجلسات بالـ Cookies لكل متجر وحماية CSRF، ونجحت اختبارات **`60 / 60`** (`57` Unit + `3` Integration على SQL Server و`WebApplicationFactory`).
 - `AddAuthentication` و`UseAuthentication` و`UseAuthorization` وHTTP Authentication endpoints لم تُعتمد بعد في التطبيق الفعلي لـ `IdentitySpike` بانتظار استكمال بقية بوابات القبول في هذا ADR.
 - هذا القرار لا يغيّر Identity Schema أو UserStore أو Scope model.
 
@@ -304,13 +304,30 @@ Execute Store-scoped application operation
 
 ملاحظة: `__Host-` Cookie Prefix يشترط `Path=/`، لذا لا يتوافق مع محاولة Path-scoped cookies. لا تستخدم هذا الـ Prefix مع Path مخصص؛ إذا استُخدم Host-only `Path=/` تحت Subdomain فحينها يمكن تقييمه وفق شروطه.
 
-### 9.4 CSRF وCORS
+### 9.4 CSRF وCORS (القرار المعتمد لـ Same-Origin Browser API)
 
-- في Same-Origin baseline، نفذ Antiforgery Token للنقاط المغيّرة للحالة، وأرسل Request Token في Header مخصص.
-- لا تعتمد على SameSite وحده.
-- امنع التغيير عبر GET؛ طبّق CSRF على POST/PUT/PATCH/DELETE حسب تصميم endpoint.
-- إذا احتاج النظام Cross-Origin Cookies: اسمح بـ Origins محددة صراحة، و`AllowCredentials` فقط عند الحاجة، ولا تجمعه مع `AllowAnyOrigin`.
-- افحص Origin/Referer وفق سياسة موثوقة، مع معالجة صريحة للحالات التي تغيب فيها Headers بصورة مشروعة.
+- في نموذج **Same-Origin Browser API**، يعمل React SPA وASP.NET Core API على نفس الـ Origin دون CORS (`No CORS`)، مع إرسال `credentials: "same-origin"`.
+- لا يُعتمد على `SameSite` وحده؛ وتُستبدل آلية Synchronizer Antiforgery Token في واجهة الـ API بـ **`BrowserCsrfProtectionMiddleware`** التي تجمع ثلاث طبقات متكاملة للطلبات المغيّرة للحالة (`POST`, `PUT`, `PATCH`, `DELETE`، وكل طلب غير `GET/HEAD/OPTIONS/TRACE`)، بما فيها نقاط ما قبل المصادقة مثل `Login`:
+  1. **Custom Request Header (`X-RetailFlow-Request: 1`):** ليس سراً ولا Token مصادقة، بل يجبر المتصفح على إرسال CORS Preflight عند أي محاولة Cross-Origin. يجب أن يرسله React API Client المركزي في كل طلب يغيّر الحالة.
+  2. **Fetch Metadata (`Sec-Fetch-Site`):** عند وجوده يُقبل `same-origin` فقط، ويُرفض `same-site` و`cross-site` و`none`. عند غيابه يُعتمد على فحص Origin/Referer.
+  3. **Strict Origin / Referer Validation:** مقارنة دقيقة (`Scheme + Host + Port`) مقابل `Security:BrowserCsrf:BrowserOrigin` (إعداد إلزامي بنمط Fail-Fast عند الإقلاع دون قيمة افتراضية غير مؤكدة، يقبل `https://` فقط في `Staging` و`Production`، ويسمح بـ `http://` لـ Loopback في `Development` فقط)، مع رفض `Origin: null`، ومنع الرجوع إلى `Referer` إذا وُجد `Origin` غير صالح، ومنع الاعتماد على `Request.Host`.
+- الطلبات المرفوضة تتوقف قبل الوصول إلى Endpoint وتعيد `403 Forbidden` مع `ProblemDetails` وترويسة `Cache-Control: no-store` وتسجيل سبب الرفض التشخيصي دون تسجيل Cookies أو Tokens.
+
+#### عقد React API Client المطلوب (عند بناء الواجهة)
+
+لا يوجد React Frontend في المستودع حالياً؛ وعند بنائه يجب أن يلتزم العميل المركزي بإرسال `X-RetailFlow-Request: 1` و`credentials: "same-origin"` في كل طلب يغيّر الحالة:
+
+```typescript
+await fetch("/api/stores/store-a/customers/profile", {
+  method: "POST",
+  credentials: "same-origin",
+  headers: {
+    "Content-Type": "application/json",
+    "X-RetailFlow-Request": "1",
+  },
+  body: JSON.stringify(payload),
+});
+```
 
 ### 9.5 XSS وحدود Path
 
@@ -390,15 +407,33 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 
 لا تُعتمد أرقام أداء نظرية من الإنترنت كبديل عن قياس RetailFlow. تُحدد حدود الأداء بعد ظهور Baseline ومتطلبات الاستضافة، ويجب ألا يكون البديل المختار أبطأ أو أكثر استهلاكاً بصورة غير مبررة.
 
-### 10.4 ما تم إثباته في SessionTransportSpike حتى الآن (`2026-11-24`)
+### 10.4 ما تم إثباته في SessionTransportSpike حتى الآن (`2026-11-25`)
 
 - **`StoreCustomerCookieManager`:** يصدر Cookie باسم خاص بكل متجر (`__Secure-RetailFlow.StoreCustomer.store.{storeId:N}`) ومسار متجر مطبّع بالأحرف الصغيرة (`/api/stores/{slug}/customers`) مع `Secure` و`HttpOnly` و`SameSite=Lax`، مع اختبارات وحدة (`7/7`).
-- **`CanonicalStoreSlugMiddleware`:** يرفض المسارات غير القياسية للـ slug بـ `400 Bad Request` (`ProblemDetails`) قبل `IdentityScopeMiddleware`، مع اختبارات وحدة (`5/5`).
-- **`StoreCustomerCookieAuthenticationEvents` و`StoreCustomerClaimsPrincipalFactory`:** يربطان الجلسة بـ `AccountKind` و`StoreId`، ويعيدان `401 Unauthorized` / `403 Forbidden` (بدل `302` redirect) للـ SPA/API، ويرفضان إعادة استخدام Ticket متجر A على مسار متجر B مع حذف Cookie المستهدفة لمتجر B.
-- **ضوابط Security & Timing المطبقة:** تفعيل `Antiforgery` (`X-CSRF-TOKEN` + `SameSite=Strict` cookie) عبر `GET /antiforgery` والتحقق منه في `POST /logout`، وضبط `SecurityStampValidatorOptions.ValidationInterval = 5m` (أقل من `ExpireTimeSpan = 15m`)، وموازنة زمن `POST /login` بـ Dummy Hash عند عدم وجود المستخدم.
-- **اختبارات التكامل على SQL Server (`2/2` Passed، 0 تحذيرات):**
-  - `Login_Me_Logout_RemovesBrowserSessionCookie`: يثبت `Login (204)` -> `Me (200)` -> رفض `Logout` دون CSRF (`400`) -> `Logout` مع `X-CSRF-TOKEN` (`204 + حذف Cookie`) -> `Me` بعد حذف Cookie من المتصفح (`401 Unauthorized`). *(ملاحظة أمنية: `SignOutAsync` يحذف Cookie من المتصفح فقط ولا يحقق إبطالاً خادمياً تلقائياً لنسخة Ticket منسوخة؛ سيُقيّم ذلك ضمن سياسة الإبطال الخادمي و`SecurityStamp`).*
-  - `StoreACookie_CannotAuthenticateAgainstStoreB`: يثبت رفض Cookie متجر A على متجر B ورفض Ticket A المنسوخ باسم Cookie متجر B (`401 Unauthorized` مع حذف Cookie B).
+- **`CanonicalStoreSlugMiddleware`:** يرفض المسارات غير القياسية للـ slug بـ `400 Bad Request` (`ProblemDetails`) قبل `BrowserCsrfProtectionMiddleware` و`IdentityScopeMiddleware`، مع اختبارات وحدة (`5/5`).
+- **`BrowserCsrfProtectionMiddleware` و`BrowserCsrfProtectionOptions`:**
+  - استبدال آلية Synchronizer Antiforgery Token القديمة (`AddAntiforgery`, `X-CSRF-TOKEN`, `GET /antiforgery`) بالكامل بحماية `X-RetailFlow-Request: 1` + `Sec-Fetch-Site` + Strict `Origin`/`Referer` مقابل `Security:BrowserCsrf:BrowserOrigin` (Fail-Fast عند الإقلاع عبر `BrowserCsrfProtectionOptionsValidator` و`IHostEnvironment`، مع قصر `http://` Loopback على `Development` فقط).
+  - حماية `Login` (قبل المصادقة) و`Logout` وجميع الطرق غير الآمنة، مع إرجاع `403 Forbidden` و`ProblemDetails` و`Cache-Control: no-store`، واختبارات وحدة (`45` حالة في `BrowserCsrfProtectionMiddlewareTests` و`BrowserCsrfProtectionOptionsValidatorTests`).
+- **`ITicketStore` / Per-Session Server-side Revocation (`SqlServerTicketStore` و`SessionTicketDbContext`):**
+  - إنشاء `PersistedAuthenticationTicket` و`SessionTicketDbContext` (`AuthenticationSessionTickets`) و`SessionTicketDbContextFactory` (`__EFMigrationsHistory_SessionTickets`) وتطبيق Migration `20261124225416_CreateAuthenticationSessionTickets` على قاعدة التطوير المحلية `RetailFlowIdentitySpike` (دون المساس بجداول Identity).
+  - تنفيذ `SqlServerTicketStore` (مفتاح جلسة عشوائي `32 bytes` Base64Url بطول `43` محرفاً، حماية `AuthenticationTicket` عبر `IDataProtector`، التحقق من `StoreCustomer` metadata عند التخزين والاسترجاع والتجديد، ومنع `RenewAsync` من إعادة إنشاء جلسة محذوفة أو تغيير هويتها).
+  - إضافة حارس `409 Conflict` في `POST /login` لمنع تبديل الحساب داخل جلسة نشطة قبل `Logout`.
+- **`StoreCustomerCookieAuthenticationEvents` و`StoreCustomerClaimsPrincipalFactory`:** يربطان الجلسة بـ `AccountKind` و`StoreId`، ويعيدان `401 Unauthorized` / `403 Forbidden` (بدل `302` redirect) للـ SPA/API، ويرفضان إعادة استخدام Ticket متجر A على مسار متجر B مع حذف Cookie النطاق الحالي فقط (`DeleteCurrentScopeCookie` بدل `SignOutAsync`) حتى لا تُبطَل جلسة Store A على الخادم.
+- **ضوابط إضافية:** ضبط `SecurityStampValidatorOptions.ValidationInterval = 5m` (أقل من `ExpireTimeSpan = 15m`)، وموازنة زمن `POST /login` بـ Dummy Hash عند عدم وجود المستخدم.
+- **اختبارات التكامل على SQL Server (`3/3` Passed، 0 تحذيرات، عبر `WebApplicationFactory`):**
+  - `Login_Me_Logout_RemovesBrowserSessionCookie`: يثبت `Login (204)` -> `Me (200)` -> رفض `Logout` دون `X-RetailFlow-Request` (`403`) -> رفض `Logout` من Origin خارجي (`403`) -> `Logout` صحيح (`204 + حذف Cookie + حذف سجل SQL`) -> إعادة إرسال Cookie الأصلية نفسها بعد `Logout` تعيد **`401 Unauthorized`** (إبطال خادمي فعلي).
+  - `StoreACookie_CannotAuthenticateAgainstStoreB`: يثبت رفض Cookie متجر A على متجر B ورفض Ticket A المنسوخ باسم Cookie متجر B (`401 Unauthorized` مع حذف Cookie B)، مع بقاء جلسة Store A صالحة (`200 OK`).
+  - `CsrfProtection_EnforcesCustomHeader_OriginReferer_AndFetchMetadata`: يثبت رفض `Login` (بـ `403` ودون إصدار Cookie) عند غياب Header أو Origin خارجي أو `Origin: null` أو غياب Origin وReferer أو `Sec-Fetch-Site` بقيم `cross-site`/`same-site`/`none` أو Origin غير صالح مع Referer صالح، ويثبت قبول الطلب الصحيح عند غياب `Sec-Fetch-Site` أو عند غياب `Origin` مع `Referer` صالح.
+  - **ملاحظة ما زال متبقياً لإغلاق بوابة `ITicketStore`:** حقن `TimeProvider` في `SqlServerTicketStore`، واختبارات `Sliding Renewal`، واختبارات `Renew/Remove Concurrency` (ومنع stale updates)، واختبار `409 Conflict` مستقل.
+
+### 10.5 اختبارات المتصفح المطلوبة لاحقاً (Browser-Level Acceptance)
+
+لا توجد بنية Playwright أو اختبارات متصفح حقيقية في المستودع حتى الآن؛ واختبارات `WebApplicationFactory` (`HttpClient`) لا تغني عن اختبار Cookie Jar الفعلي وتعدد التبويبات في المتصفح. الاختبارات المطلوبة قبل إغلاق ADR بالكامل:
+- تسجيل الدخول إلى Store A وStore B في تبويبين ضمن المتصفح نفسه.
+- نجاح طلبات كل تبويب على متجره دون تداخل جلسات.
+- رفض Cross-Site POST من صفحة خارجية فعلية.
+- رفض Login CSRF قبل إصدار أي Cookie في المتصفح.
+- Logout من متجر A لا يؤدي إلى حذف Cookie متجر B.
 
 ## 11. معايير قبول ADR
 
@@ -409,7 +444,7 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 - [ ] تم اختيار بديل واحد بناءً على نتائج Spike، لا التفضيل الشخصي.
 - [ ] نجاح Cross-Store isolation لكل من Store A وStore B.
 - [ ] نجاح Login/renewal/logout/expiration، بما فيها اختبارات التزامن.
-- [ ] وجود CSRF/CORS policy صريحة ومختبرة بحسب نموذج النشر.
+- [x] وجود CSRF/CORS policy صريحة ومختبرة بحسب نموذج النشر (`Same-Origin` + `No CORS` + `BrowserCsrfProtectionMiddleware` مختبرة في `SessionTransportSpike`؛ وبقي تأكيدها عبر متصفح Playwright في 10.5).
 - [ ] توثيق سياسة Security Stamp والإبطال وتغيير كلمة المرور.
 - [ ] اختبار تعدد API Instances وData Protection أو Signing Keys.
 - [ ] تقرير أداء قابل لإعادة الإنتاج مع إعدادات الاختبار ونتائجه.
@@ -434,7 +469,7 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 
 - استخدام ASP.NET Core Cookie handler مع تكامل SignInManager المناسب.
 - تصميم واضح للكوكيز بحسب StoreCustomer وBackOffice.
-- Antiforgery إلزامي للطلبات المغيّرة للحالة.
+- حماية CSRF إلزامية للطلبات المغيّرة للحالة (عبر `BrowserCsrfProtectionMiddleware`: Custom Request Header + Strict Origin/Referer + Fetch Metadata دون CORS في نموذج Same-Origin).
 - Data Protection Key Ring دائم ومشترك في بيئة تعدد النسخ.
 - سياسة انتهاء وتجديد وإبطال موثقة.
 - لا يُسمح بتخصيص Cookie path per store إلا إذا اجتازت اختبارات دورة الحياة والأمن كاملة.
@@ -495,3 +530,5 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 | 0.1 | 2026-11-24 | إنشاء مسودة القرار استناداً إلى Product Blueprint وPhase 06 ودراسة مصادر .NET 10 وOWASP/IETF. |
 | 0.2 | 2026-11-24 | توثيق نتائج المرحلة الأولية من `SessionTransportSpike` (`14/14`) وإغلاق فجوات `ScopedUserStore` (`49/49` في `IdentitySpike`). |
 | 0.3 | 2026-11-24 | مطابقة سلوك API مع توثيق ASP.NET Core 10 (`401/403`، `Antiforgery` لـ `Logout`، `ValidationInterval = 5m`، موازنة زمن `Login`، وRequest-Scoped Cache في `ScopedUserStore`). |
+| 0.4 | 2026-11-25 | اعتماد حماية CSRF عبر `BrowserCsrfProtectionMiddleware` (`X-RetailFlow-Request: 1` + Strict `Origin/Referer` + `Sec-Fetch-Site` دون CORS) وإزالة Synchronizer Antiforgery Token، وتقييد `http://` Loopback بـ `Development` (`60/60` في `SessionTransportSpike`)، وإنشاء قاعدة تخزين `AuthenticationSessionTickets` وMigration الخاصة بها كخطوة أولى لـ `Per-Session Revocation`. |
+| 0.5 | 2026-11-25 | تنفيذ `SqlServerTicketStore` (`ITicketStore`) وربطه في `Program.cs`، وتطبيق Migration محلياً على `RetailFlowIdentitySpike`، ومنع تبديل الحساب دون Logout (`409`)، وإثبات رفض إعادة استخدام Cookie الأصلية بعد Logout (`401`) مع بقاء جلسة Store A (`60/60` في `SessionTransportSpike`). |

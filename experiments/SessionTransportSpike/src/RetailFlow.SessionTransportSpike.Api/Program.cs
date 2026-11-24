@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 using RetailFlow.IdentitySpike.Api.Domain.Identity;
 using RetailFlow.IdentitySpike.Api.Infrastructure.Identity;
@@ -12,6 +12,7 @@ using RetailFlow.IdentitySpike.Api.Infrastructure.Persistence;
 
 using RetailFlow.SessionTransportSpike.Api.Authentication;
 using RetailFlow.SessionTransportSpike.Api.Contracts;
+using RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence;
 using RetailFlow.SessionTransportSpike.Authentication;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -30,6 +31,18 @@ var connectionString =
 
 builder.Services.AddDbContext<IdentitySpikeDbContext>(
     options => options.UseSqlServer(connectionString));
+
+builder.Services.AddDbContextFactory<SessionTicketDbContext>(
+    options =>
+    {
+        options.UseSqlServer(
+            connectionString,
+            sqlServer =>
+            {
+                sqlServer.MigrationsHistoryTable(
+                    SessionTicketDbContextFactory.MigrationsHistoryTableName);
+            });
+    });
 
 // -----------------------------------------------------------------------------
 // Identity Scope
@@ -86,14 +99,15 @@ builder.Services.Configure<SecurityStampValidatorOptions>(options =>
     options.ValidationInterval = TimeSpan.FromMinutes(5);
 });
 
-builder.Services.AddAntiforgery(options =>
-{
-    options.HeaderName = "X-CSRF-TOKEN";
-    options.Cookie.HttpOnly = true;
-    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
-    options.Cookie.SameSite = SameSiteMode.Strict;
-    options.Cookie.Path = "/";
-});
+builder.Services
+    .AddOptions<BrowserCsrfProtectionOptions>()
+    .BindConfiguration(BrowserCsrfProtectionOptions.SectionName)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+builder.Services.AddSingleton<
+    IValidateOptions<BrowserCsrfProtectionOptions>,
+    BrowserCsrfProtectionOptionsValidator>();
 
 // -----------------------------------------------------------------------------
 // StoreCustomer Authentication
@@ -149,6 +163,23 @@ builder.Services
             options.SlidingExpiration = true;
         });
 
+// -----------------------------------------------------------------------------
+// Server-side Authentication Ticket Store
+// -----------------------------------------------------------------------------
+
+builder.Services.AddSingleton<
+    ITicketStore,
+    SqlServerTicketStore>();
+
+builder.Services
+    .AddOptions<CookieAuthenticationOptions>(
+        IdentityConstants.ApplicationScheme)
+    .Configure<ITicketStore>(
+        (cookieOptions, ticketStore) =>
+        {
+            cookieOptions.SessionStore = ticketStore;
+        });
+
 builder.Services.AddAuthorization();
 
 // -----------------------------------------------------------------------------
@@ -165,8 +196,11 @@ app.UseHttpsRedirection();
 
 app.UseRouting();
 
-// Normalize StoreCustomer URLs before resolving identity scope.
+// Normalize StoreCustomer URLs before CSRF and identity scope resolution.
 app.UseMiddleware<CanonicalStoreSlugMiddleware>();
+
+// Enforce browser CSRF protection on state-changing requests before identity scope/auth.
+app.UseMiddleware<BrowserCsrfProtectionMiddleware>();
 
 // This MUST execute before UseAuthentication.
 app.UseMiddleware<IdentityScopeMiddleware>();
@@ -199,11 +233,20 @@ var dummyPasswordHash = new PasswordHasher<ApplicationUser>()
 storeCustomerGroup.MapPost(
     "/login",
     async (
+        HttpContext httpContext,
         CustomerLoginRequest request,
         UserManager<ApplicationUser> userManager,
         SignInManager<ApplicationUser> signInManager,
         IPasswordHasher<ApplicationUser> passwordHasher) =>
     {
+        if (httpContext.User.Identity?.IsAuthenticated == true)
+        {
+            return Results.Problem(
+                title: "An active session already exists.",
+                detail: "Log out before switching to another customer account.",
+                statusCode: StatusCodes.Status409Conflict);
+        }
+
         if (string.IsNullOrWhiteSpace(request.Email) ||
             string.IsNullOrWhiteSpace(request.Password))
         {
@@ -269,45 +312,13 @@ storeCustomerGroup.MapGet(
     .RequireAuthorization();
 
 // -----------------------------------------------------------------------------
-// Antiforgery Token for SPA State-Changing Requests
-// -----------------------------------------------------------------------------
-
-storeCustomerGroup.MapGet(
-    "/antiforgery",
-    (HttpContext httpContext, IAntiforgery antiforgery) =>
-    {
-        var tokens = antiforgery.GetAndStoreTokens(httpContext);
-        httpContext.Response.Headers.CacheControl = "no-store";
-
-        return Results.Ok(new
-        {
-            tokens.HeaderName,
-            tokens.RequestToken
-        });
-    });
-
-// -----------------------------------------------------------------------------
 // Logout
 // -----------------------------------------------------------------------------
 
 storeCustomerGroup.MapPost(
     "/logout",
-    async (
-        HttpContext httpContext,
-        IAntiforgery antiforgery,
-        SignInManager<ApplicationUser> signInManager) =>
+    async (SignInManager<ApplicationUser> signInManager) =>
     {
-        try
-        {
-            await antiforgery.ValidateRequestAsync(httpContext);
-        }
-        catch (AntiforgeryValidationException)
-        {
-            return Results.Problem(
-                title: "Invalid or missing CSRF token.",
-                statusCode: StatusCodes.Status400BadRequest);
-        }
-
         await signInManager.SignOutAsync();
 
         return Results.NoContent();

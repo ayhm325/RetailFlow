@@ -23,7 +23,9 @@ public sealed class SessionTransportApiFactory
                 new Dictionary<string, string?>
                 {
                     ["ConnectionStrings:IdentitySpike"] =
-                        ConnectionString
+                        ConnectionString,
+                    ["Security:BrowserCsrf:BrowserOrigin"] =
+                        "https://localhost"
                 });
         });
 

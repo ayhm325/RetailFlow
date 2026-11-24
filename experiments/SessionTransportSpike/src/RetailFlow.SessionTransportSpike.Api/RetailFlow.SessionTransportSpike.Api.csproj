@@ -7,6 +7,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design"
+                      Version="10.0.15">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\RetailFlow.SessionTransportSpike\RetailFlow.SessionTransportSpike.csproj" />
 
     <ProjectReference Include="..\..\..\IdentitySpike\src\RetailFlow.IdentitySpike.Api\RetailFlow.IdentitySpike.Api.csproj" />

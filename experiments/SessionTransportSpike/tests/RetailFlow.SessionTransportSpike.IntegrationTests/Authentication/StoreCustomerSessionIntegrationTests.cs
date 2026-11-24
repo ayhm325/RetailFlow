@@ -10,6 +10,7 @@ using RetailFlow.IdentitySpike.Api.Domain.Identity;
 using RetailFlow.IdentitySpike.Api.Domain.Stores;
 using RetailFlow.IdentitySpike.Api.Infrastructure.Identity;
 using RetailFlow.IdentitySpike.Api.Infrastructure.Persistence;
+using RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence;
 using RetailFlow.SessionTransportSpike.Authentication;
 using RetailFlow.SessionTransportSpike.IntegrationTests.Infrastructure;
 
@@ -18,6 +19,9 @@ namespace RetailFlow.SessionTransportSpike.IntegrationTests.Authentication;
 public sealed class StoreCustomerSessionIntegrationTests
     : IClassFixture<SessionTransportApiFactory>
 {
+    private const string TrustedBrowserOrigin =
+        "https://localhost";
+
     private const string TestPassword =
         "RetailFlow-Integration-2026!";
 
@@ -44,14 +48,18 @@ public sealed class StoreCustomerSessionIntegrationTests
             var basePath =
                 $"/api/stores/{tenant.Slug}/customers";
 
-            // 1. Login through the real HTTP endpoint.
-            using var loginResponse = await client.PostAsJsonAsync(
+            // 1. Login through the real HTTP endpoint with valid same-origin CSRF headers.
+            using var loginResponse = await SendBrowserPostAsync(
+                client,
                 $"{basePath}/login",
                 new
                 {
                     Email = tenant.Email,
                     Password = TestPassword
-                });
+                },
+                origin: TrustedBrowserOrigin,
+                customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                secFetchSite: "same-origin");
 
             Assert.Equal(
                 HttpStatusCode.NoContent,
@@ -87,54 +95,49 @@ public sealed class StoreCustomerSessionIntegrationTests
                 tenant.StoreId.ToString("D"),
                 me.StoreId);
 
-            // 3. Logout without CSRF token must be rejected with 400 Bad Request.
-            using var missingCsrfLogoutResponse = await SendWithCookieAsync(
+            // 3. Logout without custom CSRF header must be rejected with 403 Forbidden.
+            using var missingHeaderLogoutResponse = await SendBrowserPostAsync(
                 client,
-                HttpMethod.Post,
                 $"{basePath}/logout",
-                issuedCookie.CookieHeader);
+                body: null,
+                cookieHeader: issuedCookie.CookieHeader,
+                origin: TrustedBrowserOrigin,
+                customHeaderValue: null,
+                secFetchSite: "same-origin");
 
             Assert.Equal(
-                HttpStatusCode.BadRequest,
-                missingCsrfLogoutResponse.StatusCode);
+                HttpStatusCode.Forbidden,
+                missingHeaderLogoutResponse.StatusCode);
 
-            // 4. Fetch Antiforgery token and cookie, then logout with CSRF header.
-            using var antiforgeryResponse = await client.GetAsync(
-                $"{basePath}/antiforgery");
+            // 4. Logout from an untrusted Origin must be rejected with 403 Forbidden.
+            using var untrustedOriginLogoutResponse = await SendBrowserPostAsync(
+                client,
+                $"{basePath}/logout",
+                body: null,
+                cookieHeader: issuedCookie.CookieHeader,
+                origin: "https://evil.example",
+                customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                secFetchSite: "same-origin");
 
             Assert.Equal(
-                HttpStatusCode.OK,
-                antiforgeryResponse.StatusCode);
+                HttpStatusCode.Forbidden,
+                untrustedOriginLogoutResponse.StatusCode);
 
-            var antiforgery = await antiforgeryResponse.Content
-                .ReadFromJsonAsync<AntiforgeryResponse>();
-
-            Assert.NotNull(antiforgery);
-            Assert.False(string.IsNullOrWhiteSpace(antiforgery.HeaderName));
-            Assert.False(string.IsNullOrWhiteSpace(antiforgery.RequestToken));
-
-            var antiforgeryCookieHeader = string.Join(
-                "; ",
-                GetSetCookieHeaders(antiforgeryResponse)
-                    .Select(header => header.Split(';', 2)[0]));
-
-            var combinedCookies = string.IsNullOrWhiteSpace(antiforgeryCookieHeader)
-                ? issuedCookie.CookieHeader
-                : $"{issuedCookie.CookieHeader}; {antiforgeryCookieHeader}";
-
-            using var logoutResponse = await SendWithCookieAsync(
+            // 5. Logout with valid custom header, trusted origin, and same-origin Fetch Metadata.
+            using var logoutResponse = await SendBrowserPostAsync(
                 client,
-                HttpMethod.Post,
                 $"{basePath}/logout",
-                combinedCookies,
-                antiforgery.HeaderName,
-                antiforgery.RequestToken);
+                body: null,
+                cookieHeader: issuedCookie.CookieHeader,
+                origin: TrustedBrowserOrigin,
+                customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                secFetchSite: "same-origin");
 
             Assert.Equal(
                 HttpStatusCode.NoContent,
                 logoutResponse.StatusCode);
 
-            // 5. The deletion cookie must use the same name and path.
+            // 6. The deletion cookie must use the same name and path.
             var deletionHeaders = GetSetCookieHeaders(logoutResponse);
 
             var deletionCookie = Assert.Single(
@@ -157,14 +160,20 @@ public sealed class StoreCustomerSessionIntegrationTests
                     StringComparison.OrdinalIgnoreCase),
                 "Logout must expire the issued browser cookie.");
 
-            // 6. Simulate the browser after applying Set-Cookie deletion:
-            // API must return 401 Unauthorized (not 302 login redirect).
-            using var afterLogoutResponse = await client.GetAsync(
-                $"{basePath}/me");
+            // 7. Replay the ORIGINAL authentication cookie after Logout.
+            //
+            // The browser deletion response is not sufficient evidence.
+            // The server must reject the original session key because
+            // its server-side ticket has already been removed.
+            using var replayAfterLogoutResponse = await SendWithCookieAsync(
+                client,
+                HttpMethod.Get,
+                $"{basePath}/me",
+                issuedCookie.CookieHeader);
 
             Assert.Equal(
                 HttpStatusCode.Unauthorized,
-                afterLogoutResponse.StatusCode);
+                replayAfterLogoutResponse.StatusCode);
         }
         finally
         {
@@ -194,13 +203,17 @@ public sealed class StoreCustomerSessionIntegrationTests
                 $"/api/stores/{storeB.Slug}/customers";
 
             // Login to Store A.
-            using var loginResponse = await client.PostAsJsonAsync(
+            using var loginResponse = await SendBrowserPostAsync(
+                client,
                 $"{storeAPath}/login",
                 new
                 {
                     Email = storeA.Email,
                     Password = TestPassword
-                });
+                },
+                origin: TrustedBrowserOrigin,
+                customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                secFetchSite: "same-origin");
 
             Assert.Equal(
                 HttpStatusCode.NoContent,
@@ -259,6 +272,182 @@ public sealed class StoreCustomerSessionIntegrationTests
                 $"path=/api/stores/{storeB.Slug}/customers",
                 rejectedCookie,
                 StringComparison.OrdinalIgnoreCase);
+
+            // Case 3:
+            // A rejected cross-store replay must not revoke Store A's
+            // original server-side session.
+            using var originalStoreAResponse = await SendWithCookieAsync(
+                client,
+                HttpMethod.Get,
+                $"{storeAPath}/me",
+                storeACookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.OK,
+                originalStoreAResponse.StatusCode);
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task CsrfProtection_EnforcesCustomHeader_OriginReferer_AndFetchMetadata()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            using var client = CreateClient();
+
+            var tenant = await CreateTenantAsync("csrf-policy");
+            tenants.Add(tenant);
+
+            var loginPath =
+                $"/api/stores/{tenant.Slug}/customers/login";
+
+            var credentials = new
+            {
+                Email = tenant.Email,
+                Password = TestPassword
+            };
+
+            // 1. Missing custom header -> 403, no auth cookie.
+            using (var response = await SendBrowserPostAsync(
+                       client,
+                       loginPath,
+                       credentials,
+                       origin: TrustedBrowserOrigin,
+                       customHeaderValue: null,
+                       secFetchSite: "same-origin"))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+                Assert.Empty(GetSetCookieHeaders(response));
+            }
+
+            // 2. External Origin with valid custom header -> 403, no auth cookie.
+            using (var response = await SendBrowserPostAsync(
+                       client,
+                       loginPath,
+                       credentials,
+                       origin: "https://evil.example",
+                       customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                       secFetchSite: "same-origin"))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+                Assert.Empty(GetSetCookieHeaders(response));
+            }
+
+            // 3. Origin: null -> 403, no auth cookie.
+            using (var response = await SendBrowserPostAsync(
+                       client,
+                       loginPath,
+                       credentials,
+                       origin: "null",
+                       customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                       secFetchSite: "same-origin"))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+                Assert.Empty(GetSetCookieHeaders(response));
+            }
+
+            // 4. Missing both Origin and Referer -> 403, no auth cookie.
+            using (var response = await SendBrowserPostAsync(
+                       client,
+                       loginPath,
+                       credentials,
+                       origin: null,
+                       referer: null,
+                       customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                       secFetchSite: "same-origin"))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+                Assert.Empty(GetSetCookieHeaders(response));
+            }
+
+            // 5. Valid Origin + Sec-Fetch-Site: cross-site -> 403, no auth cookie.
+            using (var response = await SendBrowserPostAsync(
+                       client,
+                       loginPath,
+                       credentials,
+                       origin: TrustedBrowserOrigin,
+                       customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                       secFetchSite: "cross-site"))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+                Assert.Empty(GetSetCookieHeaders(response));
+            }
+
+            // 6. Valid Origin + Sec-Fetch-Site: same-site -> 403, no auth cookie.
+            using (var response = await SendBrowserPostAsync(
+                       client,
+                       loginPath,
+                       credentials,
+                       origin: TrustedBrowserOrigin,
+                       customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                       secFetchSite: "same-site"))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+                Assert.Empty(GetSetCookieHeaders(response));
+            }
+
+            // 6b. Valid Origin + Sec-Fetch-Site: none -> 403, no auth cookie.
+            using (var response = await SendBrowserPostAsync(
+                       client,
+                       loginPath,
+                       credentials,
+                       origin: TrustedBrowserOrigin,
+                       customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                       secFetchSite: "none"))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+                Assert.Empty(GetSetCookieHeaders(response));
+            }
+
+            // 6c. Invalid Origin must NOT fall back to valid Referer -> 403.
+            using (var response = await SendBrowserPostAsync(
+                       client,
+                       loginPath,
+                       credentials,
+                       origin: "https://evil.example",
+                       referer: $"{TrustedBrowserOrigin}/store/login",
+                       customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                       secFetchSite: "same-origin"))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+                Assert.Empty(GetSetCookieHeaders(response));
+            }
+
+            // 7. Valid Origin + valid Header + absent Fetch Metadata -> allowed (204).
+            using (var response = await SendBrowserPostAsync(
+                       client,
+                       loginPath,
+                       credentials,
+                       origin: TrustedBrowserOrigin,
+                       customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                       secFetchSite: null))
+            {
+                Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+                ReadIssuedCookie(response, tenant.StoreId, tenant.Slug);
+            }
+
+            // 8. Absent Origin + valid Referer + valid Header -> allowed (204).
+            // Use a fresh client without the session cookie issued in step 7
+            // so the active-session 409 guard does not trigger.
+            using var refererClient = CreateClient();
+            using (var response = await SendBrowserPostAsync(
+                       refererClient,
+                       loginPath,
+                       credentials,
+                       origin: null,
+                       referer: $"{TrustedBrowserOrigin}/{tenant.Slug}/login",
+                       customHeaderValue: BrowserCsrfProtectionMiddleware.CustomHeaderValue,
+                       secFetchSite: "same-origin"))
+            {
+                Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+                ReadIssuedCookie(response, tenant.StoreId, tenant.Slug);
+            }
         }
         finally
         {
@@ -376,6 +565,19 @@ public sealed class StoreCustomerSessionIntegrationTests
         await using var scope =
             _factory.Services.CreateAsyncScope();
 
+        var ticketFactory = scope.ServiceProvider
+            .GetRequiredService<
+                IDbContextFactory<SessionTicketDbContext>>();
+
+        await using var ticketDb =
+            await ticketFactory.CreateDbContextAsync();
+
+        await ticketDb.AuthenticationTickets
+            .Where(ticket =>
+                userIds.Contains(ticket.UserId) ||
+                storeIds.Contains(ticket.StoreId))
+            .ExecuteDeleteAsync();
+
         var db = scope.ServiceProvider
             .GetRequiredService<IdentitySpikeDbContext>();
 
@@ -450,9 +652,7 @@ public sealed class StoreCustomerSessionIntegrationTests
         HttpClient client,
         HttpMethod method,
         string path,
-        string cookieHeader,
-        string? csrfHeaderName = null,
-        string? csrfToken = null)
+        string cookieHeader)
     {
         using var request = new HttpRequestMessage(method, path);
 
@@ -460,12 +660,59 @@ public sealed class StoreCustomerSessionIntegrationTests
             "Cookie",
             cookieHeader);
 
-        if (!string.IsNullOrWhiteSpace(csrfHeaderName) &&
-            !string.IsNullOrWhiteSpace(csrfToken))
+        return await client.SendAsync(request);
+    }
+
+    private static async Task<HttpResponseMessage> SendBrowserPostAsync(
+        HttpClient client,
+        string path,
+        object? body,
+        string? origin,
+        string? customHeaderValue,
+        string? secFetchSite,
+        string? cookieHeader = null,
+        string? referer = null)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Post, path);
+
+        if (body is not null)
+        {
+            request.Content = JsonContent.Create(body);
+        }
+
+        if (!string.IsNullOrWhiteSpace(cookieHeader))
         {
             request.Headers.TryAddWithoutValidation(
-                csrfHeaderName,
-                csrfToken);
+                "Cookie",
+                cookieHeader);
+        }
+
+        if (origin is not null)
+        {
+            request.Headers.TryAddWithoutValidation(
+                "Origin",
+                origin);
+        }
+
+        if (referer is not null)
+        {
+            request.Headers.TryAddWithoutValidation(
+                "Referer",
+                referer);
+        }
+
+        if (customHeaderValue is not null)
+        {
+            request.Headers.TryAddWithoutValidation(
+                BrowserCsrfProtectionMiddleware.CustomHeaderName,
+                customHeaderValue);
+        }
+
+        if (secFetchSite is not null)
+        {
+            request.Headers.TryAddWithoutValidation(
+                "Sec-Fetch-Site",
+                secFetchSite);
         }
 
         return await client.SendAsync(request);
@@ -537,8 +784,4 @@ public sealed class StoreCustomerSessionIntegrationTests
         string? UserId,
         string? AccountKind,
         string? StoreId);
-
-    private sealed record AntiforgeryResponse(
-        string? HeaderName,
-        string? RequestToken);
 }
