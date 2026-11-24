@@ -17,6 +17,7 @@
   - مشروع اختبارات الوحدة: `RetailFlow.IdentitySpike.IdentityScopeUnitTests`
   - مشروع اختبارات التكامل: `RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests`
 - تثبيت حزم `Microsoft.AspNetCore.Identity.EntityFrameworkCore` و `Microsoft.EntityFrameworkCore.SqlServer` و `Microsoft.EntityFrameworkCore.Design` و `Microsoft.AspNetCore.OpenApi` و `Microsoft.AspNetCore.Mvc.Testing` عند الإصدار `10.0.15`، مع `xUnit 2.9.3`.
+- ضبط [`.gitignore`](../.gitignore#L66-L72) لحفظ `experiments/IdentitySpike/artifacts/` وتجاهل ملفات الإعدادات المحلية (`appsettings.Development.json`, `appsettings.Local.json`, `secrets.json`).
 
 ---
 
@@ -44,7 +45,7 @@
   - [`IIdentityLookupScopeAccessor.cs`](../experiments/IdentitySpike/src/RetailFlow.IdentitySpike.Api/Infrastructure/Identity/IIdentityLookupScopeAccessor.cs) و [`IdentityLookupScopeAccessor.cs`](../experiments/IdentitySpike/src/RetailFlow.IdentitySpike.Api/Infrastructure/Identity/IdentityLookupScopeAccessor.cs): يحفظ نطاق الطلب الحالي ويمنع إعادة تعيينه أكثر من مرة عبر `Interlocked.CompareExchange`.
 - **مخزن المستخدمين المعزول [`ScopedUserStore.cs`](../experiments/IdentitySpike/src/RetailFlow.IdentitySpike.Api/Infrastructure/Identity/ScopedUserStore.cs):**
   - يرث من `UserOnlyStore<ApplicationUser, IdentitySpikeDbContext>` ويعمل بمبدأ **Fail-Closed** (يرمي `InvalidOperationException` إذا لم يُحدد النطاق).
-  - تقييد الاستعلامات والبحث: `Users`, `FindByIdAsync`, `FindByEmailAsync`, `FindByNameAsync`, `FindUserAsync`.
+  - تقييد الاستعلامات والبحث: `Users`, `FindByIdAsync`, `FindByEmailAsync`, `FindByNameAsync`, `FindUserAsync`, و `FindByLoginAsync` (مع Fail-Closed عند غياب النطاق).
   - حراسة `CreateAsync` و `UpdateAsync` و `DeleteAsync` (ترجع `IdentityResult.Failed` بكود `IdentityScopeViolation` عند مخالفة النطاق أو عدم وجود المستخدم في النطاق الحالي).
   - حماية العمليات الحساسة عبر `EnsurePersistedUserIsInCurrentScopeAsync` (التحقق من خصائص الكائن في الذاكرة **ومن وجوده فعلياً في SQL Server ضمن النطاق الحالي** لمنع تمرير كائن مزور):
     - **Claims:** `GetClaimsAsync`, `AddClaimsAsync`, `ReplaceClaimAsync`, `RemoveClaimsAsync`.
@@ -67,15 +68,18 @@
 2. **اختبارات التكامل مع SQL Server (`IdentitySqlServerIntegrationTests`):**
    - [`ScopedUserStoreLookupTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/ScopedUserStoreLookupTests.cs): عزل `Users` و `FindById/Email/Name`، وعزل `BackOffice`، واختبار Fail-Closed.
    - [`ScopedUserStoreClaimsTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/ScopedUserStoreClaimsTests.cs): منع قراءة/إضافة/استبدال/حذف Claims لمتجر آخر أو لكائن مزور.
+   - [`ScopedUserStoreLoginTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/ScopedUserStoreLoginTests.cs): عزل عمليات `IUserLoginStore` (`AddLoginAsync`, `GetLoginsAsync`, `FindByLoginAsync`, `RemoveLoginAsync`)، ومنع الكائنات المزورة، واختبار Fail-Closed.
    - [`ScopedUserStoreSecurityStateTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/ScopedUserStoreSecurityStateTests.cs): عزل عمليات `IUserLockoutStore` و `IUserSecurityStampStore` ورفض الكائنات المزورة.
    - [`ScopedUserStoreTokenTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/ScopedUserStoreTokenTests.cs): عزل عمليات `IUserAuthenticationTokenStore` ورفض الكائنات المزورة.
+   - [`UserManagerStoreScopingTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/UserManagerStoreScopingTests.cs): اختبار `UserManager.CreateAsync` للسماح بنفس البريد الإلكتروني في متجرين مختلفين ورفض التكرار داخل نفس المتجر.
 
-> **نتائج التشغيل الفعلي للاختبارات (تم التحقق منها بتاريخ `2026-11-24` بعد اعتماد Hybrid Scope Validation):**
-> - **`IdentityScopeUnitTests`**: نجحت جميع الاختبارات (**Passed: 9 / Total: 9**، منها 8 اختبارات فعلية + `UnitTest1.Test1` القالبي) — الزمن: `9.9178` ثانية عبر `dotnet test --no-restore`.
-> - **`IdentitySqlServerIntegrationTests` (مقابل SQL Server الفعلي):** نجحت جميع الاختبارات (**Passed: 7 / Total: 7**، منها 6 اختبارات تكامل فعلية + `UnitTest1.Test1` القالبي) — الزمن: `3.5547` ثانية عبر `dotnet test --no-restore`:
->   - `ScopedUserStoreLookupTests.CustomerLookups_AreRestrictedToCurrentStore_AndBackOfficeRemainsGlobal` — `Passed` (`988 ms`)
->   - `ScopedUserStoreLookupTests.Users_WithoutIdentityLookupScope_FailClosed` — `Passed` (`114 ms`)
+> **نتائج التشغيل الفعلي للاختبارات (تم التحقق منها بتاريخ `2026-11-24` بعد إكمال `IUserLoginStore` وتنظيف ملفات القالب):**
+> - **`IdentityScopeUnitTests`**: نجحت جميع الاختبارات (**Passed: 8 / Total: 8**) — الزمن: `2.8376` ثانية عبر `dotnet test --no-restore`.
+> - **`IdentitySqlServerIntegrationTests` (مقابل SQL Server الفعلي):** نجحت جميع الاختبارات (**Passed: 7 / Total: 7**) — الزمن: `4.8608` ثانية عبر `dotnet test --no-restore`:
+>   - `ScopedUserStoreLookupTests.CustomerLookups_AreRestrictedToCurrentStore_AndBackOfficeRemainsGlobal` — `Passed` (`1 s`)
+>   - `ScopedUserStoreLookupTests.Users_WithoutIdentityLookupScope_FailClosed` — `Passed` (`132 ms`)
 >   - `ScopedUserStoreClaimsTests.ClaimsOperations_AreRestrictedToCurrentStore` — `Passed` (`1 s`)
+>   - `ScopedUserStoreLoginTests.LoginOperations_AreRestrictedToCurrentStore_AndFailClosedWithoutScope` — `Passed` (`1 s`)
 >   - `ScopedUserStoreSecurityStateTests.LockoutAndSecurityStamp_AreRestrictedToCurrentStore` — `Passed` (`1 s`)
 >   - `ScopedUserStoreTokenTests.TokenOperations_AreRestrictedToCurrentStore` — `Passed` (`1 s`)
 >   - `UserManagerStoreScopingTests.CreateAsync_AllowsSameEmailAcrossStores_AndRejectsDuplicateWithinStore` — `Passed` (`1 s`)
@@ -84,12 +88,10 @@
 
 ## 2. ما تبقى لإنهاء Phase 06
 
-### أ. بقايا المراحل 0 و 1 و 2
+### أ. بقايا المراحل 0 و 1
 - **المرحلة 0 (Baseline):** عمل أول Git Commit للمشروع، وإعداد خط CI يطابق إصدارات `.NET 10` واختبارات SQL Server.
 - **المرحلة 1 (Model):** إضافة `CustomerProfile` (مع المفتاح البديل `(StoreId, Id)`) و `StoreMembership` إذا تقرر تضمينها في الـ Spike، أو تثبيتها قبل الانتقال لـ Phase 07.
-- **المرحلة 2 (UserStore):**
-  - مراجعة مسارات `IUserLoginStore` (`AddLoginAsync`, `FindByLoginAsync`, `GetLoginsAsync`, `RemoveLoginAsync`) وتقرير تعطيلها أو تقييدها بالنطاق.
-  - تنظيف ملفات القالب غير المستخدمة (`UnitTest1.cs` في مشروعي الاختبار، و `/weatherforecast` في `Program.cs`).
+- *(ملاحظة: تم إكمال تغطية `IUserLoginStore` بالكامل وتنظيف ملفات القالب `UnitTest1.cs` و `/weatherforecast`.)*
 
 ### ب. المرحلة 3 — Managers & Minimal APIs (الخطوة القادمة مباشرة)
 - تهيئة `SignInManager<ApplicationUser>` (مع نظام مصادقة مناسب للـ Spike، مع إبقاء القرار النهائي بين `Cookies` و `JWT` لـ `AUTH-ADR-01`).
