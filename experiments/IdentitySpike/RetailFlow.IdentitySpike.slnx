@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RetailFlow.IdentitySpike.Api/RetailFlow.IdentitySpike.Api.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RetailFlow.IdentitySpike.IdentityScopeUnitTests/RetailFlow.IdentitySpike.IdentityScopeUnitTests.csproj" />
+    <Project Path="tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests.csproj" />
+  </Folder>
+</Solution>
