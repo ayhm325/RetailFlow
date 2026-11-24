@@ -152,6 +152,116 @@ public sealed class IdentityScopeMiddlewareTests
         Assert.Equal(2, resolver.CallCount);
     }
 
+    [Fact]
+    public async Task EndpointWithoutIdentityMetadata_ContinuesWithoutEstablishingScope()
+    {
+        // Arrange
+        var context = new DefaultHttpContext();
+
+        context.SetEndpoint(
+            new Endpoint(
+                requestDelegate: _ => Task.CompletedTask,
+                metadata: new EndpointMetadataCollection(),
+                displayName: "Public Endpoint"));
+
+        var accessor = new IdentityLookupScopeAccessor();
+        var resolver = new SpyIdentityScopeResolver();
+
+        var nextCalled = false;
+
+        RequestDelegate next = _ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        };
+
+        var middleware = new IdentityScopeMiddleware(next);
+
+        // Act
+        await middleware.InvokeAsync(
+            context,
+            resolver,
+            accessor);
+
+        // Assert
+        Assert.True(nextCalled);
+        Assert.Equal(0, resolver.CallCount);
+        Assert.Null(accessor.Current);
+    }
+
+    public static TheoryData<bool, object?> InvalidSlugCases =>
+        new()
+        {
+            // Route value does not exist.
+            { false, null },
+
+            // Route value exists but is null.
+            { true, null },
+
+            // Empty slug.
+            { true, string.Empty },
+
+            // Whitespace-only slug.
+            { true, " " },
+
+            // Route value has an unexpected type.
+            { true, 123 }
+        };
+
+    [Theory]
+    [MemberData(nameof(InvalidSlugCases))]
+    public async Task StoreCustomerEndpoint_MissingOrInvalidSlug_ReturnsNotFound(
+        bool hasRouteValue,
+        object? slugValue)
+    {
+        // Arrange
+        var context = new DefaultHttpContext();
+
+        context.SetEndpoint(
+            new Endpoint(
+                requestDelegate: _ => Task.CompletedTask,
+                metadata: new EndpointMetadataCollection(
+                    new object[]
+                    {
+                        new IdentityScopeMetadata(
+                            AccountKind.StoreCustomer)
+                    }),
+                displayName: "Store Customer Endpoint"));
+
+        if (hasRouteValue)
+        {
+            context.Request.RouteValues["slug"] = slugValue!;
+        }
+
+        var accessor = new IdentityLookupScopeAccessor();
+        var resolver = new SpyIdentityScopeResolver();
+
+        var nextCalled = false;
+
+        RequestDelegate next = _ =>
+        {
+            nextCalled = true;
+            return Task.CompletedTask;
+        };
+
+        var middleware = new IdentityScopeMiddleware(next);
+
+        // Act
+        await middleware.InvokeAsync(
+            context,
+            resolver,
+            accessor);
+
+        // Assert
+        Assert.Equal(
+            StatusCodes.Status404NotFound,
+            context.Response.StatusCode);
+
+        Assert.False(nextCalled);
+        Assert.Equal(0, resolver.CallCount);
+        Assert.Null(accessor.Current);
+    }
+
     private static async Task<IHost> CreateHostAsync(
         StubIdentityScopeResolver resolver)
     {
@@ -254,6 +364,21 @@ public sealed class IdentityScopeMiddlewareTests
             LastSlug = slug;
 
             return Task.FromResult(_resolveStoreId(slug));
+        }
+    }
+
+    private sealed class SpyIdentityScopeResolver : IIdentityScopeResolver
+    {
+        public int CallCount { get; private set; }
+
+        public Task<Guid?> ResolveActiveStoreIdAsync(
+            string slug,
+            CancellationToken cancellationToken)
+        {
+            CallCount++;
+
+            throw new InvalidOperationException(
+                "Resolver should not be called.");
         }
     }
 }

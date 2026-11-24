@@ -102,6 +102,36 @@ app.UseRouting();
 app.UseMiddleware<IdentityScopeMiddleware>();
 
 // -----------------------------------------------------------------------------
+// Store Customer Identity Scope
+// -----------------------------------------------------------------------------
+
+var storeCustomerGroup = app
+    .MapGroup("/api/stores/{slug}/customers")
+    .WithMetadata(
+        new IdentityScopeMetadata(
+            AccountKind.StoreCustomer));
+
+storeCustomerGroup.MapGet(
+    "/scope",
+    (IIdentityLookupScopeAccessor scopeAccessor) =>
+    {
+        var currentScope = scopeAccessor.Current;
+
+        if (currentScope is null)
+        {
+            return Results.Problem(
+                "Identity scope was not established.",
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+
+        return Results.Ok(new
+        {
+            StoreId = currentScope.StoreId,
+            AccountKind = currentScope.AccountKind.ToString()
+        });
+    });
+
+// -----------------------------------------------------------------------------
 // Run Application
 // -----------------------------------------------------------------------------
 

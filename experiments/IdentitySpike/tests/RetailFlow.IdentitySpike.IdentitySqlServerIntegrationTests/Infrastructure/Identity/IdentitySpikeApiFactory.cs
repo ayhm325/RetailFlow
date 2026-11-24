@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
 namespace RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests.Infrastructure.Identity;
@@ -8,6 +10,20 @@ namespace RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests.Infrastruct
 public sealed class IdentitySpikeApiFactory
     : WebApplicationFactory<Program>
 {
+    private readonly Action<IServiceCollection>?
+        _configureTestServices;
+
+    public IdentitySpikeApiFactory()
+        : this(null)
+    {
+    }
+
+    internal IdentitySpikeApiFactory(
+        Action<IServiceCollection>? configureTestServices)
+    {
+        _configureTestServices = configureTestServices;
+    }
+
     private static string ConnectionString =>
         Environment.GetEnvironmentVariable(
             "RETAILFLOW_IDENTITY_SPIKE_CONNECTION")
@@ -34,5 +50,10 @@ public sealed class IdentitySpikeApiFactory
         IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+
+        if (_configureTestServices is not null)
+        {
+            builder.ConfigureTestServices(_configureTestServices);
+        }
     }
 }
