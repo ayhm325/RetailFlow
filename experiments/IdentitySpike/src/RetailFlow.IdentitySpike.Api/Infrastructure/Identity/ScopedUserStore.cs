@@ -94,6 +94,134 @@ public sealed class ScopedUserStore
     }
 
     // -------------------------------------------------------------------------
+    // User identity and credential properties
+    // -------------------------------------------------------------------------
+
+    public override async Task<string> GetUserIdAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        return await base.GetUserIdAsync(user, cancellationToken);
+    }
+
+    public override async Task<string?> GetUserNameAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        return await base.GetUserNameAsync(user, cancellationToken);
+    }
+
+    public override async Task SetUserNameAsync(
+        ApplicationUser user,
+        string? userName,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        await base.SetUserNameAsync(user, userName, cancellationToken);
+    }
+
+    public override async Task<string?> GetNormalizedUserNameAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        return await base.GetNormalizedUserNameAsync(user, cancellationToken);
+    }
+
+    public override async Task SetNormalizedUserNameAsync(
+        ApplicationUser user,
+        string? normalizedName,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        await base.SetNormalizedUserNameAsync(
+            user,
+            normalizedName,
+            cancellationToken);
+    }
+
+    public override async Task<string?> GetEmailAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        return await base.GetEmailAsync(user, cancellationToken);
+    }
+
+    public override async Task SetEmailAsync(
+        ApplicationUser user,
+        string? email,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        await base.SetEmailAsync(user, email, cancellationToken);
+    }
+
+    public override async Task<bool> GetEmailConfirmedAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        return await base.GetEmailConfirmedAsync(user, cancellationToken);
+    }
+
+    public override async Task SetEmailConfirmedAsync(
+        ApplicationUser user,
+        bool confirmed,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        await base.SetEmailConfirmedAsync(user, confirmed, cancellationToken);
+    }
+
+    public override async Task<string?> GetNormalizedEmailAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        return await base.GetNormalizedEmailAsync(user, cancellationToken);
+    }
+
+    public override async Task SetNormalizedEmailAsync(
+        ApplicationUser user,
+        string? normalizedEmail,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        await base.SetNormalizedEmailAsync(
+            user,
+            normalizedEmail,
+            cancellationToken);
+    }
+
+    public override async Task<string?> GetPasswordHashAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        return await base.GetPasswordHashAsync(user, cancellationToken);
+    }
+
+    public override async Task SetPasswordHashAsync(
+        ApplicationUser user,
+        string? passwordHash,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        await base.SetPasswordHashAsync(user, passwordHash, cancellationToken);
+    }
+
+    public override async Task<bool> HasPasswordAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureUserIsInCurrentScopeOrNewAsync(user, cancellationToken);
+        return await base.HasPasswordAsync(user, cancellationToken);
+    }
+
+    // -------------------------------------------------------------------------
     // External logins
     // -------------------------------------------------------------------------
 
@@ -499,6 +627,19 @@ public sealed class ScopedUserStore
     // -------------------------------------------------------------------------
     // Scope validation helpers
     // -------------------------------------------------------------------------
+
+    private async Task EnsureUserIsInCurrentScopeOrNewAsync(
+        ApplicationUser user,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfDisposed();
+        ArgumentNullException.ThrowIfNull(user);
+
+        await EnsureUserMatchesScopeOrIsNewAsync(
+            user,
+            cancellationToken);
+    }
 
     /// <summary>
     /// Validates only the in-memory tenant identity of a user.
