@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Http;
@@ -78,6 +79,21 @@ builder.Services.Replace(
     ServiceDescriptor.Scoped<
         IUserClaimsPrincipalFactory<ApplicationUser>,
         StoreCustomerClaimsPrincipalFactory>());
+
+// Validate SecurityStamp within the 15-minute experimental cookie lifetime.
+builder.Services.Configure<SecurityStampValidatorOptions>(options =>
+{
+    options.ValidationInterval = TimeSpan.FromMinutes(5);
+});
+
+builder.Services.AddAntiforgery(options =>
+{
+    options.HeaderName = "X-CSRF-TOKEN";
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+    options.Cookie.SameSite = SameSiteMode.Strict;
+    options.Cookie.Path = "/";
+});
 
 // -----------------------------------------------------------------------------
 // StoreCustomer Authentication
@@ -169,6 +185,13 @@ var storeCustomerGroup = app
         new IdentityScopeMetadata(
             AccountKind.StoreCustomer));
 
+// Precompute a dummy hash using the configured hasher to equalize login timing
+// when a user does not exist in the current store scope.
+var dummyPasswordHash = new PasswordHasher<ApplicationUser>()
+    .HashPassword(
+        new ApplicationUser(),
+        Guid.NewGuid().ToString("N"));
+
 // -----------------------------------------------------------------------------
 // Login
 // -----------------------------------------------------------------------------
@@ -178,7 +201,8 @@ storeCustomerGroup.MapPost(
     async (
         CustomerLoginRequest request,
         UserManager<ApplicationUser> userManager,
-        SignInManager<ApplicationUser> signInManager) =>
+        SignInManager<ApplicationUser> signInManager,
+        IPasswordHasher<ApplicationUser> passwordHasher) =>
     {
         if (string.IsNullOrWhiteSpace(request.Email) ||
             string.IsNullOrWhiteSpace(request.Password))
@@ -194,6 +218,11 @@ storeCustomerGroup.MapPost(
 
         if (user is null)
         {
+            _ = passwordHasher.VerifyHashedPassword(
+                new ApplicationUser(),
+                dummyPasswordHash,
+                request.Password);
+
             return Results.Problem(
                 title: "Invalid credentials.",
                 statusCode: StatusCodes.Status401Unauthorized);
@@ -240,13 +269,45 @@ storeCustomerGroup.MapGet(
     .RequireAuthorization();
 
 // -----------------------------------------------------------------------------
+// Antiforgery Token for SPA State-Changing Requests
+// -----------------------------------------------------------------------------
+
+storeCustomerGroup.MapGet(
+    "/antiforgery",
+    (HttpContext httpContext, IAntiforgery antiforgery) =>
+    {
+        var tokens = antiforgery.GetAndStoreTokens(httpContext);
+        httpContext.Response.Headers.CacheControl = "no-store";
+
+        return Results.Ok(new
+        {
+            tokens.HeaderName,
+            tokens.RequestToken
+        });
+    });
+
+// -----------------------------------------------------------------------------
 // Logout
 // -----------------------------------------------------------------------------
 
 storeCustomerGroup.MapPost(
     "/logout",
-    async (SignInManager<ApplicationUser> signInManager) =>
+    async (
+        HttpContext httpContext,
+        IAntiforgery antiforgery,
+        SignInManager<ApplicationUser> signInManager) =>
     {
+        try
+        {
+            await antiforgery.ValidateRequestAsync(httpContext);
+        }
+        catch (AntiforgeryValidationException)
+        {
+            return Results.Problem(
+                title: "Invalid or missing CSRF token.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
         await signInManager.SignOutAsync();
 
         return Results.NoContent();

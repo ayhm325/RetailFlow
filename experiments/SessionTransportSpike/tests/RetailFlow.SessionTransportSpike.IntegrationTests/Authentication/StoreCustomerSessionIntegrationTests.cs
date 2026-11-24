@@ -87,25 +87,61 @@ public sealed class StoreCustomerSessionIntegrationTests
                 tenant.StoreId.ToString("D"),
                 me.StoreId);
 
-            // 3. Logout using the same issued cookie.
-            using var logoutResponse = await SendWithCookieAsync(
+            // 3. Logout without CSRF token must be rejected with 400 Bad Request.
+            using var missingCsrfLogoutResponse = await SendWithCookieAsync(
                 client,
                 HttpMethod.Post,
                 $"{basePath}/logout",
                 issuedCookie.CookieHeader);
 
             Assert.Equal(
+                HttpStatusCode.BadRequest,
+                missingCsrfLogoutResponse.StatusCode);
+
+            // 4. Fetch Antiforgery token and cookie, then logout with CSRF header.
+            using var antiforgeryResponse = await client.GetAsync(
+                $"{basePath}/antiforgery");
+
+            Assert.Equal(
+                HttpStatusCode.OK,
+                antiforgeryResponse.StatusCode);
+
+            var antiforgery = await antiforgeryResponse.Content
+                .ReadFromJsonAsync<AntiforgeryResponse>();
+
+            Assert.NotNull(antiforgery);
+            Assert.False(string.IsNullOrWhiteSpace(antiforgery.HeaderName));
+            Assert.False(string.IsNullOrWhiteSpace(antiforgery.RequestToken));
+
+            var antiforgeryCookieHeader = string.Join(
+                "; ",
+                GetSetCookieHeaders(antiforgeryResponse)
+                    .Select(header => header.Split(';', 2)[0]));
+
+            var combinedCookies = string.IsNullOrWhiteSpace(antiforgeryCookieHeader)
+                ? issuedCookie.CookieHeader
+                : $"{issuedCookie.CookieHeader}; {antiforgeryCookieHeader}";
+
+            using var logoutResponse = await SendWithCookieAsync(
+                client,
+                HttpMethod.Post,
+                $"{basePath}/logout",
+                combinedCookies,
+                antiforgery.HeaderName,
+                antiforgery.RequestToken);
+
+            Assert.Equal(
                 HttpStatusCode.NoContent,
                 logoutResponse.StatusCode);
 
-            // 4. The deletion cookie must use the same name and path.
+            // 5. The deletion cookie must use the same name and path.
             var deletionHeaders = GetSetCookieHeaders(logoutResponse);
 
             var deletionCookie = Assert.Single(
-                deletionHeaders.Where(header =>
-                    header.StartsWith(
-                        $"{issuedCookie.Name}=",
-                        StringComparison.Ordinal)));
+                deletionHeaders,
+                header => header.StartsWith(
+                    $"{issuedCookie.Name}=",
+                    StringComparison.Ordinal));
 
             Assert.Contains(
                 $"path=/api/stores/{tenant.Slug}/customers",
@@ -121,16 +157,14 @@ public sealed class StoreCustomerSessionIntegrationTests
                     StringComparison.OrdinalIgnoreCase),
                 "Logout must expire the issued browser cookie.");
 
-            // 5. Simulate the browser after applying Set-Cookie deletion:
-            // it must no longer send the session cookie.
+            // 6. Simulate the browser after applying Set-Cookie deletion:
+            // API must return 401 Unauthorized (not 302 login redirect).
             using var afterLogoutResponse = await client.GetAsync(
                 $"{basePath}/me");
 
             Assert.Equal(
-                HttpStatusCode.Found,
+                HttpStatusCode.Unauthorized,
                 afterLogoutResponse.StatusCode);
-
-            Assert.NotNull(afterLogoutResponse.Headers.Location);
         }
         finally
         {
@@ -187,7 +221,7 @@ public sealed class StoreCustomerSessionIntegrationTests
                     storeACookie.CookieHeader);
 
             Assert.Equal(
-                HttpStatusCode.Found,
+                HttpStatusCode.Unauthorized,
                 normalCrossStoreResponse.StatusCode);
 
             // Case 2: Simulate a stronger attack:
@@ -204,9 +238,10 @@ public sealed class StoreCustomerSessionIntegrationTests
                 $"{storeBPath}/me",
                 forgedCookieHeader);
 
-            // Authentication events must reject the mismatched StoreId claim.
+            // Authentication events must reject the mismatched StoreId claim
+            // with 401 Unauthorized.
             Assert.Equal(
-                HttpStatusCode.Found,
+                HttpStatusCode.Unauthorized,
                 forgedResponse.StatusCode);
 
             var forgedResponseCookies =
@@ -215,10 +250,10 @@ public sealed class StoreCustomerSessionIntegrationTests
             // Rejection must delete the cookie selected for Store B,
             // using Store B's path.
             var rejectedCookie = Assert.Single(
-                forgedResponseCookies.Where(header =>
-                    header.StartsWith(
-                        $"{BuildCookieName(storeB.StoreId)}=",
-                        StringComparison.Ordinal)));
+                forgedResponseCookies,
+                header => header.StartsWith(
+                    $"{BuildCookieName(storeB.StoreId)}=",
+                    StringComparison.Ordinal));
 
             Assert.Contains(
                 $"path=/api/stores/{storeB.Slug}/customers",
@@ -370,10 +405,10 @@ public sealed class StoreCustomerSessionIntegrationTests
         var expectedName = BuildCookieName(storeId);
 
         var mainCookie = Assert.Single(
-            headers.Where(header =>
-                header.StartsWith(
-                    $"{expectedName}=",
-                    StringComparison.Ordinal)));
+            headers,
+            header => header.StartsWith(
+                $"{expectedName}=",
+                StringComparison.Ordinal));
 
         Assert.Contains(
             $"path=/api/stores/{slug}/customers",
@@ -415,13 +450,23 @@ public sealed class StoreCustomerSessionIntegrationTests
         HttpClient client,
         HttpMethod method,
         string path,
-        string cookieHeader)
+        string cookieHeader,
+        string? csrfHeaderName = null,
+        string? csrfToken = null)
     {
         using var request = new HttpRequestMessage(method, path);
 
         request.Headers.TryAddWithoutValidation(
             "Cookie",
             cookieHeader);
+
+        if (!string.IsNullOrWhiteSpace(csrfHeaderName) &&
+            !string.IsNullOrWhiteSpace(csrfToken))
+        {
+            request.Headers.TryAddWithoutValidation(
+                csrfHeaderName,
+                csrfToken);
+        }
 
         return await client.SendAsync(request);
     }
@@ -492,4 +537,8 @@ public sealed class StoreCustomerSessionIntegrationTests
         string? UserId,
         string? AccountKind,
         string? StoreId);
+
+    private sealed record AntiforgeryResponse(
+        string? HeaderName,
+        string? RequestToken);
 }

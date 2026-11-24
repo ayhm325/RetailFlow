@@ -182,7 +182,7 @@ public sealed class StoreCustomerCookieManager : ICookieManager
             .TrimEnd('/')
             ?? string.Empty;
 
-        var escapedSlug = Uri.EscapeDataString(slug);
+        var escapedSlug = Uri.EscapeDataString(slug.ToLowerInvariant());
 
         var cookiePath =
             $"{pathBase}/api/stores/{escapedSlug}/customers";

@@ -392,12 +392,13 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 
 ### 10.4 ما تم إثباته في SessionTransportSpike حتى الآن (`2026-11-24`)
 
-- **`StoreCustomerCookieManager`:** يصدر Cookie باسم خاص بكل متجر (`__Secure-RetailFlow.StoreCustomer.store.{storeId:N}`) ومسار متجر (`/api/stores/{slug}/customers`) مع `Secure` و`HttpOnly` و`SameSite=Lax`، مع اختبارات وحدة (`7/7`).
+- **`StoreCustomerCookieManager`:** يصدر Cookie باسم خاص بكل متجر (`__Secure-RetailFlow.StoreCustomer.store.{storeId:N}`) ومسار متجر مطبّع بالأحرف الصغيرة (`/api/stores/{slug}/customers`) مع `Secure` و`HttpOnly` و`SameSite=Lax`، مع اختبارات وحدة (`7/7`).
 - **`CanonicalStoreSlugMiddleware`:** يرفض المسارات غير القياسية للـ slug بـ `400 Bad Request` (`ProblemDetails`) قبل `IdentityScopeMiddleware`، مع اختبارات وحدة (`5/5`).
-- **`StoreCustomerCookieAuthenticationEvents` و`StoreCustomerClaimsPrincipalFactory`:** يربطان الجلسة بـ `AccountKind` و`StoreId` ويرفضان إعادة استخدام Ticket متجر A على مسار متجر B مع حذف Cookie المستهدفة لمتجر B.
-- **اختبارات التكامل على SQL Server (`2/2` Passed):**
-  - `Login_Me_Logout_RemovesBrowserSessionCookie`: يثبت `Login (204)` -> `Me (200)` -> `Logout (204 + حذف Cookie)` -> `Me` بعد حذف Cookie من المتصفح (`302 Found`). *(ملاحظة أمنية: `SignOutAsync` يحذف Cookie من المتصفح فقط ولا يحقق إبطالاً خادمياً تلقائياً لنسخة Ticket منسوخة؛ سيُقيّم ذلك ضمن سياسة الإبطال الخادمي و`SecurityStamp`).*
-  - `StoreACookie_CannotAuthenticateAgainstStoreB`: يثبت رفض Cookie متجر A على متجر B ورفض Ticket A المنسوخ باسم Cookie متجر B (`302 Found` مع حذف Cookie B).
+- **`StoreCustomerCookieAuthenticationEvents` و`StoreCustomerClaimsPrincipalFactory`:** يربطان الجلسة بـ `AccountKind` و`StoreId`، ويعيدان `401 Unauthorized` / `403 Forbidden` (بدل `302` redirect) للـ SPA/API، ويرفضان إعادة استخدام Ticket متجر A على مسار متجر B مع حذف Cookie المستهدفة لمتجر B.
+- **ضوابط Security & Timing المطبقة:** تفعيل `Antiforgery` (`X-CSRF-TOKEN` + `SameSite=Strict` cookie) عبر `GET /antiforgery` والتحقق منه في `POST /logout`، وضبط `SecurityStampValidatorOptions.ValidationInterval = 5m` (أقل من `ExpireTimeSpan = 15m`)، وموازنة زمن `POST /login` بـ Dummy Hash عند عدم وجود المستخدم.
+- **اختبارات التكامل على SQL Server (`2/2` Passed، 0 تحذيرات):**
+  - `Login_Me_Logout_RemovesBrowserSessionCookie`: يثبت `Login (204)` -> `Me (200)` -> رفض `Logout` دون CSRF (`400`) -> `Logout` مع `X-CSRF-TOKEN` (`204 + حذف Cookie`) -> `Me` بعد حذف Cookie من المتصفح (`401 Unauthorized`). *(ملاحظة أمنية: `SignOutAsync` يحذف Cookie من المتصفح فقط ولا يحقق إبطالاً خادمياً تلقائياً لنسخة Ticket منسوخة؛ سيُقيّم ذلك ضمن سياسة الإبطال الخادمي و`SecurityStamp`).*
+  - `StoreACookie_CannotAuthenticateAgainstStoreB`: يثبت رفض Cookie متجر A على متجر B ورفض Ticket A المنسوخ باسم Cookie متجر B (`401 Unauthorized` مع حذف Cookie B).
 
 ## 11. معايير قبول ADR
 
@@ -493,3 +494,4 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 |---|---|---|
 | 0.1 | 2026-11-24 | إنشاء مسودة القرار استناداً إلى Product Blueprint وPhase 06 ودراسة مصادر .NET 10 وOWASP/IETF. |
 | 0.2 | 2026-11-24 | توثيق نتائج المرحلة الأولية من `SessionTransportSpike` (`14/14`) وإغلاق فجوات `ScopedUserStore` (`49/49` في `IdentitySpike`). |
+| 0.3 | 2026-11-24 | مطابقة سلوك API مع توثيق ASP.NET Core 10 (`401/403`، `Antiforgery` لـ `Logout`، `ValidationInterval = 5m`، موازنة زمن `Login`، وRequest-Scoped Cache في `ScopedUserStore`). |

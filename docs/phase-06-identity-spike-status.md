@@ -64,7 +64,7 @@
     - **Claims:** `GetClaimsAsync`, `AddClaimsAsync`, `ReplaceClaimAsync`, `RemoveClaimsAsync`.
     - **Logins:** `AddLoginAsync`, `RemoveLoginAsync`, `GetLoginsAsync`.
     - **Tokens:** `FindTokenAsync`, `AddUserTokenAsync`, `RemoveUserTokenAsync`.
-  - حماية عمليات **Lockout** و **Security Stamp** و **خصائص المستخدم** عبر **Hybrid Scope Validation** (`EnsureUserMatchesScopeOrIsNewAsync`): تتحقق من نطاق الكائن في الذاكرة، وتستعلم عن `user.Id` في `AspNetUsers` دون فلتر النطاق — فتسمح بالمستخدم الجديد غير المحفوظ بعد (لدعم `UserManager.CreateAsync`)، وترفض أي كائن يحمل `Id` محفوظاً في متجر/نطاق آخر:
+  - حماية عمليات **Lockout** و **Security Stamp** و **خصائص المستخدم** عبر **Hybrid Scope Validation** (`EnsureUserMatchesScopeOrIsNewAsync`): تتحقق من نطاق الكائن في الذاكرة، وتستعلم عن `user.Id` في `AspNetUsers` دون فلتر النطاق — فتسمح بالمستخدم الجديد غير المحفوظ بعد (لدعم `UserManager.CreateAsync`)، وترفض أي كائن يحمل `Id` محفوظاً في متجر/نطاق آخر، مع **Request-Scoped Ownership Cache** داخل `ScopedUserStore` لمنع تكرار استعلامات التحقق (`N+1`) أثناء تدفق `UserManager`/`SignInManager`:
     - **Lockout:** `GetLockoutEndDateAsync`, `SetLockoutEndDateAsync`, `GetAccessFailedCountAsync`, `IncrementAccessFailedCountAsync`, `ResetAccessFailedCountAsync`, `GetLockoutEnabledAsync`, `SetLockoutEnabledAsync`.
     - **Security Stamp:** `GetSecurityStampAsync`, `SetSecurityStampAsync`.
     - **User Properties (`IUserStore`, `IUserEmailStore`, `IUserPasswordStore`):** `GetUserIdAsync`, `GetUserNameAsync`, `SetUserNameAsync`, `GetNormalizedUserNameAsync`, `SetNormalizedUserNameAsync`, `GetEmailAsync`, `SetEmailAsync`, `GetNormalizedEmailAsync`, `SetNormalizedEmailAsync`, `GetEmailConfirmedAsync`, `SetEmailConfirmedAsync`, `GetPasswordHashAsync`, `SetPasswordHashAsync`, `HasPasswordAsync`.
@@ -109,7 +109,8 @@
 
 3. **تجربة نقل الجلسات (`experiments/SessionTransportSpike/` — 14 اختباراً):**
    - `RetailFlow.SessionTransportSpike.UnitTests` (12 اختباراً): `StoreCustomerCookieManagerTests.cs` (7 اختبارات) و `CanonicalStoreSlugMiddlewareTests.cs` (5 حالات).
-   - `RetailFlow.SessionTransportSpike.IntegrationTests` (اختباران على SQL Server و`WebApplicationFactory`): `Login_Me_Logout_RemovesBrowserSessionCookie` و `StoreACookie_CannotAuthenticateAgainstStoreB`.
+   - `RetailFlow.SessionTransportSpike.IntegrationTests` (اختباران على SQL Server و`WebApplicationFactory` دون أي تحذيرات بناء): `Login_Me_Logout_RemovesBrowserSessionCookie` (شامل رفض `POST /logout` دون `X-CSRF-TOKEN` بـ `400` وقبوله مع التوكن بـ `204`، وإرجاع `401` بدل `302` بعد الخروج) و `StoreACookie_CannotAuthenticateAgainstStoreB` (`401 Unauthorized` + حذف Cookie متجر B).
+   - **تحسينات مطابقة التوثيق الرسمي المطبقة:** `RedirectToLogin` -> `401` و `RedirectToAccessDenied` -> `403` لـ SPA/API، حماية `Antiforgery` (`X-CSRF-TOKEN`)، ضبط `SecurityStampValidatorOptions.ValidationInterval = 5m` (< عمر الكوكي `15m`)، وموازنة زمن `POST /login` عبر Dummy Hash عند غياب المستخدم.
 
 > **نتائج التشغيل الفعلي بتاريخ `2026-11-24`:**
 > - **`IdentityScopeUnitTests`: `14 / 14` Passed، `0 Failed · 0 Skipped`.**

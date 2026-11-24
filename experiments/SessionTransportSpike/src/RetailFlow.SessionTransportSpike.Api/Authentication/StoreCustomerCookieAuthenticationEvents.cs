@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 
 using RetailFlow.IdentitySpike.Api.Domain.Identity;
@@ -75,5 +76,19 @@ public sealed class StoreCustomerCookieAuthenticationEvents
 
         // Use the official ASP.NET Core Identity Security Stamp validator.
         await SecurityStampValidator.ValidatePrincipalAsync(context);
+    }
+
+    public override Task RedirectToLogin(
+        RedirectContext<CookieAuthenticationOptions> context)
+    {
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return Task.CompletedTask;
+    }
+
+    public override Task RedirectToAccessDenied(
+        RedirectContext<CookieAuthenticationOptions> context)
+    {
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        return Task.CompletedTask;
     }
 }

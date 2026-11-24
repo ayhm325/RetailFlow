@@ -15,6 +15,8 @@ public sealed class ScopedUserStore
     : UserOnlyStore<ApplicationUser, IdentitySpikeDbContext>
 {
     private readonly IIdentityLookupScopeAccessor _scopeAccessor;
+    private readonly Dictionary<string, (AccountKind AccountKind, Guid? StoreId)> _persistedScopeCache =
+        new(StringComparer.Ordinal);
 
     public ScopedUserStore(
         IdentitySpikeDbContext context,
@@ -668,6 +670,20 @@ public sealed class ScopedUserStore
     {
         EnsureUserMatchesCurrentScope(user);
 
+        var scope = GetRequiredScope();
+
+        if (_persistedScopeCache.TryGetValue(user.Id, out var cachedOwnership))
+        {
+            if (cachedOwnership.AccountKind != scope.AccountKind ||
+                cachedOwnership.StoreId != scope.StoreId)
+            {
+                throw new InvalidOperationException(
+                    "The user does not belong to the current identity scope.");
+            }
+
+            return;
+        }
+
         var persistedUser = await Context.Set<ApplicationUser>()
             .AsNoTracking()
             .Where(existing => existing.Id == user.Id)
@@ -682,7 +698,9 @@ public sealed class ScopedUserStore
         if (persistedUser is null)
             return;
 
-        var scope = GetRequiredScope();
+        _persistedScopeCache[user.Id] = (
+            persistedUser.AccountKind,
+            persistedUser.StoreId);
 
         if (persistedUser.AccountKind != scope.AccountKind ||
             persistedUser.StoreId != scope.StoreId)
@@ -702,6 +720,20 @@ public sealed class ScopedUserStore
     {
         EnsureUserMatchesCurrentScope(user);
 
+        var scope = GetRequiredScope();
+
+        if (_persistedScopeCache.TryGetValue(user.Id, out var cachedOwnership))
+        {
+            if (cachedOwnership.AccountKind != scope.AccountKind ||
+                cachedOwnership.StoreId != scope.StoreId)
+            {
+                throw new InvalidOperationException(
+                    "The user was not found in the current identity scope.");
+            }
+
+            return;
+        }
+
         var existsInCurrentScope = await CreateScopedUsers()
             .AsNoTracking()
             .AnyAsync(
@@ -713,6 +745,8 @@ public sealed class ScopedUserStore
             throw new InvalidOperationException(
                 "The user was not found in the current identity scope.");
         }
+
+        _persistedScopeCache[user.Id] = (scope.AccountKind, scope.StoreId);
     }
 
     private async Task<bool> IsPersistedUserInCurrentScopeAsync(
