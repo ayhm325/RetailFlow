@@ -167,6 +167,9 @@ builder.Services
 // Server-side Authentication Ticket Store
 // -----------------------------------------------------------------------------
 
+builder.Services.AddSingleton<TimeProvider>(
+    TimeProvider.System);
+
 builder.Services.AddSingleton<
     ITicketStore,
     SqlServerTicketStore>();
@@ -174,11 +177,25 @@ builder.Services.AddSingleton<
 builder.Services
     .AddOptions<CookieAuthenticationOptions>(
         IdentityConstants.ApplicationScheme)
-    .Configure<ITicketStore>(
-        (cookieOptions, ticketStore) =>
+    .Configure<ITicketStore, TimeProvider>(
+        (options, ticketStore, timeProvider) =>
         {
-            cookieOptions.SessionStore = ticketStore;
+            options.SessionStore = ticketStore;
+
+            // CookieAuthenticationHandler and SqlServerTicketStore
+            // must use the same clock.
+            options.TimeProvider = timeProvider;
         });
+
+// -----------------------------------------------------------------------------
+// Expired Session Cleanup
+// -----------------------------------------------------------------------------
+
+builder.Services.AddSingleton<ExpiredSessionTicketCleanupService>();
+
+builder.Services.AddHostedService(
+    services => services.GetRequiredService<
+        ExpiredSessionTicketCleanupService>());
 
 builder.Services.AddAuthorization();
 

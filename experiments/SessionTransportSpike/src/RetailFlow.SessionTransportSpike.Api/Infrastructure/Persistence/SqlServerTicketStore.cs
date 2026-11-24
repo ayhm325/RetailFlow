@@ -32,17 +32,22 @@ public sealed class SqlServerTicketStore : ITicketStore
 
     private readonly ILogger<SqlServerTicketStore> _logger;
 
+    private readonly TimeProvider _timeProvider;
+
     public SqlServerTicketStore(
         IDbContextFactory<SessionTicketDbContext> dbContextFactory,
         IDataProtectionProvider dataProtectionProvider,
-        ILogger<SqlServerTicketStore> logger)
+        ILogger<SqlServerTicketStore> logger,
+        TimeProvider timeProvider)
     {
         ArgumentNullException.ThrowIfNull(dbContextFactory);
         ArgumentNullException.ThrowIfNull(dataProtectionProvider);
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(timeProvider);
 
         _dbContextFactory = dbContextFactory;
         _logger = logger;
+        _timeProvider = timeProvider;
 
         _ticketProtector = dataProtectionProvider.CreateProtector(
             "RetailFlow",
@@ -86,7 +91,7 @@ public sealed class SqlServerTicketStore : ITicketStore
 
         var metadata = ExtractRequiredMetadata(ticket);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
 
         var createdUtc = ticket.Properties.IssuedUtc ?? now;
         var expiresUtc = GetRequiredExpiration(ticket);
@@ -174,11 +179,11 @@ public sealed class SqlServerTicketStore : ITicketStore
             return null;
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
 
         if (entity.ExpiresUtc <= now)
         {
-            // Delete only if this exact expiration state still exists.
+            // Delete only if this exact expired state still exists.
             // A concurrent renewal may already have extended the session.
             await dbContext.AuthenticationTickets
                 .Where(ticket =>
@@ -311,7 +316,7 @@ public sealed class SqlServerTicketStore : ITicketStore
 
         var metadata = ExtractRequiredMetadata(ticket);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         var expiresUtc = GetRequiredExpiration(ticket);
 
         if (expiresUtc <= now)
@@ -325,24 +330,26 @@ public sealed class SqlServerTicketStore : ITicketStore
             await _dbContextFactory.CreateDbContextAsync(
                 cancellationToken);
 
-        // The session identity is immutable.
+        // Session identity and expiration are monotonic:
         //
-        // Update only when:
-        // - The key exists.
-        // - UserId still matches.
-        // - AccountKind still matches.
-        // - StoreId still matches.
-        // - The previous session has not expired.
+        // - The same session key must still exist.
+        // - UserId, AccountKind and StoreId must match.
+        // - The existing session must not have expired.
+        // - The incoming ticket must extend the current expiration.
         //
-        // If Logout already deleted the row, this update affects zero rows.
-        // It must never insert a replacement session.
+        // The last condition prevents an older concurrent renewal
+        // from overwriting a newer renewal that already reached SQL Server.
+        //
+        // There is deliberately no INSERT fallback:
+        // a removed session must never be resurrected by RenewAsync.
         var affectedRows = await dbContext.AuthenticationTickets
             .Where(existing =>
                 existing.Key == key &&
                 existing.UserId == metadata.UserId &&
                 existing.AccountKind == metadata.AccountKind &&
                 existing.StoreId == metadata.StoreId &&
-                existing.ExpiresUtc > now)
+                existing.ExpiresUtc > now &&
+                existing.ExpiresUtc < expiresUtc)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(
@@ -359,7 +366,8 @@ public sealed class SqlServerTicketStore : ITicketStore
         if (affectedRows == 0)
         {
             _logger.LogDebug(
-                "Session renewal was ignored because the session was missing, expired, or its identity did not match.");
+                "Session renewal was ignored because the session was missing, expired, " +
+                "identity-mismatched, or already renewed to an equal or later expiration.");
         }
     }
 
