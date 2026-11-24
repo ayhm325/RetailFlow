@@ -1,6 +1,8 @@
 ﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using RetailFlow.IdentitySpike.Api.Domain.Identity;
 using RetailFlow.IdentitySpike.Api.Domain.Stores;
 using RetailFlow.IdentitySpike.Api.Infrastructure.Identity;
@@ -145,6 +147,112 @@ public sealed class ScopedUserStoreClaimsTests
         Assert.Equal("store-b-secret", persistedForeignClaim.ClaimValue);
 
         // Discard all test data.
+        await transaction.RollbackAsync();
+    }
+
+    [Fact]
+    public async Task UserManagerGetUsersForClaimAsync_ReturnsOnlyUsersFromCurrentStore()
+    {
+        await using var connection = new Microsoft.Data.SqlClient.SqlConnection(
+            ConnectionString);
+
+        await connection.OpenAsync();
+
+        await using var transaction =
+            await connection.BeginTransactionAsync();
+
+        var dbOptions = new DbContextOptionsBuilder<IdentitySpikeDbContext>()
+            .UseSqlServer(connection)
+            .Options;
+
+        var storeA = CreateStore("claim-query-store-a");
+        var storeB = CreateStore("claim-query-store-b");
+
+        var userA = CreateCustomer(storeA.Id, "claim-query-a");
+        var userB = CreateCustomer(storeB.Id, "claim-query-b");
+
+        const string claimType = "test:shared-claim";
+        const string claimValue = "shared-value";
+
+        // Arrange: persist two users with the exact same claim.
+        await using (var setupDb = new IdentitySpikeDbContext(dbOptions))
+        {
+            await setupDb.Database.UseTransactionAsync(transaction);
+
+            setupDb.Stores.AddRange(storeA, storeB);
+            setupDb.Users.AddRange(userA, userB);
+
+            setupDb.Set<IdentityUserClaim<string>>().AddRange(
+                new IdentityUserClaim<string>
+                {
+                    UserId = userA.Id,
+                    ClaimType = claimType,
+                    ClaimValue = claimValue
+                },
+                new IdentityUserClaim<string>
+                {
+                    UserId = userB.Id,
+                    ClaimType = claimType,
+                    ClaimValue = claimValue
+                });
+
+            await setupDb.SaveChangesAsync();
+        }
+
+        // Arrange: configure the real Identity services with the scoped store.
+        var services = new ServiceCollection();
+
+        services.AddLogging();
+
+        services.AddDbContext<IdentitySpikeDbContext>(
+            options => options.UseSqlServer(connection));
+
+        services.AddScoped<
+            IIdentityLookupScopeAccessor,
+            IdentityLookupScopeAccessor>();
+
+        services.AddScoped<ScopedUserStore>();
+
+        services
+            .AddIdentityCore<ApplicationUser>(options =>
+            {
+                options.User.RequireUniqueEmail = false;
+            })
+            .AddUserStore<ScopedUserStoreFacade>();
+
+        await using var serviceProvider =
+            services.BuildServiceProvider(validateScopes: true);
+
+        await using (var scope = serviceProvider.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider
+                .GetRequiredService<IdentitySpikeDbContext>();
+
+            await db.Database.UseTransactionAsync(transaction);
+
+            var accessor = scope.ServiceProvider
+                .GetRequiredService<IIdentityLookupScopeAccessor>();
+
+            accessor.SetCurrent(
+                IdentityLookupScope.ForStoreCustomer(storeA.Id));
+
+            var userManager = scope.ServiceProvider
+                .GetRequiredService<UserManager<ApplicationUser>>();
+
+            // Act: execute the query through UserManager and the facade.
+            var users = await userManager.GetUsersForClaimAsync(
+                new Claim(claimType, claimValue));
+
+            // Assert: Store A can see its own user, never Store B's user.
+            var result = Assert.Single(users);
+
+            Assert.Equal(userA.Id, result.Id);
+
+            Assert.DoesNotContain(
+                users,
+                user => user.Id == userB.Id);
+        }
+
         await transaction.RollbackAsync();
     }
 

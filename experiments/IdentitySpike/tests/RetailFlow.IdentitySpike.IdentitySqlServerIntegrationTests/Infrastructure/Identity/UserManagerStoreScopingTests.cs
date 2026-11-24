@@ -58,12 +58,18 @@ public sealed class UserManagerStoreScopingTests
             IIdentityLookupScopeAccessor,
             IdentityLookupScopeAccessor>();
 
+        services.AddDataProtection();
+
         services
             .AddIdentityCore<ApplicationUser>(options =>
             {
                 options.User.RequireUniqueEmail = false;
             })
-            .AddUserStore<ScopedUserStore>();
+            .AddUserStore<ScopedUserStoreFacade>()
+            .AddTokenProvider<DataProtectorTokenProvider<ApplicationUser>>(
+                TokenOptions.DefaultProvider);
+
+        services.AddScoped<ScopedUserStore>();
 
         await using var serviceProvider =
             services.BuildServiceProvider(validateScopes: true);

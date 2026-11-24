@@ -34,17 +34,26 @@ builder.Services.AddScoped<
     IIdentityLookupScopeAccessor,
     IdentityLookupScopeAccessor>();
 
+builder.Services.AddScoped<
+    IIdentityScopeResolver,
+    IdentityScopeResolver>();
+
 // -----------------------------------------------------------------------------
 // ASP.NET Core Identity
 // -----------------------------------------------------------------------------
 
+builder.Services.AddDataProtection();
+
+builder.Services.AddScoped<ScopedUserStore>();
+
 builder.Services
     .AddIdentityCore<ApplicationUser>(options =>
     {
-        // Email uniqueness is enforced by scoped SQL Server indexes.
         options.User.RequireUniqueEmail = false;
     })
-    .AddUserStore<ScopedUserStore>();
+    .AddUserStore<ScopedUserStoreFacade>()
+    .AddTokenProvider<DataProtectorTokenProvider<ApplicationUser>>(
+        TokenOptions.DefaultProvider);
 
 // -----------------------------------------------------------------------------
 // Build Application
@@ -88,8 +97,14 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+app.UseRouting();
+
+app.UseMiddleware<IdentityScopeMiddleware>();
+
 // -----------------------------------------------------------------------------
 // Run Application
 // -----------------------------------------------------------------------------
 
 app.Run();
+
+public partial class Program { }
