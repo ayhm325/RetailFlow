@@ -35,10 +35,15 @@ public class IdentityLookupScopeAccessorTests
 
         accessor.SetCurrent(firstScope);
 
-        Assert.Throws<InvalidOperationException>(
+        var exception = Assert.Throws<InvalidOperationException>(
             () => accessor.SetCurrent(secondScope));
 
+        Assert.Equal(
+            "Identity lookup scope has already been established.",
+            exception.Message);
+
         Assert.Same(firstScope, accessor.Current);
+        Assert.NotSame(secondScope, accessor.Current);
     }
 
     [Fact]
