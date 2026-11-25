@@ -17,3 +17,12 @@ Implementation Status & Roadmap,docs/08-Engineering-Management/Implementation-St
 ADR Catalog,docs/08-Engineering-Management/Architecture-Decision-Records/ADR-Catalog.md,Consolidated ADRs (ADR-001 to ADR-004),Accurate (Created),Created
 Comprehensive Audit Report,docs/09-Audit-and-Traceability/Comprehensive-Audit-Report.md,Full 20-section engineering audit,Accurate (Created),Created
 Documentation Change Report,docs/09-Audit-and-Traceability/Documentation-Change-Report.md,Audit of documentation changes,Accurate (Created),Created
+Acceptance Criteria Register,docs/01-Requirements/Acceptance-Criteria.csv,Canonical AC-01 to AC-08 register (AUD-001),Accurate (Gate 1),Created
+AC Reconciliation Report,docs/01-Requirements/Acceptance-Criteria-Reconciliation.md,AC-07 conflict resolution and AC-08..10 disposition,Accurate (Gate 1),Created
+NFR Register,docs/01-Requirements/NFR-Register.csv,Canonical NFR-001 to NFR-009 register,Accurate (Gate 1),Created
+Business Rules Traceability Matrix,docs/01-Requirements/Business-Rules-Traceability-Matrix.csv,BR-001 to BR-012 mapped to invariants and aggregates (AUD-003),Accurate (Gate 1),Created
+Use Case Specifications,docs/01-Requirements/Use-Case-Specifications.md,Complete UC-01 to UC-10 specifications and Gherkin examples (AUD-007),Accurate (Gate 1),Created
+Change Log and Open Decisions,docs/08-Engineering-Management/Change-Log-and-Open-Decisions.md,Gate 1 Change Requests CR-G1-* and Open Decisions OD-001..008,Accurate (Gate 1),Created
+Gate 1 Validation Report,docs/09-Audit-and-Traceability/Gate-1-Validation-Report.md,Automated Gate 1 baseline validation output and evidence,Accurate (Gate 1),Created
+Gate 1 Closure Report,docs/09-Audit-and-Traceability/Gate-1-Closure-Report.md,Gate 1 executive closure summary and residual risks,Accurate (Gate 1),Created
+Gate 1 Validator Script,scripts/validate-gate1-baseline.ps1,Repeatable PowerShell validation script for Gate 1 registers,Accurate (Gate 1),Created

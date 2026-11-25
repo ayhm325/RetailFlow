@@ -8,7 +8,11 @@ This directory is the single, evidence-based engineering knowledge base for Reta
 
 ### Overview & Requirements
 - [Project Overview](00-Project-Overview/Project-Overview.md) — Product purpose, multi-tenant model, actors, and glossary.
-- [Requirements & Business Rules](01-Requirements/Requirements-and-Business-Rules.md) — Functional, non-functional, and business rules mapped to actual implementation.
+- [Requirements & Business Rules](01-Requirements/Requirements-and-Business-Rules.md) — Summary and entry point to canonical Gate 1 registers.
+- [Use Case Specifications (UC-01–UC-10)](01-Requirements/Use-Case-Specifications.md) — Full use case flows, trust boundaries, Gherkin examples, and open decisions.
+- [Acceptance Criteria Register](01-Requirements/Acceptance-Criteria.csv) & [AC Reconciliation](01-Requirements/Acceptance-Criteria-Reconciliation.md) — Canonical `AC-01`–`AC-08` and `AC-07` conflict resolution.
+- [NFR Register](01-Requirements/NFR-Register.csv) — Canonical `NFR-001`–`NFR-009`.
+- [Business Rules Traceability Matrix](01-Requirements/Business-Rules-Traceability-Matrix.csv) — `BR-001`–`BR-012` mapped to invariants and aggregates.
 
 ### Architecture, Database & API
 - [System Architecture & Diagrams](02-Architecture/System-Architecture.md) — Clean Architecture / Modular Monolith layers, dependency graph, and Mermaid diagrams.
@@ -24,6 +28,7 @@ This directory is the single, evidence-based engineering knowledge base for Reta
 - [Testing & Verification](06-Quality-and-Testing/Testing-and-Verification.md) — Test suites across all 4 solutions (`196` tests) and SQL Server testing rules.
 - [Deployment & Operations](07-Deployment-and-Operations/Deployment-and-Configuration.md) — Azure App Service Linux target, `ConnectionStringResolver`, health checks, and CI.
 - [Implementation Status & Roadmap](08-Engineering-Management/Implementation-Status-and-Roadmap.md) — What is implemented, in PoC, or deferred, plus technical debt.
+- [Change Log & Open Decisions (Gate 1)](08-Engineering-Management/Change-Log-and-Open-Decisions.md) — `CR-G1-*` change requests and `OD-001`–`OD-008` open decisions.
 - [Architecture Decision Records (ADRs)](08-Engineering-Management/Architecture-Decision-Records/ADR-Catalog.md) — Key architectural decisions (`ADR-001`–`ADR-004`).
 
 ### Legacy / Slice-Specific Records (Preserved)
@@ -33,6 +38,7 @@ This directory is the single, evidence-based engineering knowledge base for Reta
 ### Audit & Traceability
 - [Comprehensive Audit Report](09-Audit-and-Traceability/Comprehensive-Audit-Report.md) — Full 20-section technical, security, and documentation audit.
 - [Documentation Change Report](09-Audit-and-Traceability/Documentation-Change-Report.md) — Inventory of reviewed, updated, created, and retained files.
+- [Gate 1 Validation Report](09-Audit-and-Traceability/Gate-1-Validation-Report.md) & [Gate 1 Closure Report](09-Audit-and-Traceability/Gate-1-Closure-Report.md) — Automated Gate 1 baseline checks and closure summary.
 - Traceability Matrices & Registers:
   - [Documentation-Inventory.csv](09-Audit-and-Traceability/Documentation-Inventory.csv)
   - [Reference-Register.csv](09-Audit-and-Traceability/Reference-Register.csv)

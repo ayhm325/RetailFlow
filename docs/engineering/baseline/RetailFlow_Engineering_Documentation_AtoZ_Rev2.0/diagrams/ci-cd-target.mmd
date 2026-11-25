@@ -1,0 +1,11 @@
+flowchart LR
+  PR[Pull Request] --> Checks[Build / Unit / Static Analysis]
+  Checks --> SQLTests[SQL Integration / Migrations]
+  SQLTests --> E2E[Playwright E2E]
+  E2E --> Scan[Dependency / Secret / Security Scans]
+  Scan --> Artifact[Immutable Artifact]
+  Artifact --> Stage[Staging via OIDC]
+  Stage --> Verify[Smoke / Health / Restore checks]
+  Verify --> Approval[Release Approval]
+  Approval --> Deploy[Production Deploy]
+  Deploy --> Observe[Post-deploy SLO / Error monitoring]

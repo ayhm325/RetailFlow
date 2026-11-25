@@ -1,0 +1,9 @@
+flowchart TB
+  Client[HTTP Client] --> Endpoints[PublicCatalogEndpoints]
+  Endpoints --> Filter[StoreResolutionEndpointFilter]
+  Filter --> Resolver[IStoreDirectoryResolver]
+  Resolver --> Db[(RetailFlowDbContext)]
+  Endpoints --> Query[IPublicCatalogQueryService]
+  Query --> Service[PublicCatalogQueryService]
+  Service --> Db
+  Db --> SQL[(SQL Server: RetailFlowProduct)]
