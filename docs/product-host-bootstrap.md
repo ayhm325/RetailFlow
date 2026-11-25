@@ -41,7 +41,7 @@ Implemented in `ProductHostExtensions.UseProductHostPipeline` and `MapProductHos
 5. **`UseDefaultFiles()` & `UseStaticFiles()`** — Serves static assets (and `index.html` at `/`) from `wwwroot` when present.
 6. **Development-only `MapOpenApi()`** — Exposes `/openapi/v1.json` only when `IsDevelopment()` is true.
 7. **Health Endpoints (`/health/live`, `/health/ready`)** — Mapped explicitly before SPA fallback.
-8. **Conditional React SPA Fallback** — Serves `wwwroot/index.html` only when it exists and only for browser navigation requests (`GET`/`HEAD`, no file extension, `Accept` allows `text/html`), explicitly excluding `/api/*` and `/health/*`.
+8. **Conditional React SPA Fallback** — Serves `wwwroot/index.html` only when it exists and only for browser navigation requests (`GET`/`HEAD`, no file extension, and typed `Accept` header negotiation explicitly accepting `text/html` with quality `q > 0`; `text/html;q=0` and `*/*`-only or malformed `Accept` values return `404`), sets `Vary: Accept`, and explicitly excludes `/api/*` and `/health/*`.
 
 ---
 
@@ -57,6 +57,8 @@ Implemented in `ProductHostExtensions.UseProductHostPipeline` and `MapProductHos
 
 - Prepared for Same-Origin deployment (`/` for React SPA, `/api/*` for API, `/health/*` for health checks).
 - Does **not** require `wwwroot` or `wwwroot/index.html` to start.
+- Uses `context.Request.GetTypedHeaders().Accept` for content negotiation: serves `index.html` only when an explicit `text/html` media type is present with effective quality `> 0` (omitted quality defaults to `1`; any explicit `text/html;q=0` rejects HTML even if `*/*;q=1` is present, and missing/malformed `Accept` headers return `404`).
+- Sets `Vary: Accept` on SPA fallback responses so caches never reuse an HTML response for a request with a different `Accept` header.
 - Unknown `/api/*` and `/health/*` routes always return `404 Not Found`, never `index.html`.
 
 ---
@@ -65,7 +67,7 @@ Implemented in `ProductHostExtensions.UseProductHostPipeline` and `MapProductHos
 
 - `appsettings.Development.json` configures `AllowedHosts` as `localhost;127.0.0.1` (Development settings file is gitignored per `.gitignore`).
 - `appsettings.json` intentionally omits `AllowedHosts` so Staging/Production environments must supply an explicit hostname.
-- Outside Development, `HostAllowedHostsValidator` (`ValidateOnStart`) fails fast at startup if `AllowedHosts` is empty, whitespace, `"*"`, or contains wildcards/slashes/spaces.
+- Outside Development, `HostFilteringAllowedHostsValidator` (`IValidateOptions<HostFilteringOptions>` with `ValidateOnStart`) fails fast at startup if `HostFilteringOptions.AllowedHosts` is empty, whitespace, `*`, `0.0.0.0`, `[::]`, leading-dot wildcards (`.domain`), or contains `*`, `/`, or whitespace.
 
 ---
 

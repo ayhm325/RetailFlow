@@ -69,8 +69,32 @@ public sealed class ProductHostIntegrationTests
         Assert.Contains("AllowedHosts", exception.Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void StagingHost_WithWildcardAllowedHosts_FailsStartup()
+    [Theory]
+    [InlineData("0.0.0.0")]
+    [InlineData("[::]")]
+    [InlineData("retail.example.com;0.0.0.0")]
+    [InlineData("retail.example.com;[::]")]
+    [InlineData("   ")]
+    [InlineData(".example.com")]
+    public void ProductionHost_WithUnsafeOrEmptyAllowedHosts_FailsStartup(string allowedHosts)
+    {
+        using var factory = CreateProductionFactory(allowedHosts);
+
+        var exception = Assert.Throws<OptionsValidationException>(() =>
+        {
+            using var _ = factory.CreateClient();
+        });
+
+        Assert.Contains("AllowedHosts", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("*")]
+    [InlineData("0.0.0.0")]
+    [InlineData("[::]")]
+    [InlineData("staging.example.com;0.0.0.0")]
+    [InlineData("staging.example.com;[::]")]
+    public void StagingHost_WithWildcardOrUnsafeAllowedHosts_FailsStartup(string allowedHosts)
     {
         using var factory = new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
@@ -80,7 +104,7 @@ public sealed class ProductHostIntegrationTests
                 {
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
-                        ["AllowedHosts"] = "*"
+                        ["AllowedHosts"] = allowedHosts
                     });
                 });
             });
@@ -191,7 +215,7 @@ public sealed class ProductHostIntegrationTests
             Assert.Equal(HttpStatusCode.OK, assetResponse.StatusCode);
             Assert.Contains("retailflow-static-asset", assetBody, StringComparison.Ordinal);
 
-            // 2. SPA fallback serves index.html for client navigation routes.
+            // 2. SPA fallback serves index.html for client navigation routes and sets Vary: Accept.
             using var spaRequest = new HttpRequestMessage(HttpMethod.Get, "/store-a/catalog");
             spaRequest.Headers.Add("Accept", "text/html");
 
@@ -199,7 +223,19 @@ public sealed class ProductHostIntegrationTests
             var spaBody = await spaResponse.Content.ReadAsStringAsync();
             Assert.Equal(HttpStatusCode.OK, spaResponse.StatusCode);
             Assert.Equal("text/html", spaResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains("Accept", spaResponse.Headers.Vary, StringComparer.OrdinalIgnoreCase);
             Assert.Contains("retailflow-test-spa", spaBody, StringComparison.Ordinal);
+
+            // 2b. HEAD request for SPA route succeeds with text/html and empty body.
+            using var headRequest = new HttpRequestMessage(HttpMethod.Head, "/store-a/catalog");
+            headRequest.Headers.Add("Accept", "text/html");
+
+            using var headResponse = await client.SendAsync(headRequest);
+            var headBody = await headResponse.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.OK, headResponse.StatusCode);
+            Assert.Equal("text/html", headResponse.Content.Headers.ContentType?.MediaType);
+            Assert.Contains("Accept", headResponse.Headers.Vary, StringComparer.OrdinalIgnoreCase);
+            Assert.Empty(headBody);
 
             // 3. Unknown /api route must return 404, never index.html.
             using var apiRequest = new HttpRequestMessage(HttpMethod.Get, "/api/not-existing");
@@ -234,6 +270,47 @@ public sealed class ProductHostIntegrationTests
             postRequest.Headers.Add("Accept", "text/html");
             using var postResponse = await client.SendAsync(postRequest);
             Assert.Equal(HttpStatusCode.NotFound, postResponse.StatusCode);
+        }
+        finally
+        {
+            DeleteTempDirectory(webRoot);
+        }
+    }
+
+    [Theory]
+    [InlineData("text/html", HttpStatusCode.OK)]
+    [InlineData("text/html;q=1", HttpStatusCode.OK)]
+    [InlineData("text/html;q=0.5", HttpStatusCode.OK)]
+    [InlineData("text/html;q=0", HttpStatusCode.NotFound)]
+    [InlineData("application/json, text/html;q=0", HttpStatusCode.NotFound)]
+    [InlineData("application/json, text/html;q=0, */*;q=1", HttpStatusCode.NotFound)]
+    [InlineData("text/html;q=0, text/html;q=0.8", HttpStatusCode.NotFound)]
+    [InlineData("application/json", HttpStatusCode.NotFound)]
+    [InlineData("*/*", HttpStatusCode.NotFound)]
+    [InlineData("invalid/media/type;;;", HttpStatusCode.NotFound)]
+    [InlineData("text/html;q=notanumber", HttpStatusCode.NotFound)]
+    public async Task SpaFallback_RespectsTypedAcceptHeaderQualityNegotiation(
+        string acceptHeader,
+        HttpStatusCode expectedStatus)
+    {
+        var webRoot = CreateTempWebRoot(withIndexHtml: true, withStaticAsset: false);
+
+        try
+        {
+            await using var factory = CreateDevelopmentFactory(webRoot);
+            using var client = CreateHttpsClient(factory, "localhost");
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/store-a/catalog");
+            request.Headers.TryAddWithoutValidation("Accept", acceptHeader);
+
+            using var response = await client.SendAsync(request);
+            Assert.Equal(expectedStatus, response.StatusCode);
+
+            if (expectedStatus == HttpStatusCode.OK)
+            {
+                Assert.Equal("text/html", response.Content.Headers.ContentType?.MediaType);
+                Assert.Contains("Accept", response.Headers.Vary, StringComparer.OrdinalIgnoreCase);
+            }
         }
         finally
         {

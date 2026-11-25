@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HostFiltering;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
+using Microsoft.Net.Http.Headers;
 
 namespace RetailFlow.Api.Hosting;
 
@@ -129,10 +130,27 @@ public static class ProductHostExtensions
                 return;
             }
 
-            var acceptHeader = context.Request.Headers.Accept.ToString();
+            // SPA fallback negotiation depends on the Accept header.
+            context.Response.Headers.Append("Vary", "Accept");
+
+            if (!MediaTypeHeaderValue.TryParseList(
+                    context.Request.Headers.Accept,
+                    out var acceptHeaders) ||
+                acceptHeaders.Count == 0)
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            var textHtmlEntries = acceptHeaders
+                .Where(mediaType => mediaType.MediaType.Equals(
+                    "text/html",
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
             var acceptsHtml =
-                !string.IsNullOrWhiteSpace(acceptHeader) &&
-                acceptHeader.Contains("text/html", StringComparison.OrdinalIgnoreCase);
+                textHtmlEntries.Length > 0 &&
+                textHtmlEntries.All(IsAcceptableHtmlMediaType);
 
             if (!acceptsHtml)
             {
@@ -161,6 +179,20 @@ public static class ProductHostExtensions
         });
 
         return app;
+    }
+
+    private static bool IsAcceptableHtmlMediaType(MediaTypeHeaderValue mediaType)
+    {
+        var hasQualityParameter = mediaType.Parameters.Any(parameter =>
+            parameter.Name.Equals("q", StringComparison.OrdinalIgnoreCase));
+
+        if (hasQualityParameter && !mediaType.Quality.HasValue)
+        {
+            return false;
+        }
+
+        var quality = mediaType.Quality ?? 1.0d;
+        return quality > 0d && quality <= 1.0d;
     }
 
     private sealed class HostFilteringAllowedHostsValidator
@@ -192,6 +224,8 @@ public static class ProductHostExtensions
             {
                 if (string.IsNullOrWhiteSpace(host) ||
                     host.StartsWith('.') ||
+                    host.Equals("0.0.0.0", StringComparison.OrdinalIgnoreCase) ||
+                    host.Equals("[::]", StringComparison.OrdinalIgnoreCase) ||
                     host.Contains('*', StringComparison.Ordinal) ||
                     host.Contains('/', StringComparison.Ordinal) ||
                     host.Any(char.IsWhiteSpace))
