@@ -15,12 +15,16 @@ public sealed class SessionTransportApiFactory
     : WebApplicationFactory<SessionTransportProgramMarker>
 {
     private readonly FakeTimeProvider _fakeTimeProvider;
+
     private readonly string _applicationName;
     private readonly string _certificatePath;
     private readonly string _certificatePassword;
 
-    public FakeTimeProvider FakeTimeProvider => _fakeTimeProvider;
+    public FakeTimeProvider FakeTimeProvider =>
+        _fakeTimeProvider;
 
+    // The ONLY public constructor.
+    // Required by xUnit IClassFixture<T>.
     public SessionTransportApiFactory()
         : this(
             RetailFlowDataProtectionDefaults.ApplicationName,
@@ -30,7 +34,8 @@ public sealed class SessionTransportApiFactory
     {
     }
 
-    public SessionTransportApiFactory(
+    // Private constructor for creating independent API instances.
+    private SessionTransportApiFactory(
         string applicationName,
         string certificatePath,
         string certificatePassword,
@@ -39,12 +44,28 @@ public sealed class SessionTransportApiFactory
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
         ArgumentException.ThrowIfNullOrWhiteSpace(certificatePath);
         ArgumentException.ThrowIfNullOrWhiteSpace(certificatePassword);
+
         ArgumentNullException.ThrowIfNull(fakeTimeProvider);
 
         _applicationName = applicationName;
         _certificatePath = certificatePath;
         _certificatePassword = certificatePassword;
+
         _fakeTimeProvider = fakeTimeProvider;
+    }
+
+    // Factory method for independent instances.
+    internal static SessionTransportApiFactory Create(
+        string applicationName,
+        string certificatePath,
+        string certificatePassword,
+        FakeTimeProvider fakeTimeProvider)
+    {
+        return new SessionTransportApiFactory(
+            applicationName,
+            certificatePath,
+            certificatePassword,
+            fakeTimeProvider);
     }
 
     private static string ConnectionString =>
@@ -63,12 +84,16 @@ public sealed class SessionTransportApiFactory
                 {
                     ["ConnectionStrings:IdentitySpike"] =
                         ConnectionString,
+
                     ["Security:BrowserCsrf:BrowserOrigin"] =
                         "https://localhost",
+
                     ["DataProtection:ApplicationName"] =
                         _applicationName,
+
                     ["DataProtection:Certificate:Path"] =
                         _certificatePath,
+
                     ["DataProtection:Certificate:Password"] =
                         _certificatePassword
                 });
@@ -85,6 +110,7 @@ public sealed class SessionTransportApiFactory
         builder.ConfigureTestServices(services =>
         {
             services.RemoveAll<TimeProvider>();
+
             services.AddSingleton<TimeProvider>(
                 _fakeTimeProvider);
         });

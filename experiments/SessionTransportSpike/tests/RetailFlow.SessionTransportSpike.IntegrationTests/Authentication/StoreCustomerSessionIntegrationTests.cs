@@ -1180,8 +1180,9 @@ public sealed class StoreCustomerSessionIntegrationTests
         var selectedCertificate =
             certificate ?? TestDataProtectionCertificates.Shared;
 
-        return new SessionTransportApiFactory(
-            applicationName ?? RetailFlowDataProtectionDefaults.ApplicationName,
+        return SessionTransportApiFactory.Create(
+            applicationName ??
+                RetailFlowDataProtectionDefaults.ApplicationName,
             selectedCertificate.Path,
             selectedCertificate.Password,
             _factory.FakeTimeProvider);
