@@ -1,0 +1,10 @@
+RequirementID,Requirement,SourceDocument,ImplementationEvidence,Tests,Status,Gap
+FR-003,Unique StoreSlug per store,Phase 02 / 04,Store.NormalizeSlug & UX_Stores_Slug,DatabaseConstraints_EnforceTenantIsolationAndDomainInvariants,Implemented and verified,None
+FR-005,Physical and OnlineOnly store types,Phase 02 / 04,StoreType enum & CK_Stores_StoreType,StoreSettings_PickupAllowedOnlyForPhysicalStores,Implemented and verified,None
+FR-010/011,Simple products with Draft/Published/Archived and optional SKU,Phase 02 / 04,Product.cs & ProductConfiguration.cs,Products_ExcludeDraftArchivedInactiveCategoryAndOtherStoreProducts_AndReactivateCleanly,Implemented and verified,Write APIs deferred
+FR-012/019,Public catalog hides Draft/Archived and inactive stores/categories,Phase 02 / 03,StoreDirectoryResolver & PublicCatalogQueryService,NonActiveStores_Return404ProblemDetails & Products_ExcludeDraftArchived...,Implemented and verified,None
+FR-020/021,Catalog search filter sort pagination and details,Phase 02 / 03,PublicCatalogEndpoints & PublicCatalogQueryService,Products_SearchFilterSortAndPagination_BehaveDeterministically,Implemented and verified,Collation-dependent case-insensitive search
+ST-03,Pickup allowed only for Physical stores,Phase 04,StoreSettings.Create & UpdateFulfillmentOptions,StoreSettings_PickupAllowedOnlyForPhysicalStores,Implemented and verified,None
+MNY-01,Currency catalog + StoreSettings + MinorUnit validation without rounding,Phase 05,Currency.cs StoreSettings.cs MoneyPrecision.cs Product.cs,ProductCreation_EnforcesStoreSettingsCurrencyPrecisionAndTenantMatch,Implemented and verified,Only 8 of ~150+ ISO currencies seeded
+FR-016..018,Per-store Customer Identity (Register/Login/Logout),Phase 02 / 06,experiments/IdentitySpike & SessionTransportSpike,49 IdentitySpike + 94 SessionTransportSpike tests,Implemented in PoC only,Not integrated into RetailFlow.Api
+FR-023..038,Cart Checkout Orders Fulfillment and Merchant Admin APIs,Phase 02 / 03 / 05,None in src/,None,Planned,Deferred to future vertical slices

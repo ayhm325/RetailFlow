@@ -25,7 +25,7 @@ Current responsibilities:
 
 ## 2. Project & Solution Structure
 
-- `RetailFlow.slnx`: Contains only `src/RetailFlow.Api` and `tests/RetailFlow.Api.IntegrationTests`.
+- `RetailFlow.slnx`: Initially created with `src/RetailFlow.Api` and `tests/RetailFlow.Api.IntegrationTests`; subsequently expanded in Vertical Slice 01 to also include `src/RetailFlow.Domain`, `src/RetailFlow.Application`, and `src/RetailFlow.Infrastructure`. See [public-store-catalog-slice.md](public-store-catalog-slice.md).
 - `experiments/IdentitySpike/` and `experiments/SessionTransportSpike/` remain independent and unreferenced.
 
 ---
@@ -47,8 +47,8 @@ Implemented in `ProductHostExtensions.UseProductHostPipeline` and `MapProductHos
 
 ## 4. Health Endpoint Semantics & Limitations
 
-- `GET /health/live`: Confirms the ASP.NET Core process and HTTP pipeline are responsive (`Predicate = _ => false`).
-- `GET /health/ready`: Filters for registrations tagged `"ready"`. **Honest limitation:** No production `DbContext` or external dependency exists in this bootstrap stage, so `/health/ready` currently returns `200 Healthy` for host readiness only and does **not** prove database availability. Tagged readiness checks will be added when database infrastructure is introduced.
+- `GET /health/live`: Confirms the ASP.NET Core process and HTTP pipeline are responsive (`Predicate = _ => false`), independent of database connectivity.
+- `GET /health/ready`: Filters for registrations tagged `"ready"`. In the initial bootstrap stage no `DbContext` existed; as of Vertical Slice 01, `DatabaseReadinessHealthCheck` is registered under `"ready"` and executes `RetailFlowDbContext.Database.CanConnectAsync`, returning `200 Healthy` when SQL Server is reachable and `503 Unhealthy` when unreachable.
 - Neither endpoint requires authentication, and neither exposes connection strings, environment variables, internal paths, secrets, or exception details.
 
 ---
@@ -85,11 +85,10 @@ Required Azure App Service configuration (to be set in App Service Configuration
 
 ---
 
-## 8. Explicitly Excluded Responsibilities
+## 8. Explicitly Excluded Responsibilities (Bootstrap Baseline)
 
-- No ASP.NET Core Identity, `UseAuthentication()`, or `UseAuthorization()`.
-- No `DbContext`, database connection strings, or EF Core migrations.
-- No business domain modules or endpoints.
+- No ASP.NET Core Identity, `UseAuthentication()`, or `UseAuthorization()` (still excluded as of Vertical Slice 01).
+- In the initial bootstrap commit (`e2ad578`), no `DbContext`, database connection strings, EF Core migrations, or business domain modules existed. Those were subsequently introduced in Vertical Slice 01 (`RetailFlowDbContext`, `ConnectionStringResolver`, `InitialCatalogSlice` / `HardenCurrencyConstraints`, and Public Store Catalog endpoints; see [public-store-catalog-slice.md](public-store-catalog-slice.md)).
 - No React frontend (`ClientApp`) or npm packages.
 - No CORS policies.
 - No Dockerfiles or Azure deployment steps.
