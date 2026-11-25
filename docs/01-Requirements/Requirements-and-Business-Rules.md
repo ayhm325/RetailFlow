@@ -1,8 +1,21 @@
 # Requirements & Business Rules
 
 **Last Verified:** `2026-11-26` | **Verified Commit:** `04392c875c275e99f4b5ee378f63b3a8b8fc541d`
+**Gate 1 Status:** Canonical registers established for `FR-001`–`FR-042`, `NFR-001`–`NFR-009`, `BR-001`–`BR-012`, `AC-01`–`AC-08`, and `UC-01`–`UC-10`.
 
-## 1. Implemented Functional Requirements (As-Is)
+## Canonical Gate 1 Registers & Specifications (Single Source of Truth)
+
+| Artifact | Purpose | Path |
+|---|---|---|
+| **Functional Requirements Matrix** | Complete `FR-001`–`FR-042` lifecycle, implementation, verification & CI evidence | [Requirements-Traceability-Matrix.csv](../09-Audit-and-Traceability/Requirements-Traceability-Matrix.csv) |
+| **Non-Functional Requirements Register** | Complete `NFR-001`–`NFR-009` targets, owners, and verification plans | [NFR-Register.csv](NFR-Register.csv) |
+| **Business Rules Traceability Matrix** | Complete `BR-001`–`BR-012` mapped to invariants, aggregates & tests | [Business-Rules-Traceability-Matrix.csv](Business-Rules-Traceability-Matrix.csv) |
+| **Acceptance Criteria Register** | Canonical `AC-01`–`AC-08` acceptance criteria | [Acceptance-Criteria.csv](Acceptance-Criteria.csv) |
+| **AC Reconciliation Report** | Resolution of `AC-07` conflict and external `AC-08`–`AC-10` status | [Acceptance-Criteria-Reconciliation.md](Acceptance-Criteria-Reconciliation.md) |
+| **Use Case Specifications** | Complete `UC-01`–`UC-10` specifications, Gherkin examples & cross-cutting rules | [Use-Case-Specifications.md](Use-Case-Specifications.md) |
+| **Change Log & Open Decisions** | Gate 1 Change Requests (`CR-G1-*`) and Open Decisions (`OD-001`–`OD-008`) | [Change-Log-and-Open-Decisions.md](../08-Engineering-Management/Change-Log-and-Open-Decisions.md) |
+
+## 1. Implemented Functional Requirements (As-Is Snapshot `04392c8`)
 
 | ID | Requirement | Implementation Evidence | Status |
 |---|---|---|---|
