@@ -3,7 +3,7 @@
 - **المسار التجريبي:** `experiments/IdentitySpike/`
 - **المرجع المعماري:** دراسة إثبات المفهوم لتعدد هوية العملاء (`Phase 06 — v1.0 — 22 نوفمبر 2026`)
 - **تاريخ آخر تحديث للتقرير:** `2026-11-25`
-- **نقطة التوقف الحالية:** اكتمل سد فجوات `ScopedUserStore` واختبارات `IdentitySpike` السابقة (`49/49`)، واكتملت اختبارات `SessionTransportSpike` بالنتائج: `63/63 Unit` و`27/27 Integration` (`90/90`)، إضافة إلى `4/4 Playwright Browser Tests`، بما في ذلك حسم قرار `Same-Origin Architecture` للـ MVP وإضافة `UseForwardedHeaders()` وعقد أمان Reverse Proxy، وإغلاق `ST-14 — Password Change / Security Stamp / Session Revocation`.
+- **نقطة التوقف الحالية:** اكتمل سد فجوات `ScopedUserStore` واختبارات `IdentitySpike` السابقة (`49/49`)، واكتملت اختبارات `SessionTransportSpike` بالنتائج: `63/63 Unit` و`27/27 Integration` (`90/90`)، إضافة إلى `4/4 Playwright Browser Tests`، بما في ذلك حسم قرار `Same-Origin Architecture` للـ MVP واعتماد نموذج الاستضافة والنشر (`Azure App Service on Linux` مع `.NET 10 LTS` المدمج، `Publish: Code` / `Framework-dependent`، و`GitHub Actions` + `OIDC` دون Custom Container أو Container Registry) وإضافة `UseForwardedHeaders()` وعقد أمان Reverse Proxy، وإغلاق `ST-14 — Password Change / Security Stamp / Session Revocation`.
   أثبتت اختبارات `SessionTransportSpike` و`Playwright`:
   - Cross-Store isolation في متصفحين/تبويبين مستقلين.
   - Cross-Site Login وLogout CSRF rejection.
@@ -13,8 +13,8 @@
   - التحقق من `ForwardedHeadersOptions` (`KnownProxies`, `ForwardLimit = 1`, `X-Forwarded-Proto`) و`Host Filtering` وحفظ خصائص Cookie دون Redirect Loop.
   - عدم تعديل سجلات `DataProtectionKeys` المشتركة أثناء تشغيل اختبارات Playwright.
   - تنظيف سجلات الاختبار إلى `0` جلسات متبقية في `AuthenticationSessionTickets`.
-  تم حسم Same-Origin Architecture للـ MVP. المتبقي هو التحقق من تنفيذ Reverse Proxy الفعلي في بيئة النشر المختارة، وقياس الأداء، وحسم سياسة تعدد الجلسات في المتصفح، وبوابات Production Readiness (`Certificate Rotation`، ونسخ PFX الاحتياطي، واختبار عمليتي OS مستقلتين، وCI).
-- **الخطوة التالية:** إجراء قياس الأداء وحسم دلالة تعدد المتاجر في المتصفح في `AUTH-ADR-01` واستكمال متطلبات Production Readiness قبل تفعيل Authentication في `IdentitySpike/Program.cs`. يجب إبقاء Authentication غير مفعّل في `IdentitySpike/Program.cs` حتى استكمال بوابات ADR واتخاذ القرار النهائي.
+  تم حسم `Same-Origin Architecture` ونموذج الاستضافة (`Azure App Service on Linux` + `.NET 10 LTS` + `GitHub Actions / OIDC`) للـ MVP. المتبقي هو التحقق من سلوك `ForwardedHeaders` الفعلي على شبكة Azure App Service (دون افتراض عناوين `KnownProxies` ثابتة)، وقياس الأداء، وحسم سياسة تعدد المتاجر في المتصفح، وبوابات Production Readiness (`Certificate Rotation`، ونسخ PFX الاحتياطي، واختبار عمليتي OS مستقلتين، وCI).
+- **الخطوة التالية:** إجراء قياس الأداء وحسم دلالة تعدد المتاجر في المتصفح في `AUTH-ADR-01` والتحقق من إعداد `ForwardedHeaders` الخاص بـ Azure App Service واستكمال متطلبات Production Readiness قبل تفعيل Authentication في `IdentitySpike/Program.cs`. يجب إبقاء Authentication غير مفعّل في `IdentitySpike/Program.cs` حتى استكمال بوابات ADR واتخاذ القرار النهائي.
 
 ### ملخص حالة المراحل
 
@@ -189,7 +189,8 @@
 - `IdentityLookupScopeAccessor lifecycle`: Verified.
 - آخر Regression كامل ناجح لحل `IdentitySpike` (`RetailFlow.IdentitySpike.slnx`): **`49 / 49` Passed** (`IdentityScopeUnitTests` = `14 / 14`، و `IdentitySqlServerIntegrationTests` = `35 / 35`، `0 Failed · 0 Skipped`).
 - آخر تشغيل ناجح لحل `SessionTransportSpike` (`RetailFlow.SessionTransportSpike.slnx`): **`90 / 90` Passed** (`UnitTests` = `63 / 63`، و `IntegrationTests` = `27 / 27`، `0 Failed · 0 Skipped`)، إضافةً إلى **`4 / 4` Passed** في Playwright (`RetailFlow.SessionTransportSpike.Playwright.slnx`).
-- **Next:** استكمال بوابات `AUTH-ADR-01` المتبقية (التحقق من تنفيذ Reverse Proxy الفعلي في بيئة النشر المختارة، واختبارات الأداء، وحسم تعدد المتاجر في المتصفح، ومتطلبات Production Readiness لـ Data Protection).
+- **قرار الاستضافة والنشر المعتمد للـ MVP (وفق `AUTH-ADR-01` القسم `5.4`):** `Azure App Service on Linux` مع `.NET 10 LTS` المدمج، ونموذج `Publish: Code` (`Framework-dependent`)، وCI/CD عبر `GitHub Actions` بمصادقة `OpenID Connect (OIDC)`، دون Custom Container أو Container Registry، مع الإبقاء على `Same-Origin Architecture` والتحقق من سلوك `ForwardedHeaders` الخاص بشبكة App Service دون افتراض `KnownProxies` ثابتة.
+- **Next:** استكمال بوابات `AUTH-ADR-01` المتبقية (التحقق من `ForwardedHeaders` على Azure App Service، واختبارات الأداء، وحسم تعدد المتاجر في المتصفح، ومتطلبات Production Readiness لـ Data Protection).
 - لا يُعد Identity Scope أو Authentication/Authorization مكتملًا إنتاجيًا حتى تنجح اختبارات التكامل السابقة وتُنفذ اختبارات الصلاحيات المطلوبة في المراحل اللاحقة.
 
 ### ز. بوابة القبول قبل Phase 07
