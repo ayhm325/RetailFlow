@@ -3,7 +3,7 @@
 | الحقل | القيمة |
 |---|---|
 | **الحالة** | **Proposed — Session Transport Spike قيد التنفيذ (قرار `Same-Origin Architecture` محسوم للـ MVP؛ CSRF + Per-Session `ITicketStore` + `TimeProvider` + `ExpiredSessionTicketCleanupService` + `Shared Data Protection Key Ring` + `Idle 15m / Absolute 8h Expiration` + `403 Authorization Policy` + `Playwright E2E (4/4)` + `ST-14` + `ForwardedHeaders / Reverse Proxy` منفذة ومختبرة؛ متبقي قياس الأداء وحسم تعدد المتاجر ومتطلبات Production Readiness)** |
-| **الإصدار** | 0.13 |
+| **الإصدار** | 0.14 |
 | **التاريخ** | 25 نوفمبر 2026 |
 | **النطاق** | Browser Authentication · StoreCustomer · BackOffice boundary |
 | **المنصة** | .NET 10 · ASP.NET Core Identity · React + TypeScript · SQL Server |
@@ -194,6 +194,43 @@ https://retailflow.app/api/stores/store-b/customers/...
    - اختبار Host Filtering.
    - اختبار الحفاظ على API Path وCookie Attributes.
    - اختبار عدم حدوث HTTPS Redirect Loop.
+
+### 5.4 Hosting and Deployment Model — MVP Decision
+
+**Decision: Azure App Service on Linux with Built-in .NET Runtime**
+
+The RetailFlow MVP will use:
+
+- Hosting Platform: Azure App Service
+- Operating System: Linux
+- Publish Model: Code
+- Runtime Stack: .NET 10 LTS
+- Deployment Model: Framework-dependent
+- CI/CD: GitHub Actions
+- Deployment Authentication: OpenID Connect (OIDC)
+- Custom Linux Container: Not required for MVP
+- Container Registry: Not required for MVP
+
+The application will be published using Release configuration
+without bundling the .NET runtime.
+
+Azure App Service provides the managed .NET runtime and
+platform-level runtime maintenance.
+
+The application does not require operating-system customization
+or additional native Linux dependencies at this stage.
+
+A future migration to Custom Container remains possible if
+specific operating-system, native-library, or runtime-control
+requirements arise.
+
+This decision does not change the Same-Origin architecture.
+
+Azure-specific Forwarded Headers configuration must be
+verified against the actual App Service networking behavior.
+Static KnownProxies addresses must not be assumed.
+
+**Status: Adopted for MVP.**
 
 ## 6. البدائل المدروسة
 
@@ -665,3 +702,4 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 | 0.11 | 2026-11-25 | إكمال Browser-Level Acceptance (`4/4` Playwright)، وإضافة Same-Site Cross-Origin Logout CSRF مع إرسال Cookie فعلية، وعزل مفاتيح `Testing` في File System مؤقت محمية بـ X.509، والتحقق من عدم تغيير `DataProtectionKeys`، وتحسين Credential Hygiene وBuild Configuration. بقي ADR `Proposed`. |
 | 0.12 | 2026-11-25 | تنفيذ `ST-14` (تغيير كلمة المرور وإبطال جميع جلسات المستخدم ذرّياً ضمن معاملة SQL مشتركة، ومزامنة `Login` مع تغيير كلمة المرور عبر `UPDLOCK, ROWLOCK` على `AspNetUsers` والتحقق من `SecurityStamp` قبل إدراج التذكرة، وتغطية إبطال `SecurityStampValidator` بعد `5m`، وتسجيل `IdentityConstants.TwoFactorRememberMeScheme` لنجاح `SignOutAsync`، وحماية `POST /password/change` بسياسة `403`، واختبارات التزامن وRollback) وتقوية `PlaywrightApiFixture.DisposeAsync()` (`85/85` في `SessionTransportSpike` + `4/4` Playwright). بقي ADR `Proposed`. |
 | 0.13 | 2026-11-25 | تثبيت قرار `Same-Origin Architecture` للـ MVP وإضافة عقد أمان Reverse Proxy (القسمان 5.2 و5.3)، وإضافة `UseForwardedHeaders()` مع `KnownProxies` الموثوقة و`ForwardLimit = 1` في `SessionTransportSpike/Program.cs` قبل `UseHttpsRedirection()` و`UseRouting()`، وتغطية `5` اختبارات تكامل لـ Reverse Proxy و`Host Filtering` (`90/90` في `SessionTransportSpike` + `4/4` Playwright). بقي ADR `Proposed`. |
+| 0.14 | 2026-11-25 | إضافة القسم `5.4 Hosting and Deployment Model — MVP Decision` (اعتماد `Azure App Service on Linux` مع `.NET 10 LTS` المدمج و`Framework-dependent` و`GitHub Actions` + `OIDC` للـ MVP، مع بقاء ADR `Proposed`). |
