@@ -186,7 +186,7 @@ public sealed class StoreCustomerSessionIntegrationTests
     }
 
     [Fact]
-    public async Task StoreACookie_CannotAuthenticateAgainstStoreB()
+    public async Task StoreACookie_CannotAccessStoreB()
     {
         var tenants = new List<TestTenant>();
 
@@ -255,27 +255,16 @@ public sealed class StoreCustomerSessionIntegrationTests
                 $"{storeBPath}/me",
                 forgedCookieHeader);
 
-            // Authentication events must reject the mismatched StoreId claim
-            // with 401 Unauthorized.
+            // The ticket belongs to a valid Store A session,
+            // but the authorization policy denies access to Store B.
             Assert.Equal(
-                HttpStatusCode.Unauthorized,
+                HttpStatusCode.Forbidden,
                 forgedResponse.StatusCode);
 
-            var forgedResponseCookies =
-                GetSetCookieHeaders(forgedResponse);
+            Assert.Null(forgedResponse.Headers.Location);
 
-            // Rejection must delete the cookie selected for Store B,
-            // using Store B's path.
-            var rejectedCookie = Assert.Single(
-                forgedResponseCookies,
-                header => header.StartsWith(
-                    $"{BuildCookieName(storeB.StoreId)}=",
-                    StringComparison.Ordinal));
-
-            Assert.Contains(
-                $"path=/api/stores/{storeB.Slug}/customers",
-                rejectedCookie,
-                StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(
+                GetSetCookieHeaders(forgedResponse));
 
             // Case 3:
             // A rejected cross-store replay must not revoke Store A's

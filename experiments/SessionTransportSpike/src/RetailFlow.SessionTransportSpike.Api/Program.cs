@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
@@ -12,6 +13,7 @@ using RetailFlow.IdentitySpike.Api.Infrastructure.Identity;
 using RetailFlow.IdentitySpike.Api.Infrastructure.Persistence;
 
 using RetailFlow.SessionTransportSpike.Api.Authentication;
+using RetailFlow.SessionTransportSpike.Api.Authorization;
 using RetailFlow.SessionTransportSpike.Api.Contracts;
 using RetailFlow.SessionTransportSpike.Api.Infrastructure.DataProtection;
 using RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence;
@@ -230,7 +232,22 @@ builder.Services.AddHostedService(
     services => services.GetRequiredService<
         ExpiredSessionTicketCleanupService>());
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(
+        RetailFlowAuthorizationPolicies.StoreCustomerScope,
+        policy =>
+        {
+            policy.RequireAuthenticatedUser();
+
+            policy.AddRequirements(
+                new StoreCustomerScopeRequirement());
+        });
+});
+
+builder.Services.AddScoped<
+    IAuthorizationHandler,
+    StoreCustomerScopeAuthorizationHandler>();
 
 // -----------------------------------------------------------------------------
 // Build Application
@@ -359,7 +376,8 @@ storeCustomerGroup.MapGet(
                 RetailFlowClaimTypes.StoreId)?.Value
         });
     })
-    .RequireAuthorization();
+    .RequireAuthorization(
+        RetailFlowAuthorizationPolicies.StoreCustomerScope);
 
 // -----------------------------------------------------------------------------
 // Logout
@@ -373,7 +391,8 @@ storeCustomerGroup.MapPost(
 
         return Results.NoContent();
     })
-    .RequireAuthorization();
+    .RequireAuthorization(
+        RetailFlowAuthorizationPolicies.StoreCustomerScope);
 
 // -----------------------------------------------------------------------------
 // Run

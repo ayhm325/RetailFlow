@@ -4,29 +4,17 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 
 using RetailFlow.IdentitySpike.Api.Domain.Identity;
-using RetailFlow.IdentitySpike.Api.Infrastructure.Identity;
 
 namespace RetailFlow.SessionTransportSpike.Api.Authentication;
 
 public sealed class StoreCustomerCookieAuthenticationEvents
     : CookieAuthenticationEvents
 {
-    private readonly IIdentityLookupScopeAccessor _scopeAccessor;
-
-    public StoreCustomerCookieAuthenticationEvents(
-        IIdentityLookupScopeAccessor scopeAccessor)
-    {
-        ArgumentNullException.ThrowIfNull(scopeAccessor);
-
-        _scopeAccessor = scopeAccessor;
-    }
-
     public override async Task ValidatePrincipal(
         CookieValidatePrincipalContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var scope = _scopeAccessor.Current;
         var principal = context.Principal;
 
         var accountKindClaims = principal?
@@ -39,16 +27,14 @@ public sealed class StoreCustomerCookieAuthenticationEvents
             .Select(claim => claim.Value)
             .ToArray();
 
-        var validScope =
-            scope is not null &&
-            scope.AccountKind == AccountKind.StoreCustomer &&
-            scope.StoreId is Guid currentStoreId &&
-            currentStoreId != Guid.Empty;
-
+        // The StoreCustomer cookie scheme only accepts
+        // structurally valid StoreCustomer identities.
         var validAccountKind =
             accountKindClaims is { Length: 1 } &&
-            accountKindClaims[0] ==
-                AccountKind.StoreCustomer.ToString();
+            string.Equals(
+                accountKindClaims[0],
+                AccountKind.StoreCustomer.ToString(),
+                StringComparison.Ordinal);
 
         Guid claimedStoreId = Guid.Empty;
 
@@ -57,26 +43,24 @@ public sealed class StoreCustomerCookieAuthenticationEvents
             Guid.TryParseExact(
                 storeIdClaims[0],
                 "D",
-                out claimedStoreId);
+                out claimedStoreId) &&
+            claimedStoreId != Guid.Empty;
 
-        if (!validScope ||
-            !validAccountKind ||
-            !validStoreClaim ||
-            claimedStoreId != scope!.StoreId!.Value)
+        if (!validAccountKind || !validStoreClaim)
         {
             context.RejectPrincipal();
 
-            // Delete only the cookie selected for the current request scope.
-            // Do NOT call SignOutAsync here:
-            // with ITicketStore, SignOutAsync also removes the server-side
-            // ticket, which could revoke a valid session belonging to
-            // another store after a cross-store replay attempt.
+            // Delete only the cookie selected for the current scope.
+            // Do not revoke a potentially valid server-side ticket.
             DeleteCurrentScopeCookie(context);
 
             return;
         }
 
-        // Keep the official ASP.NET Core Identity Security Stamp validation.
+        // A structurally valid identity is authenticated here.
+        //
+        // Whether it belongs to the current StoreId is an
+        // authorization decision handled by StoreCustomerScopePolicy.
         await SecurityStampValidator.ValidatePrincipalAsync(context);
     }
 

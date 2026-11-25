@@ -30,6 +30,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\RetailFlow.SessionTransportSpike\RetailFlow.SessionTransportSpike.csproj" />
+
+    <ProjectReference Include="..\..\src\RetailFlow.SessionTransportSpike.Api\RetailFlow.SessionTransportSpike.Api.csproj" />
   </ItemGroup>
 
 </Project>
