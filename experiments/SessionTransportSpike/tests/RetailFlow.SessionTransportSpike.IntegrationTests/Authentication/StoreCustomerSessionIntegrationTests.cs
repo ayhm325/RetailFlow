@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Time.Testing;
 
@@ -2129,15 +2130,35 @@ public sealed class StoreCustomerSessionIntegrationTests
             var allowLoginCommit = new TaskCompletionSource(
                 TaskCreationOptions.RunContinuationsAsynchronously);
 
+            var passwordChangeAttemptingLock = new TaskCompletionSource(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+
             var hook = new DelegateStoreCustomerSessionOperationHook
             {
-                OnUserRowLocked = async (userId, ct) =>
+                OnUserRowLocked = async (userId, cancellationToken) =>
                 {
-                    if (string.Equals(userId, tenant.UserId, StringComparison.Ordinal))
+                    if (string.Equals(
+                            userId,
+                            tenant.UserId,
+                            StringComparison.Ordinal))
                     {
                         loginLockedUserRow.TrySetResult();
-                        await allowLoginCommit.Task.WaitAsync(ct);
+                        await allowLoginCommit.Task.WaitAsync(
+                            cancellationToken);
                     }
+                },
+
+                BeforePasswordChangeUserRowLock = (userId, _) =>
+                {
+                    if (string.Equals(
+                            userId,
+                            tenant.UserId,
+                            StringComparison.Ordinal))
+                    {
+                        passwordChangeAttemptingLock.TrySetResult();
+                    }
+
+                    return Task.CompletedTask;
                 }
             };
 
@@ -2145,7 +2166,8 @@ public sealed class StoreCustomerSessionIntegrationTests
             {
                 builder.ConfigureTestServices(services =>
                 {
-                    services.AddSingleton<IStoreCustomerSessionOperationHook>(hook);
+                    services.AddSingleton<IStoreCustomerSessionOperationHook>(
+                        hook);
                 });
             });
 
@@ -2154,7 +2176,10 @@ public sealed class StoreCustomerSessionIntegrationTests
 
             var basePath = $"/api/stores/{tenant.Slug}/customers";
 
-            // Login enters StoreCoreAsync, locks AspNetUsers (UPDLOCK, ROWLOCK), and pauses.
+            // -----------------------------------------------------
+            // 1. Login acquires the SQL user-row lock and pauses.
+            // -----------------------------------------------------
+
             var loginTask = SendBrowserPostAsync(
                 loginClient,
                 $"{basePath}/login",
@@ -2164,10 +2189,13 @@ public sealed class StoreCustomerSessionIntegrationTests
                     Password = TestPassword
                 });
 
-            await loginLockedUserRow.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await loginLockedUserRow.Task.WaitAsync(
+                TimeSpan.FromSeconds(10));
 
-            // Start PasswordChange concurrently; it must block on SQL Server's UPDLOCK
-            // until Login commits its ticket, then delete that newly inserted ticket.
+            // -----------------------------------------------------
+            // 2. Password Change starts while Login holds the lock.
+            // -----------------------------------------------------
+
             var changeTask = SendBrowserPostAsync(
                 changeClient,
                 $"{basePath}/password/change",
@@ -2178,21 +2206,48 @@ public sealed class StoreCustomerSessionIntegrationTests
                 },
                 sessionCookie.CookieHeader);
 
-            // Give PasswordChange a moment to reach SQL Server and block on the lock.
-            await Task.Delay(250);
-            Assert.False(changeTask.IsCompleted);
+            // Ensure Password Change reached the point immediately
+            // before attempting its SQL user-row lock.
+            await passwordChangeAttemptingLock.Task.WaitAsync(
+                TimeSpan.FromSeconds(10));
+
+            // -----------------------------------------------------
+            // 3. Verify actual SQL Server blocking.
+            // -----------------------------------------------------
+
+            await WaitUntilPasswordChangeIsBlockedOnUserRowAsync(
+                TimeSpan.FromSeconds(10));
+
+            Assert.False(
+                changeTask.IsCompleted,
+                "Password Change completed while Login still held " +
+                "the SQL user-row update lock.");
+
+            // -----------------------------------------------------
+            // 4. Release Login.
+            // -----------------------------------------------------
 
             allowLoginCommit.TrySetResult();
 
             using var loginResponse = await loginTask;
             using var changeResponse = await changeTask;
 
-            Assert.Equal(HttpStatusCode.NoContent, loginResponse.StatusCode);
-            Assert.Equal(HttpStatusCode.NoContent, changeResponse.StatusCode);
-            Assert.Equal(0, await CountSessionsAsync(tenant.StoreId));
+            Assert.Equal(
+                HttpStatusCode.NoContent,
+                loginResponse.StatusCode);
 
-            // Even though Login returned a Set-Cookie before PasswordChange deleted it,
-            // that session ticket must already be revoked in SQL Server.
+            Assert.Equal(
+                HttpStatusCode.NoContent,
+                changeResponse.StatusCode);
+
+            // -----------------------------------------------------
+            // 5. Password Change must delete the ticket created by Login.
+            // -----------------------------------------------------
+
+            Assert.Equal(
+                0,
+                await CountSessionsAsync(tenant.StoreId));
+
             var racedCookie = ReadIssuedCookie(
                 loginResponse,
                 tenant.StoreId,
@@ -2203,7 +2258,9 @@ public sealed class StoreCustomerSessionIntegrationTests
                 $"{basePath}/me",
                 racedCookie.CookieHeader);
 
-            Assert.Equal(HttpStatusCode.Unauthorized, meResponse.StatusCode);
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                meResponse.StatusCode);
         }
         finally
         {
@@ -2232,25 +2289,14 @@ public sealed class StoreCustomerSessionIntegrationTests
             var before =
                 await ReadUserCredentialStateAsync(tenant.UserId);
 
-            var hook = new DelegateStoreCustomerSessionOperationHook
-            {
-                BeforePasswordChangeTicketDelete = (_, userId, _, _) =>
-                {
-                    if (string.Equals(userId, tenant.UserId, StringComparison.Ordinal))
-                    {
-                        throw new InvalidOperationException(
-                            "Simulated SQL ticket deletion failure.");
-                    }
-
-                    return Task.CompletedTask;
-                }
-            };
+            var deleteInterceptor = new FailTicketDeleteCommandInterceptor();
 
             using var faultFactory = _factory.WithWebHostBuilder(builder =>
             {
                 builder.ConfigureTestServices(services =>
                 {
-                    services.AddSingleton<IStoreCustomerSessionOperationHook>(hook);
+                    services.AddSingleton<DbCommandInterceptor>(
+                        deleteInterceptor);
                 });
             });
 
@@ -2268,18 +2314,26 @@ public sealed class StoreCustomerSessionIntegrationTests
                 },
                 cookieA.CookieHeader);
 
-            Assert.Equal(HttpStatusCode.InternalServerError, changeResponse.StatusCode);
+            Assert.Equal(
+                HttpStatusCode.InternalServerError,
+                changeResponse.StatusCode);
 
-            // Both PasswordHash and SecurityStamp must roll back completely.
+            Assert.True(
+                deleteInterceptor.WasTriggered,
+                "The AuthenticationSessionTickets DELETE command " +
+                "was not intercepted.");
+
+            // PasswordHash and SecurityStamp must remain unchanged.
             var after =
                 await ReadUserCredentialStateAsync(tenant.UserId);
 
             Assert.Equal(before.PasswordHash, after.PasswordHash);
             Assert.Equal(before.SecurityStamp, after.SecurityStamp);
 
-            // Both existing sessions must still be intact and usable.
+            // Both original sessions must still exist.
             Assert.Equal(2, await CountSessionsAsync(tenant.StoreId));
 
+            // Both original sessions must remain usable.
             using var meA = await SendAuthenticatedGetAsync(
                 clientA,
                 $"{basePath}/me",
@@ -2293,7 +2347,7 @@ public sealed class StoreCustomerSessionIntegrationTests
             Assert.Equal(HttpStatusCode.OK, meA.StatusCode);
             Assert.Equal(HttpStatusCode.OK, meB.StatusCode);
 
-            // Old password must still work; new password must be rejected.
+            // New password must not have been committed.
             using var newPasswordAttempt = await SendBrowserPostAsync(
                 clientA,
                 $"{basePath}/login",
@@ -2303,8 +2357,11 @@ public sealed class StoreCustomerSessionIntegrationTests
                     Password = ChangedPassword
                 });
 
-            Assert.Equal(HttpStatusCode.Unauthorized, newPasswordAttempt.StatusCode);
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                newPasswordAttempt.StatusCode);
 
+            // Old password must still work.
             using var freshClient = CreateStatelessClient();
             _ = await LoginCustomerAsync(freshClient, tenant, TestPassword);
         }
@@ -2312,6 +2369,59 @@ public sealed class StoreCustomerSessionIntegrationTests
         {
             await RemoveTestDataAsync(tenants);
         }
+    }
+
+    private async Task WaitUntilPasswordChangeIsBlockedOnUserRowAsync(
+        TimeSpan timeout)
+    {
+        await using var scope = _factory.Services.CreateAsyncScope();
+
+        var factory = scope.ServiceProvider
+            .GetRequiredService<IDbContextFactory<SessionTicketDbContext>>();
+
+        await using var db = await factory.CreateDbContextAsync();
+
+        await db.Database.OpenConnectionAsync();
+
+        await using var command = db.Database.GetDbConnection().CreateCommand();
+        command.CommandTimeout = 5;
+        command.CommandText = """
+            SELECT CASE WHEN EXISTS (
+                SELECT 1
+                FROM sys.dm_exec_requests AS request
+                CROSS APPLY sys.dm_exec_sql_text(request.sql_handle) AS sqlText
+                WHERE request.database_id = DB_ID()
+                  AND request.session_id <> @@SPID
+                  AND request.blocking_session_id > 0
+                  AND request.wait_type LIKE N'LCK_M_%'
+                  AND CHARINDEX(N'AspNetUsers', sqlText.text) > 0
+                  AND CHARINDEX(N'UPDLOCK', sqlText.text) > 0
+            )
+            THEN 1 ELSE 0 END;
+            """;
+
+        var deadline = DateTimeOffset.UtcNow.Add(timeout);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            var result = await command.ExecuteScalarAsync();
+
+            if (result is not null &&
+                result != DBNull.Value &&
+                Convert.ToInt32(result) == 1)
+            {
+                return;
+            }
+
+            // Polling interval only.
+            // Success depends on observing actual SQL Server blocking,
+            // not on elapsed time.
+            await Task.Delay(TimeSpan.FromMilliseconds(50));
+        }
+
+        throw new TimeoutException(
+            "SQL Server did not report Password Change waiting " +
+            "for the AspNetUsers UPDLOCK.");
     }
 
     private static HttpClient CreateStatelessClient(
@@ -2333,7 +2443,7 @@ public sealed class StoreCustomerSessionIntegrationTests
 
         public Func<string, CancellationToken, Task>? OnUserRowLocked { get; init; }
 
-        public Func<SessionTicketDbContext, string, Guid, CancellationToken, Task>? BeforePasswordChangeTicketDelete { get; init; }
+        public Func<string, CancellationToken, Task>? BeforePasswordChangeUserRowLock { get; init; }
 
         public Task OnBeforeTicketStoreTransactionAsync(
             string userId,
@@ -2347,16 +2457,10 @@ public sealed class StoreCustomerSessionIntegrationTests
             => OnUserRowLocked?.Invoke(userId, cancellationToken)
                ?? Task.CompletedTask;
 
-        public Task OnBeforePasswordChangeTicketDeleteAsync(
-            SessionTicketDbContext ticketDbContext,
+        public Task OnBeforePasswordChangeUserRowLockAsync(
             string userId,
-            Guid storeId,
             CancellationToken cancellationToken)
-            => BeforePasswordChangeTicketDelete?.Invoke(
-                   ticketDbContext,
-                   userId,
-                   storeId,
-                   cancellationToken)
+            => BeforePasswordChangeUserRowLock?.Invoke(userId, cancellationToken)
                ?? Task.CompletedTask;
     }
 

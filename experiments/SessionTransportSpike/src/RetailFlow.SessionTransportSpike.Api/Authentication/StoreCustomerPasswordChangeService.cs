@@ -2,6 +2,7 @@ using System.Data;
 
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
 
 using RetailFlow.IdentitySpike.Api.Domain.Identity;
@@ -23,11 +24,14 @@ public sealed class StoreCustomerPasswordChangeService
 
     private readonly IStoreCustomerSessionOperationHook _operationHook;
 
+    private readonly DbCommandInterceptor[] _commandInterceptors;
+
     public StoreCustomerPasswordChangeService(
         IdentitySpikeDbContext identityDbContext,
         UserManager<ApplicationUser> userManager,
         IIdentityLookupScopeAccessor scopeAccessor,
-        IStoreCustomerSessionOperationHook? operationHook = null)
+        IStoreCustomerSessionOperationHook? operationHook = null,
+        IEnumerable<DbCommandInterceptor>? commandInterceptors = null)
     {
         ArgumentNullException.ThrowIfNull(identityDbContext);
         ArgumentNullException.ThrowIfNull(userManager);
@@ -38,6 +42,8 @@ public sealed class StoreCustomerPasswordChangeService
         _scopeAccessor = scopeAccessor;
         _operationHook = operationHook
             ?? NoOpStoreCustomerSessionOperationHook.Instance;
+        _commandInterceptors = commandInterceptors?.ToArray()
+            ?? Array.Empty<DbCommandInterceptor>();
     }
 
     public async Task<IdentityResult> ChangePasswordAndRevokeSessionsAsync(
@@ -84,6 +90,13 @@ public sealed class StoreCustomerPasswordChangeService
         var sharedConnection =
             _identityDbContext.Database.GetDbConnection();
 
+        // Test synchronization point:
+        // the integration test can now observe that Password Change
+        // is about to request the SQL user-row lock.
+        await _operationHook.OnBeforePasswordChangeUserRowLockAsync(
+            user.Id,
+            cancellationToken);
+
         await AcquireUserRowUpdateLockAsync(
             sharedConnection,
             transaction.GetDbTransaction(),
@@ -92,7 +105,7 @@ public sealed class StoreCustomerPasswordChangeService
             storeId,
             cancellationToken);
 
-        var ticketOptions =
+        var ticketOptionsBuilder =
             new DbContextOptionsBuilder<SessionTicketDbContext>()
                 .UseSqlServer(
                     sharedConnection,
@@ -100,11 +113,13 @@ public sealed class StoreCustomerPasswordChangeService
                     {
                         sqlServer.MigrationsHistoryTable(
                             SessionTicketDbContextFactory.MigrationsHistoryTableName);
-                    })
-                .Options;
+                    });
+
+        // Test-only interceptors are added only when explicitly registered.
+        ticketOptionsBuilder.AddInterceptors(_commandInterceptors);
 
         await using var ticketDbContext =
-            new SessionTicketDbContext(ticketOptions);
+            new SessionTicketDbContext(ticketOptionsBuilder.Options);
 
         // Enlist the second DbContext in Identity's transaction.
         await ticketDbContext.Database.UseTransactionAsync(
@@ -132,12 +147,6 @@ public sealed class StoreCustomerPasswordChangeService
         // -------------------------------------------------------------
         // 5. Revoke every session belonging to this exact user/scope.
         // -------------------------------------------------------------
-
-        await _operationHook.OnBeforePasswordChangeTicketDeleteAsync(
-            ticketDbContext,
-            user.Id,
-            storeId,
-            cancellationToken);
 
         await ticketDbContext.AuthenticationTickets
             .Where(ticket =>

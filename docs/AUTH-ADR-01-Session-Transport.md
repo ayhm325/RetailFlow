@@ -496,8 +496,8 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
   - `SecurityStampChange_InvalidatesSessionsAtNextValidationInterval`
   - `ChangePassword_WithCrossStoreCookie_ReturnsForbidden_AndPreservesStoreASession`
   - `ConcurrentLogin_DelayedUntilAfterPasswordChange_IsRejected_AndCreatesNoSession`
-  - `ConcurrentLogin_AcquiringUserLockFirst_WaitsForPasswordChangeToDeleteNewTicket`
-  - `ChangePassword_WhenTicketDeletionFails_RollsBackPasswordAndSecurityStamp_AndPreservesSessions`
+  - `ConcurrentLogin_AcquiringUserLockFirst_WaitsForPasswordChangeToDeleteNewTicket` (يثبت انتظار تغيير كلمة المرور على `LCK_M_%` عبر `sys.dm_exec_requests` و`sys.dm_exec_sql_text` قبل تحرير `Login`)
+  - `ChangePassword_WhenTicketDeletionFails_RollsBackPasswordAndSecurityStamp_AndPreservesSessions` (يحقن `THROW 51014` في SQL Server عبر `FailTicketDeleteCommandInterceptor` (`DbCommandInterceptor`) أثناء `ExecuteDeleteAsync` ويثبت تراجع المعاملة بالكامل)
 
 ## 11. معايير قبول ADR
 

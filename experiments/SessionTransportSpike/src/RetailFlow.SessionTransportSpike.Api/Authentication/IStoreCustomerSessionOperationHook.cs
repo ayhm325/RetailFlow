@@ -1,10 +1,8 @@
-using RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence;
-
 namespace RetailFlow.SessionTransportSpike.Api.Authentication;
 
 /// <summary>
-/// Optional coordination hook used by integration tests to deterministically
-/// exercise concurrency races and transaction rollback behavior.
+/// Optional coordination hook used by integration tests
+/// to exercise session creation and password-change concurrency.
 /// </summary>
 public interface IStoreCustomerSessionOperationHook
 {
@@ -16,10 +14,8 @@ public interface IStoreCustomerSessionOperationHook
         string userId,
         CancellationToken cancellationToken);
 
-    Task OnBeforePasswordChangeTicketDeleteAsync(
-        SessionTicketDbContext ticketDbContext,
+    Task OnBeforePasswordChangeUserRowLockAsync(
         string userId,
-        Guid storeId,
         CancellationToken cancellationToken);
 }
 
@@ -39,10 +35,8 @@ public sealed class NoOpStoreCustomerSessionOperationHook
         CancellationToken cancellationToken)
         => Task.CompletedTask;
 
-    public Task OnBeforePasswordChangeTicketDeleteAsync(
-        SessionTicketDbContext ticketDbContext,
+    public Task OnBeforePasswordChangeUserRowLockAsync(
         string userId,
-        Guid storeId,
         CancellationToken cancellationToken)
         => Task.CompletedTask;
 }
