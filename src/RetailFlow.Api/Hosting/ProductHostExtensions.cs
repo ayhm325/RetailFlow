@@ -1,5 +1,8 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HostFiltering;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
@@ -22,6 +25,59 @@ public static class ProductHostExtensions
 
         services.AddProblemDetails();
         services.AddOpenApi();
+
+        services.Configure<RateLimitingOptions>(configuration.GetSection("RateLimiting"));
+        services.AddRateLimiter();
+        services.AddOptions<RateLimiterOptions>()
+            .Configure<IOptions<RateLimitingOptions>>((options, rateLimitOptions) =>
+            {
+                var settings = rateLimitOptions.Value;
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                options.OnRejected = async (context, cancellationToken) =>
+                {
+                    context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+                    {
+                        context.HttpContext.Response.Headers.RetryAfter =
+                            ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString();
+                    }
+
+                    var problemDetailsService = context.HttpContext.RequestServices.GetService<IProblemDetailsService>();
+                    if (problemDetailsService is not null)
+                    {
+                        await problemDetailsService.WriteAsync(new ProblemDetailsContext
+                        {
+                            HttpContext = context.HttpContext,
+                            ProblemDetails = new ProblemDetails
+                            {
+                                Status = StatusCodes.Status429TooManyRequests,
+                                Title = "Too Many Requests",
+                                Detail = "Rate limit exceeded. Please retry later."
+                            }
+                        });
+                    }
+                };
+
+                options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+                {
+                    if (httpContext.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return RateLimitPartition.GetNoLimiter("health");
+                    }
+
+                    var partitionKey = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                    return RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey,
+                        _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = Math.Max(1, settings.PermitLimit),
+                            Window = TimeSpan.FromSeconds(Math.Max(1, settings.WindowSeconds)),
+                            QueueLimit = 0,
+                            AutoReplenishment = true
+                        });
+                });
+            });
+
         services.AddHealthChecks()
             .AddCheck<DatabaseReadinessHealthCheck>(
                 "database",
@@ -62,7 +118,19 @@ public static class ProductHostExtensions
         // 4. HTTPS Redirection.
         app.UseHttpsRedirection();
 
-        // 5. Default Files & 6. Static Files for future React SPA assets in wwwroot.
+        // 5. Security Response Headers (OWASP A05 / ASVS V14.4).
+        app.Use(async (context, next) =>
+        {
+            context.Response.Headers.TryAdd("X-Content-Type-Options", "nosniff");
+            context.Response.Headers.TryAdd("X-Frame-Options", "DENY");
+            context.Response.Headers.TryAdd("Referrer-Policy", "strict-origin-when-cross-origin");
+            await next();
+        });
+
+        // 6. Rate Limiting (OWASP API4:2023).
+        app.UseRateLimiter();
+
+        // 7. Default Files & 8. Static Files for future React SPA assets in wwwroot.
         app.UseDefaultFiles();
         app.UseStaticFiles();
 
@@ -241,5 +309,11 @@ public static class ProductHostExtensions
 
             return ValidateOptionsResult.Success;
         }
+    }
+
+    private sealed class RateLimitingOptions
+    {
+        public int PermitLimit { get; set; } = 120;
+        public int WindowSeconds { get; set; } = 60;
     }
 }

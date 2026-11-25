@@ -65,3 +65,10 @@
 - Implemented: `IPlatformStoreService`/`PlatformStoreService` (store creation + `Approve`/`Reject`/`Suspend` lifecycle) and `AddProductImageAsync`/`RemoveProductImageAsync` in `IMerchantCatalogService`/`MerchantCatalogService`.
 - Added Docs: `docs/07-Security/OWASP-ASVS-Security-Mapping.md` (`AUD-009`) and `Reference-Register.csv` (`REF-11`, `REF-12`).
 - Verified: `dotnet build RetailFlow.slnx --configuration Release --no-restore` (`0` warnings, `0` errors), `dotnet test RetailFlow.slnx --configuration Release --no-build` (`6/6` unit + `60/60` integration pass).
+
+## 2026-11-26 — OWASP Top 10 / API Security Top 10 / ASVS Hardening & Tests (EXEC-005)
+- Type: Security Hardening, Integration Testing & OWASP Mapping on `feature/public-store-catalog-read`.
+- Implemented: Security response headers (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`) and `RateLimiter` (`429 ProblemDetails`, `/health/*` exempt) in `ProductHostExtensions.cs`.
+- Added Tests: `OwaspApiSecurityIntegrationTests.cs` (BOLA cross-store isolation, security headers, rate-limiting `429 ProblemDetails`).
+- Updated Docs: `OWASP-ASVS-Security-Mapping.md`, `Reference-Register.csv` (`REF-13`–`REF-15`), `Testing-and-Verification.md`, `CURRENT-STATE.md`, `IMPLEMENTATION-EXECUTION-LOG.md`.
+- Verified: `dotnet build RetailFlow.slnx --configuration Release --no-restore` (`0` warnings, `0` errors), `dotnet test RetailFlow.slnx --configuration Release --no-build` (`6/6` unit + `63/63` integration pass).

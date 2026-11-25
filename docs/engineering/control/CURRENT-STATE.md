@@ -19,7 +19,7 @@
 - The current product solution (`RetailFlow.slnx`) and the experimental Identity/SessionTransport solutions (`experiments/IdentitySpike/`, `experiments/SessionTransportSpike/`) remain strictly separate.
 
 ## 2. Product Host implementation facts (verified on `feature/public-store-catalog-read`)
-- **Vertical Slice 01 — Public Store Catalog & Identity Read API** is implemented and verified (`6/6` Domain unit tests + `60/60` SQL integration tests):
+- **Vertical Slice 01 — Public Store Catalog & Identity Read API** is implemented and verified (`6/6` Domain unit tests + `63/63` SQL integration tests):
   - Domain model includes `Currency`, `Store`, `StoreSettings`, `Category`, `Product`, `ProductImage`, `InventoryItem`, `DeliveryZone`, `MoneyPrecision`, and related value/status types.
   - Application contains `StoreRequestContext`, store resolution abstractions, catalog query/read contracts (`PublicStoreIdentityDto`, `PublicDeliveryZonesResponse`), and internal tenant-scoped management contracts (`IMerchantStoreService`, `IMerchantCatalogService`, `IPlatformStoreService`).
   - Infrastructure contains `RetailFlowDbContext`, SQL Server persistence, EF Core mappings, 3 migrations (including `20261125232250_AddStoreBrandingAddressesAndDeliveryZones`), `ConnectionStringResolver`, `StoreDirectoryResolver`, `MerchantStoreService`, `MerchantCatalogService`, and `PlatformStoreService`.
