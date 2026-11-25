@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +13,7 @@ using RetailFlow.IdentitySpike.Api.Infrastructure.Persistence;
 
 using RetailFlow.SessionTransportSpike.Api.Authentication;
 using RetailFlow.SessionTransportSpike.Api.Contracts;
+using RetailFlow.SessionTransportSpike.Api.Infrastructure.DataProtection;
 using RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence;
 using RetailFlow.SessionTransportSpike.Authentication;
 
@@ -57,10 +59,28 @@ builder.Services.AddScoped<
     IdentityScopeResolver>();
 
 // -----------------------------------------------------------------------------
-// Data Protection
+// Shared Data Protection
 // -----------------------------------------------------------------------------
 
-builder.Services.AddDataProtection();
+var dataProtectionApplicationName =
+    builder.Configuration["DataProtection:ApplicationName"]
+    ?? RetailFlowDataProtectionDefaults.ApplicationName;
+
+if (string.IsNullOrWhiteSpace(dataProtectionApplicationName))
+{
+    throw new InvalidOperationException(
+        "Data Protection ApplicationName cannot be empty.");
+}
+
+using var dataProtectionCertificate = DataProtectionCertificateLoader.Load(
+    builder.Configuration);
+
+builder.Services
+    .AddDataProtection()
+    .SetApplicationName(dataProtectionApplicationName)
+    .PersistKeysToDbContext<SessionTicketDbContext>()
+    .ProtectKeysWithCertificate(dataProtectionCertificate)
+    .UnprotectKeysWithAnyCertificate(dataProtectionCertificate);
 
 // -----------------------------------------------------------------------------
 // ASP.NET Core Identity

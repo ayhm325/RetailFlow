@@ -7,15 +7,45 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 
+using RetailFlow.SessionTransportSpike.Api.Infrastructure.DataProtection;
+
 namespace RetailFlow.SessionTransportSpike.IntegrationTests.Infrastructure;
 
 public sealed class SessionTransportApiFactory
     : WebApplicationFactory<SessionTransportProgramMarker>
 {
-    private readonly FakeTimeProvider _fakeTimeProvider =
-        new(DateTimeOffset.UtcNow);
+    private readonly FakeTimeProvider _fakeTimeProvider;
+    private readonly string _applicationName;
+    private readonly string _certificatePath;
+    private readonly string _certificatePassword;
 
     public FakeTimeProvider FakeTimeProvider => _fakeTimeProvider;
+
+    public SessionTransportApiFactory()
+        : this(
+            RetailFlowDataProtectionDefaults.ApplicationName,
+            TestDataProtectionCertificates.Shared.Path,
+            TestDataProtectionCertificates.Shared.Password,
+            new FakeTimeProvider(DateTimeOffset.UtcNow))
+    {
+    }
+
+    public SessionTransportApiFactory(
+        string applicationName,
+        string certificatePath,
+        string certificatePassword,
+        FakeTimeProvider fakeTimeProvider)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(certificatePath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(certificatePassword);
+        ArgumentNullException.ThrowIfNull(fakeTimeProvider);
+
+        _applicationName = applicationName;
+        _certificatePath = certificatePath;
+        _certificatePassword = certificatePassword;
+        _fakeTimeProvider = fakeTimeProvider;
+    }
 
     private static string ConnectionString =>
         Environment.GetEnvironmentVariable(
@@ -34,7 +64,13 @@ public sealed class SessionTransportApiFactory
                     ["ConnectionStrings:IdentitySpike"] =
                         ConnectionString,
                     ["Security:BrowserCsrf:BrowserOrigin"] =
-                        "https://localhost"
+                        "https://localhost",
+                    ["DataProtection:ApplicationName"] =
+                        _applicationName,
+                    ["DataProtection:Certificate:Path"] =
+                        _certificatePath,
+                    ["DataProtection:Certificate:Password"] =
+                        _certificatePassword
                 });
         });
 
@@ -48,8 +84,6 @@ public sealed class SessionTransportApiFactory
 
         builder.ConfigureTestServices(services =>
         {
-            // Replace the production system clock with one shared
-            // controllable clock for Cookie Authentication and Ticket Store.
             services.RemoveAll<TimeProvider>();
             services.AddSingleton<TimeProvider>(
                 _fakeTimeProvider);

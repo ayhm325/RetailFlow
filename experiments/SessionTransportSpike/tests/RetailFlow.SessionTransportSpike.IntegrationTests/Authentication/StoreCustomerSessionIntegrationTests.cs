@@ -12,6 +12,7 @@ using RetailFlow.IdentitySpike.Api.Domain.Identity;
 using RetailFlow.IdentitySpike.Api.Domain.Stores;
 using RetailFlow.IdentitySpike.Api.Infrastructure.Identity;
 using RetailFlow.IdentitySpike.Api.Infrastructure.Persistence;
+using RetailFlow.SessionTransportSpike.Api.Infrastructure.DataProtection;
 using RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence;
 using RetailFlow.SessionTransportSpike.Authentication;
 using RetailFlow.SessionTransportSpike.IntegrationTests.Infrastructure;
@@ -978,6 +979,257 @@ public sealed class StoreCustomerSessionIntegrationTests
         {
             await RemoveTestDataAsync(tenants);
         }
+    }
+
+    [Fact]
+    public async Task InstanceA_CookieAndTicket_AreReadableByInstanceB_AndAfterRestart()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            using var clientA = CreateStatelessClient();
+
+            var tenant = await CreateTenantAsync(
+                "dataprotection-multi-instance");
+
+            tenants.Add(tenant);
+
+            // Instance A: Login.
+            var originalCookie = await LoginCustomerAsync(
+                clientA,
+                tenant);
+
+            var originalSession = await ReadSingleSessionAsync(tenant);
+
+            Assert.NotEmpty(originalSession.ProtectedTicket);
+
+            var initialKeyCount = await CountDataProtectionKeysAsync();
+            Assert.True(initialKeyCount > 0);
+
+            // Instance B: Independent host and independent DataProtectionProvider.
+            using (var instanceB = CreateDataProtectionInstance())
+            {
+                using var clientB = CreateStatelessClient(instanceB);
+
+                // Directly retrieve and unprotect the SQL AuthenticationTicket.
+                var ticketStoreB = instanceB.Services
+                    .GetRequiredService<ITicketStore>();
+
+                var recoveredTicket = await ticketStoreB.RetrieveAsync(
+                    originalSession.Key);
+
+                Assert.NotNull(recoveredTicket);
+
+                Assert.Equal(
+                    tenant.UserId,
+                    recoveredTicket.Principal.FindFirst(
+                        System.Security.Claims.ClaimTypes.NameIdentifier)?.Value);
+
+                // Full HTTP flow also verifies Cookie unprotection.
+                using var responseB = await SendAuthenticatedGetAsync(
+                    clientB,
+                    $"/api/stores/{tenant.Slug}/customers/me",
+                    originalCookie.CookieHeader);
+
+                Assert.Equal(
+                    HttpStatusCode.OK,
+                    responseB.StatusCode);
+            }
+
+            // Instance C: Fresh host after B has been shut down.
+            using (var instanceC = CreateDataProtectionInstance())
+            {
+                using var clientC = CreateStatelessClient(instanceC);
+
+                var ticketStoreC = instanceC.Services
+                    .GetRequiredService<ITicketStore>();
+
+                var recoveredTicket = await ticketStoreC.RetrieveAsync(
+                    originalSession.Key);
+
+                Assert.NotNull(recoveredTicket);
+
+                Assert.Equal(
+                    tenant.UserId,
+                    recoveredTicket.Principal.FindFirst(
+                        System.Security.Claims.ClaimTypes.NameIdentifier)?.Value);
+
+                using var responseC = await SendAuthenticatedGetAsync(
+                    clientC,
+                    $"/api/stores/{tenant.Slug}/customers/me",
+                    originalCookie.CookieHeader);
+
+                Assert.Equal(
+                    HttpStatusCode.OK,
+                    responseC.StatusCode);
+            }
+
+            // No new session or key ring should be generated just because
+            // another API instance was started.
+            Assert.Equal(1, await CountSessionsAsync(tenant.StoreId));
+
+            Assert.Equal(
+                initialKeyCount,
+                await CountDataProtectionKeysAsync());
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task DifferentApplicationName_CannotUnprotectCookieOrTicket()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            using var clientA = CreateStatelessClient();
+
+            var tenant = await CreateTenantAsync(
+                "dataprotection-wrong-app");
+
+            tenants.Add(tenant);
+
+            var originalCookie = await LoginCustomerAsync(
+                clientA,
+                tenant);
+
+            var session = await ReadSingleSessionAsync(tenant);
+
+            using var wrongInstance = CreateDataProtectionInstance(
+                applicationName: "RetailFlow.Auth.Wrong");
+
+            using var wrongClient = CreateStatelessClient(wrongInstance);
+
+            var ticketStore = wrongInstance.Services
+                .GetRequiredService<ITicketStore>();
+
+            var ticket = await ticketStore.RetrieveAsync(session.Key);
+
+            Assert.Null(ticket);
+
+            using var response = await SendAuthenticatedGetAsync(
+                wrongClient,
+                $"/api/stores/{tenant.Slug}/customers/me",
+                originalCookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                response.StatusCode);
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task WrongCertificate_CannotUnprotectCookieOrTicket()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            using var clientA = CreateStatelessClient();
+
+            var tenant = await CreateTenantAsync(
+                "dataprotection-wrong-cert");
+
+            tenants.Add(tenant);
+
+            var originalCookie = await LoginCustomerAsync(
+                clientA,
+                tenant);
+
+            var session = await ReadSingleSessionAsync(tenant);
+
+            using var wrongInstance = CreateDataProtectionInstance(
+                certificate: TestDataProtectionCertificates.Wrong);
+
+            using var wrongClient = CreateStatelessClient(wrongInstance);
+
+            var ticketStore = wrongInstance.Services
+                .GetRequiredService<ITicketStore>();
+
+            var ticket = await ticketStore.RetrieveAsync(session.Key);
+
+            Assert.Null(ticket);
+
+            using var response = await SendAuthenticatedGetAsync(
+                wrongClient,
+                $"/api/stores/{tenant.Slug}/customers/me",
+                originalCookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                response.StatusCode);
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    private SessionTransportApiFactory CreateDataProtectionInstance(
+        string? applicationName = null,
+        TestDataProtectionCertificate? certificate = null)
+    {
+        var selectedCertificate =
+            certificate ?? TestDataProtectionCertificates.Shared;
+
+        return new SessionTransportApiFactory(
+            applicationName ?? RetailFlowDataProtectionDefaults.ApplicationName,
+            selectedCertificate.Path,
+            selectedCertificate.Password,
+            _factory.FakeTimeProvider);
+    }
+
+    private static HttpClient CreateStatelessClient(
+        SessionTransportApiFactory factory)
+    {
+        return factory.CreateClient(
+            new WebApplicationFactoryClientOptions
+            {
+                BaseAddress = new Uri("https://localhost"),
+                AllowAutoRedirect = false,
+                HandleCookies = false
+            });
+    }
+
+    private async Task<int> CountDataProtectionKeysAsync()
+    {
+        await using var scope =
+            _factory.Services.CreateAsyncScope();
+
+        var factory = scope.ServiceProvider
+            .GetRequiredService<
+                IDbContextFactory<SessionTicketDbContext>>();
+
+        await using var db = await factory.CreateDbContextAsync();
+
+        var keys = await db.DataProtectionKeys
+            .AsNoTracking()
+            .ToListAsync();
+
+        Assert.NotEmpty(keys);
+
+        foreach (var key in keys)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(key.Xml));
+
+            var document = System.Xml.Linq.XDocument.Parse(key.Xml!);
+
+            Assert.True(
+                document.Descendants().Any(
+                    element => element.Name.LocalName == "encryptedSecret"),
+                "A Data Protection key was stored without the expected " +
+                "certificate-encrypted secret.");
+        }
+
+        return keys.Count;
     }
 
     private HttpClient CreateClient()
