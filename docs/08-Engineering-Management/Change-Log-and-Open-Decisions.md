@@ -57,18 +57,18 @@ This register records every material requirement/acceptance change request (`CR-
 
 ---
 
-### CR-G1-004 — Document Missing External `registers/acceptance-criteria.csv` (`AC-08..AC-10`)
-- **Status:** `Open (Awaiting External Baseline Artifact or PO Confirmation)`
-- **Source / Problem (`AUD-001`):** Gate 1 brief references `AC-08..AC-10` from an external `registers/acceptance-criteria.csv` that does not exist in the local workspace.
-- **Current Requirement:** Local Phase 02 contains `AC-01`–`AC-07`; `AC-08` was reconstructed from audit/implementation evidence. `AC-09` and `AC-10` definitions are not present locally.
-- **Proposed Change:** Record `AC-09` and `AC-10` as unverified external references in [Acceptance-Criteria-Reconciliation.md](../01-Requirements/Acceptance-Criteria-Reconciliation.md) rather than fabricating their text.
-- **Rationale / Evidence:** Gate 1 rule prohibits inventing missing requirements or evidence.
-- **Options Considered:** (A) Guess `AC-09`/`AC-10` from memory (prohibited); (B) Record absence explicitly and escalate (selected).
-- **Impact Analysis:** No fabrication in `Acceptance-Criteria.csv`; tracked until external register is supplied or closed by PO.
-- **Related IDs:** `AC-08`, `AC-09`, `AC-10`, `AUD-001`
+### CR-G1-004 — Reconcile Rev2.0 `registers/acceptance-criteria.csv` (`AC-07`–`AC-10`)
+- **Status:** `Open (Pending PO Confirmation)`
+- **Source / Problem (`AUD-001`):** Rev2.0 [acceptance-criteria.csv](../engineering/baseline/RetailFlow_Engineering_Documentation_AtoZ_Rev2.0/registers/acceptance-criteria.csv) (imported in `2c020de`) defines `AC-07` as *Operational recovery*, `AC-08` as *Session security*, `AC-09` as *API error contract*, and `AC-10` as *Release traceability*, whereas Phase 02 defines `AC-01`–`AC-07` differently.
+- **Current Requirement:** Canonical [Acceptance-Criteria.csv](../01-Requirements/Acceptance-Criteria.csv) holds `AC-01`–`AC-08` (`AC-08` = Operational recovery / backup & Data Protection key recovery).
+- **Proposed Change:** Map Rev2.0 `AC-07` -> `AC-08` (done in [Acceptance-Criteria-Reconciliation.md](../01-Requirements/Acceptance-Criteria-Reconciliation.md)), and request Product Owner approval to promote Rev2.0 `AC-08` (*Session security*), `AC-09` (*API error contract*), and `AC-10` (*Release traceability*) into `Acceptance-Criteria.csv` as `AC-09`–`AC-11`.
+- **Rationale / Evidence:** Preserves Phase 02 IDs without collision while capturing all Rev2.0 operational/security acceptance criteria now present in the repository.
+- **Options Considered:** (A) Overwrite Phase 02 IDs (rejected: breaks `BR-012`/`UC-10`); (B) Append non-colliding IDs `AC-09`–`AC-11` after PO approval (selected).
+- **Impact Analysis:** Documentation-only register reconciliation; zero code impact.
+- **Related IDs:** `AC-07`, `AC-08`, `AUD-001`, `OD-007`
 - **Owner / Approver:** Product Owner / Technical Documentation Architect
 - **Date:** `2026-11-26`
-- **Verification Plan:** `Acceptance-Criteria-Reconciliation.md` explicitly documents the missing file and pending disposition.
+- **Verification Plan:** Verified in [Acceptance-Criteria-Reconciliation.md](../01-Requirements/Acceptance-Criteria-Reconciliation.md) and `scripts/validate-gate1-baseline.ps1`.
 
 ---
 
@@ -82,5 +82,5 @@ This register records every material requirement/acceptance change request (`CR-
 | **OD-004** | Delivery GeoAreas & Fee Schedule (Jordan) | What is the canonical list of Jordan governorates/areas (`DeliveryZone`) and fee/minimum-order rules supported at MVP launch? | `FR-039`, `FR-040`, `FR-041`, `FR-042`, `UC-03`, `UC-08` | Product Owner | Gate 2 / Gate 4 | `Pending Product Owner Approval` |
 | **OD-005** | Proof of Delivery / Pickup Evidence | What minimum confirmation data (timestamp, recipient name, optional note/OTP) must be recorded when marking an order `Delivered` or `PickedUp`? | `FR-034`, `FR-035`, `OR-05`, `UC-09` | Product Owner | Gate 2 / Gate 4 | `Pending Product Owner Approval` |
 | **OD-006** | Production Session Transport (`AUTH-ADR-01`) | Approve or revise `AUTH-ADR-01` (currently `Proposed`, v0.14) before integrating `UC-01`, `UC-02`, `UC-05`, and protected write APIs. | `FR-016`–`FR-018`, `NFR-001`, `ID-01`–`ID-03`, `UC-01`, `UC-02`, `UC-05` | Security & Architecture Owners | Gate 3 | `Pending Engineering/Security Approval` |
-| **OD-007** | External `registers/acceptance-criteria.csv` (`AC-09`, `AC-10`) | Provide the external `registers/acceptance-criteria.csv` (or `Master_Engineering_Handbook_AR` Rev 2.0.0) if `AC-09`/`AC-10` exist outside the repo, or confirm closure with `AC-01`–`AC-08`. | `AC-08`, `AC-09`, `AC-10`, `AUD-001` | Product Owner / Doc Owner | Gate 1 / Gate 2 | `Pending Product Owner Confirmation` |
+| **OD-007** | Promote Rev2.0 `AC-08..AC-10` into Canonical Register | Confirm whether to promote Rev2.0 `AC-08` (Session security), `AC-09` (API error contract), and `AC-10` (Release traceability) from `docs/engineering/baseline/.../registers/acceptance-criteria.csv` into `Acceptance-Criteria.csv` as `AC-09`–`AC-11`. | `AC-07`, `AC-08`, `AUD-001`, `CR-G1-004` | Product Owner / Doc Owner | Gate 1 / Gate 2 | `Pending Product Owner Confirmation` |
 | **OD-008** | Automated Order/Cart Concurrency & Idempotency Standard | Confirm standard concurrency mechanism (`RowVersion` vs pessimistic lock) and `Idempotency-Key` storage/TTL for `UC-08` and `UC-10`. | `FR-030`, `FR-031`, `FR-036`, `NFR-004`, `TX-01`, `INV-01`, `OR-09` | Principal Software Architect | Gate 2 / Gate 4 | `Pending Architecture Approval` |

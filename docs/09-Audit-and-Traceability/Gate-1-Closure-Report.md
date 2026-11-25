@@ -19,7 +19,7 @@
 - **Remote Operations:** None (no `git push`, no Pull Request, `main` untouched).
 - **Gate 2–4 Items:** Not modified; dependencies and open decisions recorded in [Change-Log-and-Open-Decisions.md](../08-Engineering-Management/Change-Log-and-Open-Decisions.md).
 
-## 3. Missing External Inputs & Open Decisions
+## 3. Imported Rev2.0 Artifacts & Open Decisions
 
-1. **Missing Local Files Referenced in Brief:** `Master_Engineering_Handbook_AR` (Rev 2.0.0), `Documentation_to_Code_Audit_AR` (Rev 1.0), and `registers/acceptance-criteria.csv` (`AC-09`, `AC-10`) were not present in the local workspace or `Downloads`; recorded explicitly under `CR-G1-004` / `OD-007` without fabrication.
-2. **Product & Architecture Open Decisions (`OD-001`–`OD-008`):** Reservation expiry, customer cancellation cutoff, merchant rejection reasons, Jordan delivery GeoAreas, proof-of-delivery minimum data, `AUTH-ADR-01` approval, and order concurrency/idempotency standard remain explicitly open for Product Owner / Architecture sign-off in Gates 2–4.
+1. **Rev2.0 Baseline & Audit Bundle:** `Master_Engineering_Handbook_AR`, `Documentation_to_Code_Audit_AR`, and `registers/acceptance-criteria.csv` were imported into `docs/engineering/` in PR #3 (`e204c9e`) and reconciled in [Acceptance-Criteria-Reconciliation.md](../01-Requirements/Acceptance-Criteria-Reconciliation.md) (`CR-G1-004` / `OD-007`).
+2. **Product & Architecture Open Decisions (`OD-001`–`OD-008`):** Reservation expiry, customer cancellation cutoff, merchant rejection reasons, Jordan delivery GeoAreas, proof-of-delivery minimum data, `AUTH-ADR-01` approval, Rev2.0 `AC-08..AC-10` promotion, and order concurrency/idempotency standard remain explicitly open for Product Owner / Architecture sign-off in Gates 2–4.

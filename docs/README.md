@@ -4,6 +4,8 @@
 
 This directory is the single, evidence-based engineering knowledge base for RetailFlow. Every document separates **Current State (As-Is)**, **Target State (To-Be)**, and **Gaps**.
 
+- **Repository Contract & Operating Memory:** [AGENTS.md](../AGENTS.md) | [docs/engineering/README.md](engineering/README.md)
+
 ## Documentation Index
 
 ### Overview & Requirements

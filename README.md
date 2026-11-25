@@ -3,6 +3,7 @@
 RetailFlow is a multi-tenant e-commerce SaaS platform built with **.NET 10 LTS** (`10.0.404` SDK / `10.0.15` packages), **ASP.NET Core Web API**, **EF Core**, and **SQL Server** using a **Modular Monolith** architecture (`Shared Database + Shared Schema + StoreId`).
 
 - **Documentation Entry Point:** [docs/README.md](docs/README.md)
+- **Engineering Operating Memory & Control State:** [AGENTS.md](AGENTS.md) | [docs/engineering/README.md](docs/engineering/README.md)
 - **Production Solution:** [RetailFlow.slnx](RetailFlow.slnx)
 - **CI Workflow:** [.github/workflows/ci.yml](.github/workflows/ci.yml)
 
