@@ -4,8 +4,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 using RetailFlow.Application.Catalog;
+using RetailFlow.Application.Identity;
+using RetailFlow.Application.Orders;
 using RetailFlow.Application.Stores;
 using RetailFlow.Infrastructure.Catalog;
+using RetailFlow.Infrastructure.Identity;
+using RetailFlow.Infrastructure.Orders;
 using RetailFlow.Infrastructure.Persistence;
 using RetailFlow.Infrastructure.Stores;
 
@@ -46,6 +50,10 @@ public static class DependencyInjection
         services.AddScoped<IMerchantStoreService, MerchantStoreService>();
         services.AddScoped<IMerchantCatalogService, MerchantCatalogService>();
         services.AddScoped<IPlatformStoreService, PlatformStoreService>();
+        services.AddScoped<ICartService, CartService>();
+        services.AddScoped<ICheckoutService, CheckoutService>();
+        services.AddScoped<IOrderService, OrderService>();
+        services.AddScoped<IAuthService, AuthService>();
 
         return services;
     }

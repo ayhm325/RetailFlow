@@ -18,10 +18,10 @@
 
 ---
 
-## 2. Target / PoC Security Controls (Pending `AUTH-ADR-01` Acceptance)
+## 2. Authentication, Session Transport & Access Control (`AUTH-ADR-01` Accepted)
 
-| ASVS / OWASP Area | Target / PoC Control | Current Status |
-|---|---|---|
-| **V2 / V3 Authentication & Session Management** (`AUTH-ADR-01`, `OD-006`) | Cookie + server-side `ITicketStore` + Data Protection key ring + `UserStore` composite `(StoreId, NormalizedUserName/Email)`. | **PoC Verified (`IdentitySpike`, `SessionTransportSpike`) — Not Activated in Product Host** |
-| **V4.2 CSRF Protection** (`REF-06`) | `SameSite=Lax`, `X-CSRF` / anti-forgery token, and `Origin`/`Referer` validation for Same-Origin unsafe HTTP methods. | **PoC Verified (`BrowserCsrfProtectionMiddleware`) — Pending Product Host Auth Integration** |
-| **V4.1 Access Control** (`NFR-001`) | Role & `StoreId` claim authorization on Merchant/Admin/Customer HTTP endpoints. | **Pending `AUTH-ADR-01` Approval** (no unauthenticated write HTTP endpoints exposed) |
+| Standard Mapping | Control & Implementation | Verified Evidence (Tests & Code) | Status |
+|---|---|---|---|
+| **V2 / V3 Auth & Session Management** (`AUTH-ADR-01`, `OD-006`) | `__Host-RetailFlow.Session` (`HttpOnly`, `SameSite=Lax`, `SecurePolicy=Always`), SQL-backed `SqlSessionTicketStore : ITicketStore`, PBKDF2-SHA256 (310,000 iterations, constant-time compare), `AppUsers` tenant-scoped unique email. | `AuthEndpoints.cs`, `SqlSessionTicketStore.cs`, `PasswordHasherService.cs`, `EndToEndCommerceAuthIntegrationTests` | **Implemented & Verified** |
+| **V4.2 / A01 CSRF Protection** (`REF-06`) | Unsafe HTTP methods (`POST`/`PUT`/`DELETE`/`PATCH`) for cookie-authenticated requests require `X-CSRF: 1` header; missing header returns `403 ProblemDetails`. | `ProductHostExtensions.cs`, `UnauthenticatedAndCsrfMissingRequests_AreRejectedWith401And403` | **Implemented & Verified** |
+| **V4.1 / API1:2023 Access Control** (`NFR-001`) | Role policies (`Customer`, `MerchantOwner`, `PlatformAdmin`) + `TenantClaimMatchEndpointFilter` verifying `"store_id"` claim matches resolved `{slug}` store. | `MerchantEndpoints.cs`, `CustomerOrderEndpoints.cs`, `PlatformAdminEndpoints.cs`, `FullCommerceFlow_Auth_Bola_Idempotency_Od002Cancel_And_Od001Expiry_AllVerified` | **Implemented & Verified** |

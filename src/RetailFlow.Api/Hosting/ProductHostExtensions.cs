@@ -1,4 +1,6 @@
+using System.Security.Claims;
 using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HostFiltering;
 using Microsoft.AspNetCore.Mvc;
@@ -6,6 +8,8 @@ using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
+using RetailFlow.Api.Auth;
+using RetailFlow.Domain.Identity;
 
 namespace RetailFlow.Api.Hosting;
 
@@ -25,6 +29,41 @@ public static class ProductHostExtensions
 
         services.AddProblemDetails();
         services.AddOpenApi();
+
+        services.AddSingleton<ITicketStore, SqlSessionTicketStore>();
+        services
+            .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+            .AddCookie(options =>
+            {
+                options.Cookie.Name = "__Host-RetailFlow.Session";
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+                options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                options.Cookie.Path = "/";
+                options.SlidingExpiration = true;
+                options.ExpireTimeSpan = TimeSpan.FromHours(12);
+                options.Events = new CookieAuthenticationEvents
+                {
+                    OnRedirectToLogin = ctx =>
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                        return Task.CompletedTask;
+                    },
+                    OnRedirectToAccessDenied = ctx =>
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        return Task.CompletedTask;
+                    }
+                };
+            });
+
+        services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
+            .Configure<ITicketStore>((options, ticketStore) => options.SessionStore = ticketStore);
+
+        services.AddAuthorizationBuilder()
+            .AddPolicy("Customer", policy => policy.RequireRole(nameof(AppRole.Customer)))
+            .AddPolicy("MerchantOwner", policy => policy.RequireRole(nameof(AppRole.MerchantOwner)))
+            .AddPolicy("PlatformAdmin", policy => policy.RequireRole(nameof(AppRole.PlatformAdmin)));
 
         services.Configure<RateLimitingOptions>(configuration.GetSection("RateLimiting"));
         services.AddRateLimiter();
@@ -130,7 +169,43 @@ public static class ProductHostExtensions
         // 6. Rate Limiting (OWASP API4:2023).
         app.UseRateLimiter();
 
-        // 7. Default Files & 8. Static Files for future React SPA assets in wwwroot.
+        // 7. Authentication, CSRF Protection (OWASP REF-06), & Authorization (AUTH-ADR-01).
+        app.UseAuthentication();
+        app.Use(async (context, next) =>
+        {
+            var isUnsafeMethod =
+                !HttpMethods.IsGet(context.Request.Method) &&
+                !HttpMethods.IsHead(context.Request.Method) &&
+                !HttpMethods.IsOptions(context.Request.Method);
+
+            if (isUnsafeMethod &&
+                context.User.Identity?.IsAuthenticated == true &&
+                !string.Equals(context.Request.Headers["X-CSRF"].FirstOrDefault(), "1", StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                var problemDetailsService = context.RequestServices.GetService<IProblemDetailsService>();
+                if (problemDetailsService is not null)
+                {
+                    await problemDetailsService.WriteAsync(new ProblemDetailsContext
+                    {
+                        HttpContext = context,
+                        ProblemDetails = new ProblemDetails
+                        {
+                            Status = StatusCodes.Status403Forbidden,
+                            Title = "CSRF Validation Failed",
+                            Detail = "Missing or invalid X-CSRF header for authenticated state-changing request."
+                        }
+                    });
+                }
+
+                return;
+            }
+
+            await next();
+        });
+        app.UseAuthorization();
+
+        // 8. Default Files & 9. Static Files for future React SPA assets in wwwroot.
         app.UseDefaultFiles();
         app.UseStaticFiles();
 

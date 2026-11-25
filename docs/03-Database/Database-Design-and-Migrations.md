@@ -8,6 +8,8 @@
   1. `20261125123923_InitialCatalogSlice`: Creates `Currencies`, `Stores`, `StoreSettings`, `Categories`, `Products`, `ProductImages`, `InventoryItems`, and seeds 8 ISO 4217 currencies.
   2. `20261125130511_HardenCurrencyConstraints`: Adds `UX_Currencies_NumericCode` and updates `CK_Currencies_Code_Format` to enforce uppercase ASCII via `COLLATE Latin1_General_BIN2`.
   3. `20261125232250_AddStoreBrandingAddressesAndDeliveryZones`: Adds branding columns to `Stores` (`LogoUrl`, `PrimaryColor`, `ContactEmail`, `ContactPhone`), address columns to `StoreSettings` (`PublicAddress`, `FulfillmentAddress`), and creates `DeliveryZones` with tenant-scoped uniqueness and non-negative fee constraints.
+  4. `20261125234743_AddCartOrdersAndCheckoutIdempotency` (exact timestamped filename in `Persistence/Migrations/`): Creates `Carts`, `CartItems`, `Orders`, `OrderItems`, `OrderStatusHistories`, and `CheckoutRequests` (`ADR-0005`, `ADR-0006`).
+  5. `AddIdentityAndSessionTickets`: Creates `AppUsers` and `SessionTickets` (`AUTH-ADR-01`).
 
 ## 2. Tables, Keys & Constraints
 
@@ -21,6 +23,10 @@
 | `ProductImages` | `PK_ProductImages (Id)` | — | `FK_ProductImages_Products_StoreId_ProductId` | — |
 | `InventoryItems` | `PK_InventoryItems (Id)` | `UX_InventoryItems_StoreId_ProductId (StoreId, ProductId)` | `FK_InventoryItems_Products_StoreId_ProductId` | `CK_InventoryItems_OnHand_NonNegative`, `CK_InventoryItems_Reserved_NonNegative`, `CK_InventoryItems_Reserved_NotExceed_OnHand` |
 | `DeliveryZones` | `PK_DeliveryZones (Id)` | `UX_DeliveryZones_StoreId_NormalizedName (StoreId, NormalizedName)` | `FK_DeliveryZones_Stores_StoreId` | `CK_DeliveryZones_FlatFee_NonNegative` |
+| `Carts` & `CartItems` | `PK_Carts`, `AK_Carts_StoreId_Id`, `PK_CartItems` | `UX_Carts_StoreId_CustomerId`, `UX_CartItems_StoreId_CartId_ProductId` | `FK_Carts_Stores_StoreId`, `FK_CartItems_Carts_StoreId_CartId` | `CK_CartItems_Quantity_Positive` |
+| `Orders`, `OrderItems`, `OrderStatusHistories` | `PK_Orders`, `AK_Orders_StoreId_Id`, `PK_OrderItems`, `PK_OrderStatusHistories` | `UX_Orders_StoreId_OrderNumber` | `FK_Orders_Stores_StoreId`, `FK_Orders_Currencies_CurrencyCode`, `FK_OrderItems_Orders_StoreId_OrderId`, `FK_OrderStatusHistories_Orders_StoreId_OrderId` | `CK_Orders_OrderStatus`, `CK_Orders_FulfillmentMode`, `CK_Orders_FulfillmentStatus`, `CK_Orders_PaymentStatus`, `CK_Orders_Totals_NonNegative`, `CK_OrderItems_*` |
+| `CheckoutRequests` | `PK_CheckoutRequests (Id)` | `UX_CheckoutRequests_StoreId_CustomerId_IdempotencyKey` | `FK_CheckoutRequests_Stores_StoreId` | `CK_CheckoutRequests_Status` |
+| `AppUsers` & `SessionTickets` | `PK_AppUsers (Id)`, `PK_SessionTickets (Key)` | `UX_AppUsers_StoreId_NormalizedEmail`, `UX_AppUsers_Platform_NormalizedEmail` | — | `CK_AppUsers_Role` (`1,2,3`) |
 
 ## 3. Data Types & Seed Data
 - **Money:** `Products.Price` and `DeliveryZones.FlatFee` use `decimal(19,4)` with `MoneyPrecision` domain validation by `Currency.MinorUnit` (no implicit rounding).

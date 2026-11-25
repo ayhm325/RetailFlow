@@ -2,9 +2,9 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed |
+| Status | Accepted |
 | Date | 2026-11-26 |
-| Owner | Principal Software Architect (Pending Assignment) |
+| Owner | Product Owner & Principal Software Architect |
 | Decision scope | Architecture / Data / Security / Reliability |
 | Related requirements | `FR-030`, `FR-031`, `NFR-004`, `TX-01`, `INV-01`, `OR-09`, `UC-08`, `AUD-005`, `OD-008` |
 | Supersedes | None |
@@ -72,10 +72,10 @@ Recommend adopting an atomic `CheckoutRequests` claim protocol (keeping `Status:
 - Payload mismatch test: same `Idempotency-Key` with altered delivery zone or quantity returns `422 Unprocessable Entity`.
 
 ## 12. Approval
-- Owner decision: Pending
-- Approved by:
-- Approval date:
-- Evidence/reference:
+- Owner decision: Accepted
+- Approved by: Project Owner (via interactive session decision)
+- Approval date: 2026-11-26
+- Evidence/reference: Session decision `2026-11-26T02:45:31+03:00`
 
 ## 13. Implementation status (separate from decision status)
 - Not started (Blocked on Gate 2 approval, `OD-008`, and `AUTH-ADR-01`)

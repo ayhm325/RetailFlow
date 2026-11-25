@@ -72,3 +72,9 @@
 - Added Tests: `OwaspApiSecurityIntegrationTests.cs` (BOLA cross-store isolation, security headers, rate-limiting `429 ProblemDetails`).
 - Updated Docs: `OWASP-ASVS-Security-Mapping.md`, `Reference-Register.csv` (`REF-13`–`REF-15`), `Testing-and-Verification.md`, `CURRENT-STATE.md`, `IMPLEMENTATION-EXECUTION-LOG.md`.
 - Verified: `dotnet build RetailFlow.slnx --configuration Release --no-restore` (`0` warnings, `0` errors), `dotnet test RetailFlow.slnx --configuration Release --no-build` (`6/6` unit + `63/63` integration pass).
+
+## 2026-11-26 — Full Backend Completion: Auth/ITicketStore/CSRF, Merchant/Platform/Customer APIs, Cart/Checkout/Orders (EXEC-006)
+- Type: End-to-End Backend Implementation, Migrations, Security & Integration Testing on `feature/public-store-catalog-read` (following Owner approval of `AUTH-ADR-01`, `ADR-0005`, `ADR-0006`, `OD-001=15m`, `OD-002=Pending only`).
+- Implemented: `Cart`/`CartItem`/`Order`/`OrderItem`/`OrderStatusHistory`/`CheckoutRequest`/`AppUser`/`SessionTicket` + 2 EF Core migrations (`AddCartOrdersAndCheckoutIdempotency`, `AddIdentityAndSessionTickets`); `CartService`, `CheckoutService` (atomic `CheckoutRequests` claim), `OrderService` (`OD-001` expiry sweep, `OD-002` `Pending`-only cancel, `ADR-0005` transitions), `AuthService` (PBKDF2-SHA256), `SqlSessionTicketStore`, `X-CSRF` middleware, and `AuthEndpoints`/`MerchantEndpoints`/`CustomerOrderEndpoints`/`PlatformAdminEndpoints`.
+- Added Tests: `OrderDomainTests.cs` (3 unit tests) + `EndToEndCommerceAuthIntegrationTests.cs` (2 full end-to-end SQL/HTTP tests).
+- Verified: `dotnet build RetailFlow.slnx --configuration Release --no-restore` (`0` warnings, `0` errors), `dotnet test RetailFlow.slnx --configuration Release --no-build` (`9/9` unit + `65/65` integration pass).

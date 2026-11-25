@@ -2,9 +2,9 @@
 
 | Field | Value |
 |---|---|
-| Status | Proposed |
+| Status | Accepted |
 | Date | 2026-11-26 |
-| Owner | Principal Software Architect & Product Owner (Pending Assignment) |
+| Owner | Product Owner & Principal Software Architect |
 | Decision scope | Architecture / Data / Domain |
 | Related requirements | `FR-027`–`FR-037`, `BR-009`, `BR-011`, `OR-01`, `OR-05`, `OR-08`, `UC-08`, `UC-09`, `UC-10`, `AUD-004` |
 | Supersedes | None |
@@ -77,10 +77,10 @@ Recommend adopting three orthogonal state models on the `Order` aggregate (keepi
 - SQL integration tests verifying `CHECK` constraints and `rowversion` `DbUpdateConcurrencyException` handling on concurrent state transitions.
 
 ## 12. Approval
-- Owner decision: Pending
-- Approved by:
-- Approval date:
-- Evidence/reference:
+- Owner decision: Accepted (`OD-001 = 15 minutes`, `OD-002 = Pending only`)
+- Approved by: Project Owner (via interactive session decision)
+- Approval date: 2026-11-26
+- Evidence/reference: Session decision `2026-11-26T02:45:31+03:00`
 
 ## 13. Implementation status (separate from decision status)
 - Not started (Blocked on Gate 2 approval and `OD-001`–`OD-005`)

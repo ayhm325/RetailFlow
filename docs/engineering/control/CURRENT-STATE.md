@@ -19,16 +19,10 @@
 - The current product solution (`RetailFlow.slnx`) and the experimental Identity/SessionTransport solutions (`experiments/IdentitySpike/`, `experiments/SessionTransportSpike/`) remain strictly separate.
 
 ## 2. Product Host implementation facts (verified on `feature/public-store-catalog-read`)
-- **Vertical Slice 01 — Public Store Catalog & Identity Read API** is implemented and verified (`6/6` Domain unit tests + `63/63` SQL integration tests):
-  - Domain model includes `Currency`, `Store`, `StoreSettings`, `Category`, `Product`, `ProductImage`, `InventoryItem`, `DeliveryZone`, `MoneyPrecision`, and related value/status types.
-  - Application contains `StoreRequestContext`, store resolution abstractions, catalog query/read contracts (`PublicStoreIdentityDto`, `PublicDeliveryZonesResponse`), and internal tenant-scoped management contracts (`IMerchantStoreService`, `IMerchantCatalogService`, `IPlatformStoreService`).
-  - Infrastructure contains `RetailFlowDbContext`, SQL Server persistence, EF Core mappings, 3 migrations (including `20261125232250_AddStoreBrandingAddressesAndDeliveryZones`), `ConnectionStringResolver`, `StoreDirectoryResolver`, `MerchantStoreService`, `MerchantCatalogService`, and `PlatformStoreService`.
-  - API exposes `/health/live`, `/health/ready`, Development `/openapi/v1.json` (with `400`/`404` `ProblemDetails` metadata), and five public read GET endpoints (no unauthenticated write HTTP endpoints exposed):
-    - `GET /api/stores/{slug}`
-    - `GET /api/stores/{slug}/delivery-zones`
-    - `GET /api/stores/{slug}/catalog/categories`
-    - `GET /api/stores/{slug}/catalog/products`
-    - `GET /api/stores/{slug}/catalog/products/{productId:guid}`
+- **Full Backend Implementation (Public Catalog, Auth/Session, Merchant, Platform Admin, Cart, Checkout & Orders)** is implemented and verified (`9/9` Domain unit tests + `65/65` SQL integration tests):
+  - Domain model includes `Currency`, `Store`, `StoreSettings`, `Category`, `Product`, `ProductImage`, `InventoryItem` (with `Reserve`/`ReleaseReservation`/`CommitReservation`), `DeliveryZone`, `Cart`, `CartItem`, `Order` (`OrderStatus`/`FulfillmentStatus`/`PaymentStatus` per `ADR-0005`, `OD-001` 15-min timeout, `OD-002` `Pending`-only cancel), `OrderItem`, `OrderStatusHistory`, `CheckoutRequest` (`ADR-0006`), `AppUser`, `SessionTicket`, and `MoneyPrecision`.
+  - Application & Infrastructure implement `IPublicCatalogQueryService`, `IMerchantStoreService`, `IMerchantCatalogService`, `IPlatformStoreService`, `ICartService`, `ICheckoutService`, `IOrderService`, `IAuthService`, `SqlSessionTicketStore` (`ITicketStore`), and 5 EF Core migrations against SQL Server.
+  - API exposes `/health/live`, `/health/ready`, Development `/openapi/v1.json`, `RateLimiter` (`429 ProblemDetails`), Security Headers, Cookie + `ITicketStore` Auth + `X-CSRF` protection (`AUTH-ADR-01`), Public Store/Catalog/DeliveryZone endpoints, Auth endpoints, Merchant endpoints, Customer Cart/Checkout/Order endpoints, and Platform Admin endpoints.
 
 ## 3. Identity and session work — do not conflate with Product Host
 - `experiments/IdentitySpike/` and `experiments/SessionTransportSpike/` are isolated experiments.
