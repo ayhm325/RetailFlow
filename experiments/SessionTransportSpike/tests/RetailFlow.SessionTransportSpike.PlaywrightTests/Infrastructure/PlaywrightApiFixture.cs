@@ -301,7 +301,7 @@ public sealed class PlaywrightApiFixture : IAsyncLifetime
 
         _playwright?.Dispose();
 
-        // Stop the API child process before deleting temporary keys and certificates.
+        // Stop the API child process before verifying SQL state and deleting temporary files.
         if (_apiProcess is not null)
         {
             try
@@ -313,10 +313,20 @@ public sealed class PlaywrightApiFixture : IAsyncLifetime
                         new CancellationTokenSource(
                             TimeSpan.FromSeconds(10)).Token);
                 }
+
+                if (!_apiProcess.HasExited)
+                {
+                    throw new InvalidOperationException(
+                        "SessionTransportSpike API process did not exit within the 10-second shutdown timeout. " +
+                        "Temporary Data Protection keys and certificates were not deleted.");
+                }
             }
-            catch
+            catch (Exception exception)
             {
-                // Best-effort process tree termination.
+                throw new InvalidOperationException(
+                    "Failed to stop the SessionTransportSpike API child process cleanly. " +
+                    "Temporary Data Protection keys and certificates were not deleted.",
+                    exception);
             }
             finally
             {
@@ -324,23 +334,55 @@ public sealed class PlaywrightApiFixture : IAsyncLifetime
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(_keysDirectory))
+        Exception? verificationError = null;
+
+        try
         {
-            try
+            if (Seeder is not null)
             {
-                if (Directory.Exists(_keysDirectory))
+                var finalCount =
+                    await Seeder.CountDataProtectionKeysAsync();
+
+                if (finalCount != InitialDataProtectionKeysCount)
                 {
-                    Directory.Delete(_keysDirectory, recursive: true);
+                    verificationError = new InvalidOperationException(
+                        "Playwright modified the shared DataProtectionKeys table. " +
+                        $"Initial count: {InitialDataProtectionKeysCount}, " +
+                        $"Final count: {finalCount}.");
                 }
             }
-            catch
+        }
+        catch (Exception exception)
+        {
+            verificationError = exception;
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(_keysDirectory))
             {
-                // Best-effort cleanup of temporary Data Protection keys directory.
+                try
+                {
+                    if (Directory.Exists(_keysDirectory))
+                    {
+                        Directory.Delete(_keysDirectory, recursive: true);
+                    }
+                }
+                catch
+                {
+                    // Best-effort cleanup of temporary Data Protection keys directory.
+                }
             }
+
+            _httpsCertificate?.Dispose();
+            _dataProtectionCertificate?.Dispose();
         }
 
-        _httpsCertificate?.Dispose();
-        _dataProtectionCertificate?.Dispose();
+        if (verificationError is not null)
+        {
+            throw new InvalidOperationException(
+                "Final DataProtectionKeys isolation verification failed.",
+                verificationError);
+        }
     }
 
     private async Task WaitForApiReadyAsync()

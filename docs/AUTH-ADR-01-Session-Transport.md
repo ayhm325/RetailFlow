@@ -3,7 +3,7 @@
 | الحقل | القيمة |
 |---|---|
 | **الحالة** | **Proposed — Session Transport Spike قيد التنفيذ (CSRF + Per-Session `ITicketStore` + `TimeProvider` + `ExpiredSessionTicketCleanupService` + `Shared Data Protection Key Ring` + `Idle 15m / Absolute 8h Expiration` + `403 Authorization Policy` منفذة ومختبرة؛ متبقي Playwright وقياس الأداء ومتطلبات Production Readiness)** |
-| **الإصدار** | 0.10 |
+| **الإصدار** | 0.11 |
 | **التاريخ** | 25 نوفمبر 2026 |
 | **النطاق** | Browser Authentication · StoreCustomer · BackOffice boundary |
 | **المنصة** | .NET 10 · ASP.NET Core Identity · React + TypeScript · SQL Server |
@@ -442,7 +442,7 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
   - `InstanceA_CookieAndTicket_AreReadableByInstanceB_AndAfterRestart`: يثبت على ثلاث مراحل (`Instance A` -> `Instance B` مستقل -> `Instance C` جديد بعد إيقاف `B`) استرجاع الـ Cookie والتذكرة المحمية من SQL Server والتحقق من `<encryptedSecret>` في `DataProtectionKeys`.
   - `DifferentApplicationName_CannotUnprotectCookieOrTicket`: يثبت فشل فك التذكرة والـ Cookie (`RetrieveAsync == null` و`401 Unauthorized`) عند اختلاف `ApplicationName`.
   - `WrongCertificate_CannotUnprotectCookieOrTicket`: يثبت فشل فك التذكرة والـ Cookie (`RetrieveAsync == null` و`401 Unauthorized`) عند استخدام شهادة X.509 مختلفة.
-  - **المتبقي لإغلاق بوابات ADR:** اختبارات المتصفح بـ Playwright (قسم 10.5)، وقياس الأداء (قسم 10.3)، إضافةً إلى متطلبات ما قبل الإنتاج الخاصة بـ Data Protection (`Certificate Rotation`، و`Backup/Restore` لملف PFX، واختبار عمليتي OS مستقلتين، ومراقبة مزامنة Key Ring)، وحسم قرارات Origin وURL وتعدد جلسات المتاجر، وتكامل `BackOffice StoreMembership` لاحقاً.
+  - **المتبقي من بوابات ADR:** قياس الأداء القابل لإعادة الإنتاج (القسم 10.3)، ومتطلبات Production Readiness الخاصة بـ Data Protection (`Certificate Rotation` و`Backup/Restore` لملف PFX واختبار عمليتي OS مستقلتين ومراقبة مزامنة Key Ring)، وحسم قرارات Origin/URL وتعدد جلسات المتاجر، وتوثيق سياسة Security Stamp وتغيير كلمة المرور وإبطال الجلسات، وتكامل `BackOffice StoreMembership` لاحقاً. اكتملت اختبارات Browser-Level Acceptance على API في القسم 10.5.
 
 ### 10.5 اختبارات المتصفح الفعلية (Browser-Level Acceptance — منفذة على API)
 
@@ -451,7 +451,18 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 - **الحزمة والمتصفح:** `Microsoft.Playwright 1.65.1` مع Chromium (`Chrome for Testing 159.0.8154.6` / `playwright chromium v1255`).
 - **ترتيب مضيف HTTPS وحماية المفاتيح:** تشغيل `RetailFlow.SessionTransportSpike.Api.dll` كعملية `dotnet` مستقلة ببيئة `ASPNETCORE_ENVIRONMENT=Testing` على منفذ ديناميكي `https://localhost:{port}` بشهادة HTTPS مؤقتة مخصصة منفصلة عن شهادة Data Protection، مع `IgnoreHTTPSErrors = true` في `BrowserContext`، وعزل مفاتيح Data Protection الخاصة ببيئة `Testing` عبر `DataProtection:KeysDirectory` (`PersistKeysToFileSystem` محمي بشهادة X.509) دون الكتابة في جدول `DataProtectionKeys` المشترك في SQL Server، إضافةً إلى خادم مهاجم خارجي (`BrowserAttackerServer` على `http://127.0.0.1:{port}` للطلبات Cross-Site وعلى `https://localhost:{port}` للطلبات Same-Site Cross-Origin) مع تسجيل بيانات الهجوم على الخادم دون تمرير أي بيانات اعتماد في URL.
 - **قاعدة البيانات:** `RetailFlowIdentitySpike` (تجهيز البيانات وتنظيفها مباشرة عبر `IdentitySpikeDbContext` و`SessionTicketDbContext` دون تشغيل Migrations ودون تعديل أو حذف سجلات `DataProtectionKeys`).
-- **نتائج اختبارات المتصفح (`4 / 4 Passed`، `0 Failed · 0 Skipped`):**
+- **نتائج تشغيل Playwright:** `4/4 Passed`، `0 Failed`، `0 Skipped`، بمدة إجمالية `10.1691s`.
+- **عزل Data Protection:** بقي عدد سجلات `dbo.DataProtectionKeys` في `RetailFlowIdentitySpike` عند `48` قبل التشغيل وبعده.
+- **تنظيف الجلسات:** `dbo.AuthenticationSessionTickets` يحتوي `0` جلسات اختبار بعد انتهاء التنظيف.
+
+| الاختبار | النتيجة الأخيرة |
+|---|---|
+| `StoreAAndStoreB_CanMaintainSeparateSessionsInTwoTabs_AndLogoutIsIsolated` | Passed |
+| `CrossSiteLoginFormPost_IsRejectedBeforeIssuingAuthenticationCookie` | Passed |
+| `CrossSiteLogoutFormPost_IsRejectedAndExistingSessionRemainsValid` | Passed |
+| `SameSiteCrossOriginLogoutFormPost_SendsRealCookie_IsRejectedWith403_AndPreservesSession` | Passed |
+
+- **تفاصيل الاختبارات (`4 / 4 Passed`):**
   - `StoreAAndStoreB_CanMaintainSeparateSessionsInTwoTabs_AndLogoutIsIsolated` (`1 s`): يثبت تسجيل الدخول لمتجر A في Tab 1 ومتجر B في Tab 2 ضمن `BrowserContext` واحد (`204`)، واسترجاع هوية كل متجر مستقلة من `/me` (`200`)، ثم `Logout` من متجر A (`204`) وإزالة Cookie A مع بقاء Cookie B صالحة (`A/me -> 401` و`B/me -> 200`)، وبقاء عدد سجلات `DataProtectionKeys` في SQL Server دون تغيير.
   - `CrossSiteLoginFormPost_IsRejectedBeforeIssuingAuthenticationCookie` (`162 ms`): يثبت إرسال HTML form `POST` تلقائي من `BrowserAttackerServer` (`Origin` خارجي، `Sec-Fetch-Site: cross-site`، دون `X-RetailFlow-Request`)، ورفضه بـ `403` دون `Set-Cookie` ودون أي Cookie مصادقة في Cookie Jar.
   - `CrossSiteLogoutFormPost_IsRejectedAndExistingSessionRemainsValid` (`979 ms`): يثبت إرسال HTML form `POST` إلى `/logout` من `BrowserAttackerServer` (`Sec-Fetch-Site: cross-site`، دون `X-RetailFlow-Request`) ورفضه بـ `403` دون `Set-Cookie` مع بقاء جلسة Store A صالحة (`200`).
@@ -469,9 +480,9 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 - [ ] حُسمت دلالة تعدد المتاجر في المتصفح (switching أم simultaneous sessions).
 - [ ] حُددت علاقة Origin/Host بين React وAPI في MVP.
 - [ ] تم اختيار بديل واحد بناءً على نتائج Spike، لا التفضيل الشخصي.
-- [ ] نجاح Cross-Store isolation لكل من Store A وStore B.
+- [x] نجاح Cross-Store isolation لكل من Store A وStore B، بما في ذلك وجود جلستين مستقلتين في `BrowserContext` واحد وإثبات عزل `Logout` في Playwright.
 - [x] نجاح Login/renewal/logout/expiration، بما فيها اختبارات التزامن (تمت تغطية Login وSliding Renewal وStale Renewal وتزامن Renew/Remove وLogout وIdle Expiration `15m` وAbsolute Expiration `8h` في `SessionTransportSpike`).
-- [x] وجود CSRF/CORS policy صريحة ومختبرة بحسب نموذج النشر (`Same-Origin` + `No CORS` + `BrowserCsrfProtectionMiddleware` مختبرة في `SessionTransportSpike`؛ وبقي تأكيدها عبر متصفح Playwright في 10.5).
+- [x] وجود CSRF/CORS policy صريحة ومختبرة بحسب نموذج النشر (`Same-Origin` + `No CORS` + `BrowserCsrfProtectionMiddleware`)، مع تغطية Integration Tests وPlaywright Browser Tests بما فيها Same-Site Cross-Origin مع إرسال Cookie فعلية.
 - [ ] توثيق سياسة Security Stamp والإبطال وتغيير كلمة المرور.
 - [x] اختبار تعدد API Instances وData Protection أو Signing Keys (مختبر في `SessionTransportSpike` عبر SQL Server Key Ring و`DataProtectionKeys` وحماية X.509 و`ApplicationName = RetailFlow.Auth` واختبارات `A/B/C` و`DifferentApplicationName` و`WrongCertificate`؛ متبقي قبل الإنتاج: `Certificate Rotation` و`Backup/Restore` لملف PFX واختبار عمليتي OS مستقلتين).
 - [ ] تقرير أداء قابل لإعادة الإنتاج مع إعدادات الاختبار ونتائجه.
@@ -564,3 +575,4 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 | 0.8 | 2026-11-25 | تنفيذ `Shared Data Protection Key Ring` عبر `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore 10.0.15` وMigration `20261125063008_AddDataProtectionKeys` (`DataProtectionKeys`)، وحماية X.509 (`DataProtectionCertificateLoader`) و`ApplicationName = "RetailFlow.Auth"`، وإثبات اختبارات `A/B/C` وعزل `ApplicationName` والشهادة الخاطئة (`69/69` في `SessionTransportSpike`). |
 | 0.9 | 2026-11-25 | إضافة سياسة انتهاء الجلسة المزدوجة (`Idle Timeout = 15m` و`Absolute Session Lifetime = 8h`) عبر `SessionLifetimeOptions` و`AbsoluteExpiresUtc` وMigration `20261125072108_AddAbsoluteSessionExpiration` (مع Backfill آمن)، وتقييد `Sliding Renewal` بالحد المطلق، وإثبات اختباري انتهاء الخمول والحد المطلق مع استمرار النشاط (`71/71` في `SessionTransportSpike`). |
 | 0.10 | 2026-11-25 | فصل `403 Authorization Policy` (`RetailFlow.StoreCustomerScope` و`StoreCustomerScopeAuthorizationHandler`) عن `401 Authentication`، وحماية `SecurityStampValidator` عند اختلاف `StoreId` مع Scope الطلب، وإضافة `6` اختبارات وحدة واختبار التكامل المتأخر بعد 6 دقائق (`StoreACookie_ReplayedAgainstStoreBAfterSecurityStampInterval_ReturnsForbidden_AndPreservesStoreASession`) مع نتيجة `78/78` في `SessionTransportSpike`. |
+| 0.11 | 2026-11-25 | إكمال Browser-Level Acceptance (`4/4` Playwright)، وإضافة Same-Site Cross-Origin Logout CSRF مع إرسال Cookie فعلية، وعزل مفاتيح `Testing` في File System مؤقت محمية بـ X.509، والتحقق من عدم تغيير `DataProtectionKeys`، وتحسين Credential Hygiene وBuild Configuration. بقي ADR `Proposed`. |

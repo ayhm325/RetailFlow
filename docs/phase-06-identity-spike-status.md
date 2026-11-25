@@ -3,8 +3,16 @@
 - **المسار التجريبي:** `experiments/IdentitySpike/`
 - **المرجع المعماري:** دراسة إثبات المفهوم لتعدد هوية العملاء (`Phase 06 — v1.0 — 22 نوفمبر 2026`)
 - **تاريخ آخر تحديث للتقرير:** `2026-11-25`
-- **نقطة التوقف الحالية:** اكتمل سد فجوات خصائص المستخدم في `ScopedUserStore` (`49/49` اختباراً في `IdentitySpike`)، وأُنشئ واختُبر `SessionTransportSpike` (`experiments/SessionTransportSpike/`) بـ `78/78` اختباراً ناجحاً (`63` وحدة + `15` تكامل على `WebApplicationFactory` وSQL Server الفعلي) مع تفعيل **`Per-Session Server-side Revocation`** (`SqlServerTicketStore` + `SessionLifetimeOptions` + `TimeProvider` + `ExpiredSessionTicketCleanupService`)، و**`Shared Data Protection Key Ring`** عبر `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore 10.0.15` و`SessionTicketDbContext` (`DataProtectionKeys`) وحماية X.509 (`ApplicationName = "RetailFlow.Auth"`)، و**`403 Authorization Policy`** (`RetailFlow.StoreCustomerScope` + `StoreCustomerScopeAuthorizationHandler` + حارس `SecurityStampValidator` عند اختلاف المتجر)، وتطبيق Migrations `20261124225416_CreateAuthenticationSessionTickets` و`20261125063008_AddDataProtectionKeys` و`20261125072108_AddAbsoluteSessionExpiration` على قاعدة التطوير المحلية `RetailFlowIdentitySpike`، وإثبات استرجاع الجلسة عبر نسخ `A/B/C` وعزل `ApplicationName` والشهادة الخاطئة، و`Sliding Renewal` ومنع `Stale Renewal` وتزامن `Renew/Remove` وحارس `409 Conflict` وتنظيف الجلسات المنتهية وانتهاء الخمول (`15m`) والحد المطلق (`8h`) ورفض Cross-store replay بـ `403` حتى بعد تجاوز `ValidationInterval = 5m` مع الحفاظ على جلسة Store A.
-- **الخطوة التالية بعد تثبيت هذه النقطة:** استكمال بقية بوابات [`AUTH-ADR-01`](AUTH-ADR-01-Session-Transport.md) (اختبارات المتصفح بـ Playwright، وقياس الأداء، ومتطلبات Production Readiness لـ Data Protection، مع إبقاء Authentication غير مفعّل في `IdentitySpike/Program.cs` حتى إغلاق البوابات).
+- **نقطة التوقف الحالية:** اكتمل سد فجوات `ScopedUserStore` واختبارات `IdentitySpike` السابقة (`49/49`)، واكتملت اختبارات `SessionTransportSpike` بالنتائج: `63/63 Unit` و`15/15 Integration`، إضافة إلى `4/4 Playwright Browser Tests`.
+  أثبتت اختبارات Playwright:
+  - Cross-Store isolation في متصفحين/تبويبين مستقلين.
+  - Cross-Site Login وLogout CSRF rejection.
+  - Same-Site Cross-Origin Logout rejection مع إرسال Cookie فعلية.
+  - بقاء جلسات المتاجر الأخرى سليمة بعد Logout.
+  - عدم تعديل سجلات `DataProtectionKeys` المشتركة أثناء تشغيل الاختبارات (`48 -> 48`).
+  - تنظيف سجلات الاختبار إلى `0` جلسات متبقية.
+  بقيت مراجعة Security Stamp وتغيير كلمة المرور والإبطال، وقياس الأداء، وبوابات Production Readiness.
+- **الخطوة التالية:** إغلاق ملاحظات Playwright والتوثيق، ثم تنفيذ `ST-14 — Password Change / Security Stamp / Session Revocation` داخل `SessionTransportSpike` فقط. يجب إبقاء Authentication غير مفعّل في `IdentitySpike/Program.cs` حتى استكمال بوابات ADR واتخاذ القرار النهائي.
 
 ### ملخص حالة المراحل
 
@@ -16,7 +24,7 @@
 | **3 — Managers & APIs** | جزئية: Managers وRoute Groups النطاق (`StoreCustomer` و`BackOffice`) منفذة ومختبرة في التطبيق الفعلي؛ Minimal Auth APIs وSignInManager في التطبيق متبقية |
 | **4 — Lifecycle** | إثبات الخدمات منجز؛ HTTP endpoints والسياسات متبقية |
 | **5 — Security** | لم تبدأ كتنفيذ إنتاجي؛ اختبار ترتيب Authentication مع Scope منفذ في TestServer فقط |
-| **6 — SQL/CI** | جزئية: 35 اختبار تكامل ناجحاً في `IdentitySpike` + 15 اختبار تكامل في `SessionTransportSpike` (تشمل `Sliding Renewal` وتزامن `Renew/Remove` وتنظيف المنتهي و`Shared Data Protection Key Ring` و`Idle 15m / Absolute 8h Expiration` و`403 Authorization Policy` + `SecurityStamp` بعد 6 دقائق)؛ CI وتزامن التسجيل وبقية بوابات الإنتاج متبقية |
+| **6 — SQL/CI** | جزئية: 35 اختبار تكامل ناجحاً في `IdentitySpike` + 15 اختبار تكامل و4 اختبارات متصفح Playwright في `SessionTransportSpike` (تشمل `Sliding Renewal` وتزامن `Renew/Remove` وتنظيف المنتهي و`Shared Data Protection Key Ring` و`Idle 15m / Absolute 8h Expiration` و`403 Authorization Policy` + `SecurityStamp` بعد 6 دقائق وPlaywright E2E)؛ CI وتزامن التسجيل وبقية بوابات الإنتاج متبقية |
 
 ---
 
