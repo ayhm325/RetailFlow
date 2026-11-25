@@ -27,6 +27,10 @@ public sealed class DatabaseReadinessHealthCheck : IHealthCheck
                 ? HealthCheckResult.Healthy("Database connection succeeded.")
                 : HealthCheckResult.Unhealthy("Database readiness check failed.");
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch
         {
             return HealthCheckResult.Unhealthy("Database readiness check failed.");

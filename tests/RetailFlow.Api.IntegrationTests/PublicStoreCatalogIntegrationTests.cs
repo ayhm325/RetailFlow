@@ -8,7 +8,9 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
+using RetailFlow.Api.Hosting;
 using RetailFlow.Application.Catalog;
 using RetailFlow.Domain.Catalog;
 using RetailFlow.Domain.Currencies;
@@ -41,7 +43,7 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         var suffix = NewSuffix();
         var (store, settings) = CreateStoreWithSettings($"Active Store {suffix}", $"active-{suffix}", StoreType.OnlineOnly, StoreStatus.Active, Usd);
         var category = Category.Create(Guid.NewGuid(), store.Id, "Electronics", $"electronics-{suffix}", isActive: true, sortOrder: 1);
-        var product = Product.Create(Guid.NewGuid(), store.Id, category.Id, "Wireless Mouse", 29.99m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow, description: "Ergonomic wireless mouse", sku: $"SKU-{suffix}-1");
+        var product = Product.Create(Guid.NewGuid(), store.Id, category.Id, "Wireless Mouse", 29.99m, settings, Usd, ProductStatus.Published, DateTimeOffset.UtcNow, description: "Ergonomic wireless mouse", sku: $"SKU-{suffix}-1");
         var image = ProductImage.Create(Guid.NewGuid(), store.Id, product.Id, "https://cdn.example.com/mouse.png", sortOrder: 0, altText: "Wireless Mouse");
         var inventory = InventoryItem.Create(Guid.NewGuid(), store.Id, product.Id, onHand: 12, reserved: 2);
 
@@ -126,7 +128,7 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         var suffix = NewSuffix();
         var (store, settings) = CreateStoreWithSettings($"Inactive Store {suffix}", $"inactive-{suffix}", StoreType.Physical, status, Sar);
         var category = Category.Create(Guid.NewGuid(), store.Id, "Cat", $"cat-{suffix}", true, 1);
-        var product = Product.Create(Guid.NewGuid(), store.Id, category.Id, "Prod", 10m, Sar, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var product = Product.Create(Guid.NewGuid(), store.Id, category.Id, "Prod", 10m, settings, Sar, ProductStatus.Published, DateTimeOffset.UtcNow);
 
         await using (var db = _fixture.CreateDbContext())
         {
@@ -208,11 +210,11 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         var catInactiveA = Category.Create(Guid.NewGuid(), storeA.Id, "Hidden", $"hid-a-{suffix}", false, 2);
         var catB = Category.Create(Guid.NewGuid(), storeB.Id, "General", $"gen-b-{suffix}", true, 1);
 
-        var publishedA = Product.Create(Guid.NewGuid(), storeA.Id, catActiveA.Id, "Published A", 15m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
-        var publishedInInactiveCatA = Product.Create(Guid.NewGuid(), storeA.Id, catInactiveA.Id, "Hidden Cat Product", 15m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
-        var draftA = Product.Create(Guid.NewGuid(), storeA.Id, catActiveA.Id, "Draft A", 15m, Usd, ProductStatus.Draft, DateTimeOffset.UtcNow);
-        var archivedA = Product.Create(Guid.NewGuid(), storeA.Id, catActiveA.Id, "Archived A", 15m, Usd, ProductStatus.Archived, DateTimeOffset.UtcNow);
-        var publishedB = Product.Create(Guid.NewGuid(), storeB.Id, catB.Id, "Published B", 15m, Eur, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var publishedA = Product.Create(Guid.NewGuid(), storeA.Id, catActiveA.Id, "Published A", 15m, settingsA, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var publishedInInactiveCatA = Product.Create(Guid.NewGuid(), storeA.Id, catInactiveA.Id, "Hidden Cat Product", 15m, settingsA, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var draftA = Product.Create(Guid.NewGuid(), storeA.Id, catActiveA.Id, "Draft A", 15m, settingsA, Usd, ProductStatus.Draft, DateTimeOffset.UtcNow);
+        var archivedA = Product.Create(Guid.NewGuid(), storeA.Id, catActiveA.Id, "Archived A", 15m, settingsA, Usd, ProductStatus.Archived, DateTimeOffset.UtcNow);
+        var publishedB = Product.Create(Guid.NewGuid(), storeB.Id, catB.Id, "Published B", 15m, settingsB, Eur, ProductStatus.Published, DateTimeOffset.UtcNow);
 
         await using (var db = _fixture.CreateDbContext())
         {
@@ -227,7 +229,6 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         {
             using var client = _fixture.CreateHttpsClient();
 
-            // Unfiltered list hides Draft, Archived, Inactive-category, and Store B products
             var listPayload = await client.GetFromJsonAsync<CatalogProductsResponse>(
                 $"/api/stores/{storeA.Slug}/catalog/products",
                 JsonOptions);
@@ -235,14 +236,12 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
             var single = Assert.Single(listPayload.Items);
             Assert.Equal(publishedA.Id, single.Id);
 
-            // Details endpoint returns 404 for all hidden products including inactive category
             foreach (var hiddenId in new[] { publishedInInactiveCatA.Id, draftA.Id, archivedA.Id, publishedB.Id })
             {
                 using var detailResp = await client.GetAsync($"/api/stores/{storeA.Slug}/catalog/products/{hiddenId}");
                 Assert.Equal(HttpStatusCode.NotFound, detailResp.StatusCode);
             }
 
-            // Category filters cannot bypass IsActive
             var byInactiveId = await client.GetFromJsonAsync<CatalogProductsResponse>(
                 $"/api/stores/{storeA.Slug}/catalog/products?categoryId={catInactiveA.Id}",
                 JsonOptions);
@@ -255,7 +254,6 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
             Assert.NotNull(byInactiveSlug);
             Assert.Empty(byInactiveSlug.Items);
 
-            // Reactivating the category makes the published product visible in list and details
             await using (var db = _fixture.CreateDbContext())
             {
                 await db.Categories
@@ -288,10 +286,10 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         var catGear = Category.Create(Guid.NewGuid(), store.Id, "Gear", $"gear-{suffix}", true, 2);
 
         var t0 = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
-        var p1 = Product.Create(Guid.NewGuid(), store.Id, catBooks.Id, "Alpha Book", 30m, Eur, ProductStatus.Published, t0, sku: $"BK-{suffix}-01");
-        var p2 = Product.Create(Guid.NewGuid(), store.Id, catBooks.Id, "Gamma Guide", 10m, Eur, ProductStatus.Published, t0.AddMinutes(1), sku: $"BK-{suffix}-02");
-        var p3 = Product.Create(Guid.NewGuid(), store.Id, catGear.Id, "Beta Lamp", 20m, Eur, ProductStatus.Published, t0.AddMinutes(2), sku: $"GR-{suffix}-03");
-        var p4 = Product.Create(Guid.NewGuid(), store.Id, catGear.Id, "Delta Mug", 5m, Eur, ProductStatus.Published, t0.AddMinutes(3), sku: $"GR-{suffix}-04");
+        var p1 = Product.Create(Guid.NewGuid(), store.Id, catBooks.Id, "Alpha Book", 30m, settings, Eur, ProductStatus.Published, t0, sku: $"BK-{suffix}-01");
+        var p2 = Product.Create(Guid.NewGuid(), store.Id, catBooks.Id, "Gamma Guide", 10m, settings, Eur, ProductStatus.Published, t0.AddMinutes(1), sku: $"BK-{suffix}-02");
+        var p3 = Product.Create(Guid.NewGuid(), store.Id, catGear.Id, "Beta Lamp", 20m, settings, Eur, ProductStatus.Published, t0.AddMinutes(2), sku: $"GR-{suffix}-03");
+        var p4 = Product.Create(Guid.NewGuid(), store.Id, catGear.Id, "Delta Mug", 5m, settings, Eur, ProductStatus.Published, t0.AddMinutes(3), sku: $"GR-{suffix}-04");
 
         await using (var db = _fixture.CreateDbContext())
         {
@@ -306,21 +304,18 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         {
             using var client = _fixture.CreateHttpsClient();
 
-            // Search by SKU (case-insensitive)
             var skuResult = await client.GetFromJsonAsync<CatalogProductsResponse>(
                 $"/api/stores/{store.Slug}/catalog/products?search=gr-{suffix}-03",
                 JsonOptions);
             Assert.NotNull(skuResult);
             Assert.Equal([p3.Id], skuResult.Items.Select(i => i.Id).ToArray());
 
-            // Filter by categoryId
             var catIdResult = await client.GetFromJsonAsync<CatalogProductsResponse>(
                 $"/api/stores/{store.Slug}/catalog/products?categoryId={catBooks.Id}&sort=price_asc",
                 JsonOptions);
             Assert.NotNull(catIdResult);
             Assert.Equal([p2.Id, p1.Id], catIdResult.Items.Select(i => i.Id).ToArray());
 
-            // Matching categoryId + categorySlug vs conflicting categoryId + categorySlug
             var matchingCatResult = await client.GetFromJsonAsync<CatalogProductsResponse>(
                 $"/api/stores/{store.Slug}/catalog/products?categoryId={catBooks.Id}&categorySlug={catBooks.Slug}",
                 JsonOptions);
@@ -333,7 +328,6 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
             Assert.NotNull(conflictingCatResult);
             Assert.Empty(conflictingCatResult.Items);
 
-            // Sort price_desc + pagination
             var page1 = await client.GetFromJsonAsync<CatalogProductsResponse>(
                 $"/api/stores/{store.Slug}/catalog/products?sort=price_desc&page=1&pageSize=2",
                 JsonOptions);
@@ -348,7 +342,6 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
             Assert.NotNull(page2);
             Assert.Equal([p2.Id, p4.Id], page2.Items.Select(i => i.Id).ToArray());
 
-            // Out-of-range page returns empty items
             var page3 = await client.GetFromJsonAsync<CatalogProductsResponse>(
                 $"/api/stores/{store.Slug}/catalog/products?sort=name_asc&page=3&pageSize=2",
                 JsonOptions);
@@ -356,7 +349,6 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
             Assert.Empty(page3.Items);
             Assert.Equal(4, page3.TotalCount);
 
-            // Large page value does not overflow
             var maxPage = await client.GetFromJsonAsync<CatalogProductsResponse>(
                 $"/api/stores/{store.Slug}/catalog/products?page={int.MaxValue}&pageSize=50",
                 JsonOptions);
@@ -365,7 +357,6 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
             Assert.Empty(maxPage.Items);
             Assert.Equal(4, maxPage.TotalCount);
 
-            // Sort name_desc
             var nameDesc = await client.GetFromJsonAsync<CatalogProductsResponse>(
                 $"/api/stores/{store.Slug}/catalog/products?categorySlug={catBooks.Slug}&sort=name_desc",
                 JsonOptions);
@@ -385,9 +376,9 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         var (store, settings) = CreateStoreWithSettings("Inv Store", $"inv-{suffix}", StoreType.Physical, StoreStatus.Active, Usd);
         var category = Category.Create(Guid.NewGuid(), store.Id, "Cat", $"inv-cat-{suffix}", true, 1);
 
-        var availableProd = Product.Create(Guid.NewGuid(), store.Id, category.Id, "Available", 10m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
-        var reservedOutProd = Product.Create(Guid.NewGuid(), store.Id, category.Id, "ReservedOut", 10m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
-        var noInventoryProd = Product.Create(Guid.NewGuid(), store.Id, category.Id, "NoInventory", 10m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var availableProd = Product.Create(Guid.NewGuid(), store.Id, category.Id, "Available", 10m, settings, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var reservedOutProd = Product.Create(Guid.NewGuid(), store.Id, category.Id, "ReservedOut", 10m, settings, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var noInventoryProd = Product.Create(Guid.NewGuid(), store.Id, category.Id, "NoInventory", 10m, settings, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
 
         var availableInventory = InventoryItem.Create(Guid.NewGuid(), store.Id, availableProd.Id, onHand: 10, reserved: 3);
         var reservedOutInventory = InventoryItem.Create(Guid.NewGuid(), store.Id, reservedOutProd.Id, onHand: 5, reserved: 5);
@@ -434,33 +425,79 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
     }
 
     [Fact]
-    public void MoneyPrecision_ValidatesAgainstCurrencyMinorUnit_WithoutImplicitRounding()
+    public void ProductCreation_EnforcesStoreSettingsCurrencyPrecisionAndTenantMatch()
     {
-        var categoryId = Guid.NewGuid();
-        var storeId = Guid.NewGuid();
+        var (jodStore, jodSettings) = CreateStoreWithSettings("JOD Store", "jod-s", StoreType.OnlineOnly, StoreStatus.Active, Jod);
+        var (kwdStore, kwdSettings) = CreateStoreWithSettings("KWD Store", "kwd-s", StoreType.OnlineOnly, StoreStatus.Active, Kwd);
+        var (usdStore, usdSettings) = CreateStoreWithSettings("USD Store", "usd-s", StoreType.OnlineOnly, StoreStatus.Active, Usd);
+        var (eurStore, eurSettings) = CreateStoreWithSettings("EUR Store", "eur-s", StoreType.OnlineOnly, StoreStatus.Active, Eur);
+        var (jpyStore, jpySettings) = CreateStoreWithSettings("JPY Store", "jpy-s", StoreType.OnlineOnly, StoreStatus.Active, Jpy);
 
-        // Valid amounts
-        var jodProd = Product.Create(Guid.NewGuid(), storeId, categoryId, "JOD Item", 1.250m, Jod, ProductStatus.Published, DateTimeOffset.UtcNow);
-        var kwdProd = Product.Create(Guid.NewGuid(), storeId, categoryId, "KWD Item", 4.250m, Kwd, ProductStatus.Published, DateTimeOffset.UtcNow);
-        var usdProd = Product.Create(Guid.NewGuid(), storeId, categoryId, "USD Item", 12.50m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
-        var eurProd = Product.Create(Guid.NewGuid(), storeId, categoryId, "EUR Item", 9.99m, Eur, ProductStatus.Published, DateTimeOffset.UtcNow);
-        var jpyProd = Product.Create(Guid.NewGuid(), storeId, categoryId, "JPY Item", 1000m, Jpy, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var catId = Guid.NewGuid();
 
-        Assert.Equal(1.250m, jodProd.Price);
+        var jodProd = Product.Create(Guid.NewGuid(), jodStore.Id, catId, "JOD Item", 10.125m, jodSettings, Jod, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var kwdProd = Product.Create(Guid.NewGuid(), kwdStore.Id, catId, "KWD Item", 4.250m, kwdSettings, Kwd, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var usdProd = Product.Create(Guid.NewGuid(), usdStore.Id, catId, "USD Item", 10.25m, usdSettings, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var eurProd = Product.Create(Guid.NewGuid(), eurStore.Id, catId, "EUR Item", 9.99m, eurSettings, Eur, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var jpyProd = Product.Create(Guid.NewGuid(), jpyStore.Id, catId, "JPY Item", 1000m, jpySettings, Jpy, ProductStatus.Published, DateTimeOffset.UtcNow);
+
+        Assert.Equal(10.125m, jodProd.Price);
         Assert.Equal(4.250m, kwdProd.Price);
-        Assert.Equal(12.50m, usdProd.Price);
+        Assert.Equal(10.25m, usdProd.Price);
         Assert.Equal(9.99m, eurProd.Price);
         Assert.Equal(1000m, jpyProd.Price);
 
         // Excess decimal places rejected without rounding
-        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), storeId, categoryId, "Bad JOD", 1.2505m, Jod, ProductStatus.Published, DateTimeOffset.UtcNow));
-        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), storeId, categoryId, "Bad KWD", 4.2501m, Kwd, ProductStatus.Published, DateTimeOffset.UtcNow));
-        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), storeId, categoryId, "Bad USD", 12.501m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow));
-        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), storeId, categoryId, "Bad EUR", 9.999m, Eur, ProductStatus.Published, DateTimeOffset.UtcNow));
-        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), storeId, categoryId, "Bad JPY", 1000.5m, Jpy, ProductStatus.Published, DateTimeOffset.UtcNow));
+        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), jodStore.Id, catId, "Bad JOD", 10.1234m, jodSettings, Jod, ProductStatus.Published, DateTimeOffset.UtcNow));
+        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), kwdStore.Id, catId, "Bad KWD", 4.2501m, kwdSettings, Kwd, ProductStatus.Published, DateTimeOffset.UtcNow));
+        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), usdStore.Id, catId, "Bad USD", 10.251m, usdSettings, Usd, ProductStatus.Published, DateTimeOffset.UtcNow));
+        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), eurStore.Id, catId, "Bad EUR", 9.999m, eurSettings, Eur, ProductStatus.Published, DateTimeOffset.UtcNow));
+        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), jpyStore.Id, catId, "Bad JPY", 1000.5m, jpySettings, Jpy, ProductStatus.Published, DateTimeOffset.UtcNow));
+
+        // USD store cannot create product using JOD precision/currency
+        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), usdStore.Id, catId, "Mismatch", 1.234m, usdSettings, Jod, ProductStatus.Published, DateTimeOffset.UtcNow));
+
+        // StoreSettings belonging to another Store cannot be used
+        Assert.Throws<ArgumentException>(() => Product.Create(Guid.NewGuid(), usdStore.Id, catId, "Cross Settings", 10.125m, jodSettings, Jod, ProductStatus.Published, DateTimeOffset.UtcNow));
 
         // Negative price rejected
-        Assert.Throws<ArgumentOutOfRangeException>(() => Product.Create(Guid.NewGuid(), storeId, categoryId, "Neg", -0.01m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Product.Create(Guid.NewGuid(), usdStore.Id, catId, "Neg", -0.01m, usdSettings, Usd, ProductStatus.Published, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public async Task StoreSettings_PickupAllowedOnlyForPhysicalStores()
+    {
+        var suffix = NewSuffix();
+        var physicalStore = Store.Create(Guid.NewGuid(), "Physical", $"phys-{suffix}", StoreType.Physical, StoreStatus.Active, DateTimeOffset.UtcNow);
+        var onlineStore = Store.Create(Guid.NewGuid(), "Online", $"onl-{suffix}", StoreType.OnlineOnly, StoreStatus.Active, DateTimeOffset.UtcNow);
+
+        // All 4 combinations:
+        var physWithPickup = StoreSettings.Create(Guid.NewGuid(), physicalStore, Usd, "UTC", deliveryEnabled: true, pickupEnabled: true);
+        var physWithoutPickup = StoreSettings.Create(Guid.NewGuid(), physicalStore, Usd, "UTC", deliveryEnabled: true, pickupEnabled: false);
+        var onlineWithoutPickup = StoreSettings.Create(Guid.NewGuid(), onlineStore, Usd, "UTC", deliveryEnabled: true, pickupEnabled: false);
+
+        Assert.True(physWithPickup.PickupEnabled);
+        Assert.False(physWithoutPickup.PickupEnabled);
+        Assert.False(onlineWithoutPickup.PickupEnabled);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            StoreSettings.Create(Guid.NewGuid(), onlineStore, Usd, "UTC", deliveryEnabled: true, pickupEnabled: true));
+
+        // UpdateFulfillmentOptions enforces ST-03 and StoreId match
+        Assert.Throws<InvalidOperationException>(() =>
+            onlineWithoutPickup.UpdateFulfillmentOptions(onlineStore, deliveryEnabled: true, pickupEnabled: true));
+        Assert.Throws<ArgumentException>(() =>
+            onlineWithoutPickup.UpdateFulfillmentOptions(physicalStore, deliveryEnabled: true, pickupEnabled: true));
+
+        // Persistence round-trip succeeds for valid combinations
+        await using (var db = _fixture.CreateDbContext())
+        {
+            db.Stores.AddRange(physicalStore, onlineStore);
+            db.StoreSettings.AddRange(physWithPickup, onlineWithoutPickup);
+            await db.SaveChangesAsync();
+        }
+
+        await _fixture.DeleteStoresAsync(physicalStore.Id, onlineStore.Id);
     }
 
     [Fact]
@@ -475,17 +512,18 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
             Assert.Contains("JPY", seededCodes);
         }
 
-        // Inactive currency cannot be assigned to new StoreSettings
         var inactiveCurrency = Currency.Create("XTS", "963", 2, isActive: false);
+        var dummyStore = Store.Create(Guid.NewGuid(), "Dummy", $"dum-{NewSuffix()}", StoreType.OnlineOnly, StoreStatus.Active, DateTimeOffset.UtcNow);
         Assert.Throws<InvalidOperationException>(() =>
-            StoreSettings.Create(Guid.NewGuid(), Guid.NewGuid(), inactiveCurrency, "UTC", true, false));
+            StoreSettings.Create(Guid.NewGuid(), dummyStore, inactiveCurrency, "UTC", true, false));
 
         var suffix = NewSuffix();
         var tempCurrencyCode = string.Concat(
             'Z',
             (char)('A' + (suffix[0] % 26)),
             (char)('A' + (suffix[1] % 26)));
-        var tempCurrency = Currency.Create(tempCurrencyCode, "991", 3, isActive: true);
+        var tempNumericCode = "991";
+        var tempCurrency = Currency.Create(tempCurrencyCode, tempNumericCode, 3, isActive: true);
         var (store, settings) = CreateStoreWithSettings("Temp Curr Store", $"tcurr-{suffix}", StoreType.OnlineOnly, StoreStatus.Active, tempCurrency);
 
         await using (var db = _fixture.CreateDbContext())
@@ -501,8 +539,24 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
             // Duplicate StoreSettings.StoreId rejected
             await using (var db = _fixture.CreateDbContext())
             {
-                db.StoreSettings.Add(StoreSettings.Create(Guid.NewGuid(), store.Id, Usd, "UTC", false, true));
+                db.StoreSettings.Add(StoreSettings.Create(Guid.NewGuid(), store, Usd, "UTC", false, false));
                 await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            }
+
+            // Duplicate NumericCode rejected by UX_Currencies_NumericCode
+            await using (var db = _fixture.CreateDbContext())
+            {
+                await Assert.ThrowsAsync<SqlException>(() =>
+                    db.Database.ExecuteSqlInterpolatedAsync(
+                        $"INSERT INTO Currencies (Code, NumericCode, MinorUnit, IsActive) VALUES ('ZZZ', {tempNumericCode}, 2, 1)"));
+            }
+
+            // Lowercase Code rejected by CK_Currencies_Code_Format (binary collation)
+            await using (var db = _fixture.CreateDbContext())
+            {
+                await Assert.ThrowsAsync<SqlException>(() =>
+                    db.Database.ExecuteSqlInterpolatedAsync(
+                        $"INSERT INTO Currencies (Code, NumericCode, MinorUnit, IsActive) VALUES ('abc', '992', 2, 1)"));
             }
 
             // Deleting referenced currency rejected by FK_StoreSettings_Currencies_CurrencyCode
@@ -518,10 +572,10 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
             {
                 await Assert.ThrowsAsync<SqlException>(() =>
                     db.Database.ExecuteSqlInterpolatedAsync(
-                        $"INSERT INTO Currencies (Code, NumericCode, MinorUnit, IsActive) VALUES ('BAD', '999', 5, 1)"));
+                        $"INSERT INTO Currencies (Code, NumericCode, MinorUnit, IsActive) VALUES ('BAD', '993', 5, 1)"));
             }
 
-            // Deactivating an existing store's currency prevents new selection, but existing store still resolves
+            // Deactivating an existing store's currency blocks new selection, but existing store still resolves
             await using (var db = _fixture.CreateDbContext())
             {
                 await db.Currencies
@@ -549,7 +603,7 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         var (storeB, settingsB) = CreateStoreWithSettings("Store B", $"const-b-{suffix}", StoreType.OnlineOnly, StoreStatus.Active, Eur);
         var catA = Category.Create(Guid.NewGuid(), storeA.Id, "Cat A", $"cat-a-{suffix}", true, 1);
         var catB = Category.Create(Guid.NewGuid(), storeB.Id, "Cat B", $"cat-b-{suffix}", true, 1);
-        var prodA = Product.Create(Guid.NewGuid(), storeA.Id, catA.Id, "Prod A", 10m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow, sku: $"SHARED-SKU-{suffix}");
+        var prodA = Product.Create(Guid.NewGuid(), storeA.Id, catA.Id, "Prod A", 10m, settingsA, Usd, ProductStatus.Published, DateTimeOffset.UtcNow, sku: $"SHARED-SKU-{suffix}");
 
         await using (var db = _fixture.CreateDbContext())
         {
@@ -570,21 +624,21 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
 
             await using (var db = _fixture.CreateDbContext())
             {
-                db.Products.Add(Product.Create(Guid.NewGuid(), storeA.Id, catA.Id, "Dup Sku", 12m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow, sku: prodA.Sku));
+                db.Products.Add(Product.Create(Guid.NewGuid(), storeA.Id, catA.Id, "Dup Sku", 12m, settingsA, Usd, ProductStatus.Published, DateTimeOffset.UtcNow, sku: prodA.Sku));
                 await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
             }
 
             await using (var db = _fixture.CreateDbContext())
             {
-                db.Products.Add(Product.Create(Guid.NewGuid(), storeB.Id, catB.Id, "Store B Same Sku", 12m, Eur, ProductStatus.Published, DateTimeOffset.UtcNow, sku: prodA.Sku));
-                db.Products.Add(Product.Create(Guid.NewGuid(), storeA.Id, catA.Id, "Null Sku 1", 12m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow));
-                db.Products.Add(Product.Create(Guid.NewGuid(), storeA.Id, catA.Id, "Null Sku 2", 12m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow));
+                db.Products.Add(Product.Create(Guid.NewGuid(), storeB.Id, catB.Id, "Store B Same Sku", 12m, settingsB, Eur, ProductStatus.Published, DateTimeOffset.UtcNow, sku: prodA.Sku));
+                db.Products.Add(Product.Create(Guid.NewGuid(), storeA.Id, catA.Id, "Null Sku 1", 12m, settingsA, Usd, ProductStatus.Published, DateTimeOffset.UtcNow));
+                db.Products.Add(Product.Create(Guid.NewGuid(), storeA.Id, catA.Id, "Null Sku 2", 12m, settingsA, Usd, ProductStatus.Published, DateTimeOffset.UtcNow));
                 await db.SaveChangesAsync();
             }
 
             await using (var db = _fixture.CreateDbContext())
             {
-                db.Products.Add(Product.Create(Guid.NewGuid(), storeA.Id, catB.Id, "Cross Cat", 10m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow));
+                db.Products.Add(Product.Create(Guid.NewGuid(), storeA.Id, catB.Id, "Cross Cat", 10m, settingsA, Usd, ProductStatus.Published, DateTimeOffset.UtcNow));
                 await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
             }
 
@@ -691,8 +745,8 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         var (storeB, settingsB) = CreateStoreWithSettings("Store B", $"conc-b-{suffix}", StoreType.OnlineOnly, StoreStatus.Active, Kwd);
         var catA = Category.Create(Guid.NewGuid(), storeA.Id, "Cat A", $"conc-cat-a-{suffix}", true, 1);
         var catB = Category.Create(Guid.NewGuid(), storeB.Id, "Cat B", $"conc-cat-b-{suffix}", true, 1);
-        var prodA = Product.Create(Guid.NewGuid(), storeA.Id, catA.Id, "Product A", 12.50m, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
-        var prodB = Product.Create(Guid.NewGuid(), storeB.Id, catB.Id, "Product B", 4.250m, Kwd, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var prodA = Product.Create(Guid.NewGuid(), storeA.Id, catA.Id, "Product A", 12.50m, settingsA, Usd, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var prodB = Product.Create(Guid.NewGuid(), storeB.Id, catB.Id, "Product B", 4.250m, settingsB, Kwd, ProductStatus.Published, DateTimeOffset.UtcNow);
 
         await using (var db = _fixture.CreateDbContext())
         {
@@ -753,7 +807,7 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
     }
 
     [Fact]
-    public async Task HealthEndpoints_LiveIsDbIndependent_AndReadyReflectsSqlConnectivity()
+    public async Task HealthEndpoints_LiveIsDbIndependent_AndReadyUsesOverrideEvenWithCiEnvVarPresent()
     {
         // Healthy DB -> /health/live 200, /health/ready 200
         using (var client = _fixture.CreateHttpsClient())
@@ -767,71 +821,101 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
             Assert.Equal("Healthy", await readyOk.Content.ReadAsStringAsync());
         }
 
-        // Unreachable DB -> /health/live still 200, /health/ready returns 503 Unhealthy without leaking connection string
+        // Simulate CI environment where RETAILFLOW_CONNECTION is set in process environment,
+        // and prove the test's IConfiguration override still targets the unreachable DB.
         const string unreachableConn = "Server=127.0.0.1,14399;Database=RetailFlowUnreachable;User Id=sa;Password=Invalid_123!;Connect Timeout=1;Encrypt=False";
-        await using var unreachableFactory = _fixture.CreateProductionFactory(unreachableConn);
-        using var unreachableClient = unreachableFactory.CreateClient(new WebApplicationFactoryClientOptions
-        {
-            BaseAddress = new Uri("https://retail.example.com"),
-            AllowAutoRedirect = false
-        });
-
-        using var liveStillOk = await unreachableClient.GetAsync("/health/live");
-        Assert.Equal(HttpStatusCode.OK, liveStillOk.StatusCode);
-
-        using var readyFailed = await unreachableClient.GetAsync("/health/ready");
-        var readyBody = await readyFailed.Content.ReadAsStringAsync();
-        Assert.Equal(HttpStatusCode.ServiceUnavailable, readyFailed.StatusCode);
-        Assert.Equal("Unhealthy", readyBody);
-        Assert.DoesNotContain("14399", readyBody, StringComparison.Ordinal);
-        Assert.DoesNotContain("Password", readyBody, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("ConnectionStrings", readyBody, StringComparison.OrdinalIgnoreCase);
-    }
-
-    [Fact]
-    public void ConnectionStringResolution_EnforcesPriorityAndFailsFastOutsideDevelopment()
-    {
         var originalEnv = Environment.GetEnvironmentVariable("RETAILFLOW_CONNECTION");
         try
         {
-            // 1. Missing both in Production -> fail fast without leaking secrets
-            Environment.SetEnvironmentVariable("RETAILFLOW_CONNECTION", null);
-            var prodMissingConfig = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?> { ["AllowedHosts"] = "retail.example.com" })
-                .Build();
+            Environment.SetEnvironmentVariable("RETAILFLOW_CONNECTION", _fixture.ConnectionString);
 
-            var ex = Assert.Throws<InvalidOperationException>(() =>
-                ConnectionStringResolver.ResolveRuntime(prodMissingConfig, isDevelopment: false));
-            Assert.DoesNotContain("Server=.", ex.Message, StringComparison.Ordinal);
+            await using var unreachableFactory = _fixture.CreateProductionFactory(unreachableConn);
+            using var unreachableClient = unreachableFactory.CreateClient(new WebApplicationFactoryClientOptions
+            {
+                BaseAddress = new Uri("https://retail.example.com"),
+                AllowAutoRedirect = false
+            });
 
-            // 2. Empty/whitespace RETAILFLOW_CONNECTION falls back to Configuration
-            Environment.SetEnvironmentVariable("RETAILFLOW_CONNECTION", "   ");
-            var withConfig = new ConfigurationBuilder()
-                .AddInMemoryCollection(new Dictionary<string, string?>
-                {
-                    ["ConnectionStrings:RetailFlow"] = "Server=cfg-host;Database=RetailFlowProduct;"
-                })
-                .Build();
-            Assert.Equal(
-                "Server=cfg-host;Database=RetailFlowProduct;",
-                ConnectionStringResolver.ResolveRuntime(withConfig, isDevelopment: false));
+            using var liveStillOk = await unreachableClient.GetAsync("/health/live");
+            Assert.Equal(HttpStatusCode.OK, liveStillOk.StatusCode);
 
-            // 3. Non-empty RETAILFLOW_CONNECTION overrides Configuration
-            Environment.SetEnvironmentVariable("RETAILFLOW_CONNECTION", "Server=env-host;Database=RetailFlowProduct;");
-            Assert.Equal(
-                "Server=env-host;Database=RetailFlowProduct;",
-                ConnectionStringResolver.ResolveRuntime(withConfig, isDevelopment: false));
-
-            // 4. Missing both in Development -> local fallback works
-            Environment.SetEnvironmentVariable("RETAILFLOW_CONNECTION", null);
-            var emptyConfig = new ConfigurationBuilder().Build();
-            var devConn = ConnectionStringResolver.ResolveRuntime(emptyConfig, isDevelopment: true);
-            Assert.Equal(ConnectionStringResolver.DefaultLocalConnectionString, devConn);
+            using var readyFailed = await unreachableClient.GetAsync("/health/ready");
+            var readyBody = await readyFailed.Content.ReadAsStringAsync();
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, readyFailed.StatusCode);
+            Assert.Equal("Unhealthy", readyBody);
+            Assert.DoesNotContain("14399", readyBody, StringComparison.Ordinal);
+            Assert.DoesNotContain("Password", readyBody, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("ConnectionStrings", readyBody, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
             Environment.SetEnvironmentVariable("RETAILFLOW_CONNECTION", originalEnv);
         }
+    }
+
+    [Fact]
+    public async Task DatabaseReadinessHealthCheck_PropagatesCancellation()
+    {
+        await using var db = _fixture.CreateDbContext();
+        var check = new DatabaseReadinessHealthCheck(db);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            check.CheckHealthAsync(new HealthCheckContext(), cts.Token));
+    }
+
+    [Fact]
+    public void ConnectionStringResolution_EnforcesConfigurationPriorityAndFailsFastOutsideDevelopment()
+    {
+        // 1. Missing both in Production -> fail fast without leaking secrets
+        var prodMissingConfig = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["AllowedHosts"] = "retail.example.com" })
+            .Build();
+
+        var ex = Assert.Throws<InvalidOperationException>(() =>
+            ConnectionStringResolver.ResolveRuntime(prodMissingConfig, isDevelopment: false));
+        Assert.DoesNotContain("Server=.", ex.Message, StringComparison.Ordinal);
+
+        // 2. Whitespace RETAILFLOW_CONNECTION falls back to ConnectionStrings:RetailFlow
+        var whitespacePrimary = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["RETAILFLOW_CONNECTION"] = "   ",
+                ["ConnectionStrings:RetailFlow"] = "Server=cfg-host;Database=RetailFlowProduct;"
+            })
+            .Build();
+        Assert.Equal(
+            "Server=cfg-host;Database=RetailFlowProduct;",
+            ConnectionStringResolver.ResolveRuntime(whitespacePrimary, isDevelopment: false));
+
+        // 3. RETAILFLOW_CONNECTION absent uses ConnectionStrings:RetailFlow
+        var absentPrimary = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:RetailFlow"] = "Server=cfg-host;Database=RetailFlowProduct;"
+            })
+            .Build();
+        Assert.Equal(
+            "Server=cfg-host;Database=RetailFlowProduct;",
+            ConnectionStringResolver.ResolveRuntime(absentPrimary, isDevelopment: false));
+
+        // 4. Non-empty RETAILFLOW_CONNECTION in IConfiguration overrides ConnectionStrings:RetailFlow
+        var bothPresent = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["RETAILFLOW_CONNECTION"] = "Server=primary-host;Database=RetailFlowProduct;",
+                ["ConnectionStrings:RetailFlow"] = "Server=cfg-host;Database=RetailFlowProduct;"
+            })
+            .Build();
+        Assert.Equal(
+            "Server=primary-host;Database=RetailFlowProduct;",
+            ConnectionStringResolver.ResolveRuntime(bothPresent, isDevelopment: false));
+
+        // 5. Missing both in Development -> local fallback works
+        var emptyConfig = new ConfigurationBuilder().Build();
+        var devConn = ConnectionStringResolver.ResolveRuntime(emptyConfig, isDevelopment: true);
+        Assert.Equal(ConnectionStringResolver.DefaultLocalConnectionString, devConn);
     }
 
     private static (Store Store, StoreSettings Settings) CreateStoreWithSettings(
@@ -851,11 +935,11 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
 
         var settings = StoreSettings.Create(
             Guid.NewGuid(),
-            store.Id,
+            store,
             currency,
             "UTC",
             deliveryEnabled: true,
-            pickupEnabled: true);
+            pickupEnabled: storeType == StoreType.Physical);
 
         return (store, settings);
     }
@@ -883,6 +967,7 @@ public sealed class CatalogSqlTestFixture : IAsyncLifetime
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = "localhost",
+                        ["RETAILFLOW_CONNECTION"] = ConnectionString,
                         ["ConnectionStrings:RetailFlow"] = ConnectionString
                     });
                 });
@@ -912,6 +997,7 @@ public sealed class CatalogSqlTestFixture : IAsyncLifetime
 
     public WebApplicationFactory<Program> CreateProductionFactory(string? connectionStringOverride = null)
     {
+        var effectiveConnection = connectionStringOverride ?? ConnectionString;
         return new WebApplicationFactory<Program>()
             .WithWebHostBuilder(builder =>
             {
@@ -921,7 +1007,8 @@ public sealed class CatalogSqlTestFixture : IAsyncLifetime
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = "retail.example.com",
-                        ["ConnectionStrings:RetailFlow"] = connectionStringOverride ?? ConnectionString
+                        ["RETAILFLOW_CONNECTION"] = effectiveConnection,
+                        ["ConnectionStrings:RetailFlow"] = effectiveConnection
                     });
                 });
             });

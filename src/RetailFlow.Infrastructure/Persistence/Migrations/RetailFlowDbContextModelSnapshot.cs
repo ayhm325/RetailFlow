@@ -183,9 +183,13 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Code");
 
+                    b.HasIndex("NumericCode")
+                        .IsUnique()
+                        .HasDatabaseName("UX_Currencies_NumericCode");
+
                     b.ToTable("Currencies", null, t =>
                         {
-                            t.HasCheckConstraint("CK_Currencies_Code_Format", "LEN([Code]) = 3 AND [Code] NOT LIKE '%[^A-Z]%'");
+                            t.HasCheckConstraint("CK_Currencies_Code_Format", "LEN([Code]) = 3 AND [Code] COLLATE Latin1_General_BIN2 NOT LIKE '%[^A-Z]%'");
 
                             t.HasCheckConstraint("CK_Currencies_MinorUnit_Range", "[MinorUnit] >= 0 AND [MinorUnit] <= 4");
 

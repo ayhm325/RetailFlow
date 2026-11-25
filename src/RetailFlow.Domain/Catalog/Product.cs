@@ -1,5 +1,6 @@
 using RetailFlow.Domain.Currencies;
 using RetailFlow.Domain.Inventory;
+using RetailFlow.Domain.Stores;
 
 namespace RetailFlow.Domain.Catalog;
 
@@ -42,13 +43,30 @@ public sealed class Product
         Guid categoryId,
         string name,
         decimal price,
+        StoreSettings storeSettings,
         Currency currency,
         ProductStatus status,
         DateTimeOffset createdAtUtc,
         string? description = null,
         string? sku = null)
     {
+        ArgumentNullException.ThrowIfNull(storeSettings);
         ArgumentNullException.ThrowIfNull(currency);
+
+        if (storeSettings.StoreId != storeId)
+        {
+            throw new ArgumentException(
+                "StoreSettings does not belong to the product's store.",
+                nameof(storeSettings));
+        }
+
+        if (!string.Equals(storeSettings.CurrencyCode, currency.Code, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"Currency '{currency.Code}' does not match store settings currency '{storeSettings.CurrencyCode}'.",
+                nameof(currency));
+        }
+
         MoneyPrecision.EnsureValidAmount(price, currency.MinorUnit, nameof(price));
         if (id == Guid.Empty)
         {

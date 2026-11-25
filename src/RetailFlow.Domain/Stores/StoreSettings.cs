@@ -29,7 +29,7 @@ public sealed class StoreSettings
 
     public static StoreSettings Create(
         Guid id,
-        Guid storeId,
+        Store store,
         Currency currency,
         string timeZoneId,
         bool deliveryEnabled,
@@ -40,17 +40,19 @@ public sealed class StoreSettings
             throw new ArgumentException("StoreSettings id cannot be empty.", nameof(id));
         }
 
-        if (storeId == Guid.Empty)
-        {
-            throw new ArgumentException("StoreId cannot be empty.", nameof(storeId));
-        }
-
+        ArgumentNullException.ThrowIfNull(store);
         ArgumentNullException.ThrowIfNull(currency);
 
         if (!currency.IsActive)
         {
             throw new InvalidOperationException(
                 $"Currency '{currency.Code}' is inactive and cannot be assigned to store settings.");
+        }
+
+        if (store.StoreType == StoreType.OnlineOnly && pickupEnabled)
+        {
+            throw new InvalidOperationException(
+                "Pickup cannot be enabled for OnlineOnly stores.");
         }
 
         if (string.IsNullOrWhiteSpace(timeZoneId))
@@ -61,11 +63,35 @@ public sealed class StoreSettings
         return new StoreSettings
         {
             Id = id,
-            StoreId = storeId,
+            StoreId = store.Id,
             CurrencyCode = currency.Code,
             TimeZoneId = timeZoneId.Trim(),
             DeliveryEnabled = deliveryEnabled,
             PickupEnabled = pickupEnabled
         };
+    }
+
+    public void UpdateFulfillmentOptions(
+        Store store,
+        bool deliveryEnabled,
+        bool pickupEnabled)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        if (store.Id != StoreId)
+        {
+            throw new ArgumentException(
+                "Store does not match these store settings.",
+                nameof(store));
+        }
+
+        if (store.StoreType == StoreType.OnlineOnly && pickupEnabled)
+        {
+            throw new InvalidOperationException(
+                "Pickup cannot be enabled for OnlineOnly stores.");
+        }
+
+        DeliveryEnabled = deliveryEnabled;
+        PickupEnabled = pickupEnabled;
     }
 }

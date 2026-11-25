@@ -15,10 +15,12 @@ internal static class ConnectionStringResolver
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
-        var envConnection = Environment.GetEnvironmentVariable("RETAILFLOW_CONNECTION");
-        if (!string.IsNullOrWhiteSpace(envConnection))
+        // Read RETAILFLOW_CONNECTION through IConfiguration so test/host configuration
+        // overrides take precedence over process-level environment variables.
+        var primaryConnection = configuration["RETAILFLOW_CONNECTION"];
+        if (!string.IsNullOrWhiteSpace(primaryConnection))
         {
-            return envConnection;
+            return primaryConnection;
         }
 
         var configConnection = configuration.GetConnectionString("RetailFlow");

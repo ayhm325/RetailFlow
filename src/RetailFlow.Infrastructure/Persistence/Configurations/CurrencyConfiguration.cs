@@ -13,7 +13,7 @@ internal sealed class CurrencyConfiguration : IEntityTypeConfiguration<Currency>
         {
             table.HasCheckConstraint(
                 "CK_Currencies_Code_Format",
-                "LEN([Code]) = 3 AND [Code] NOT LIKE '%[^A-Z]%'");
+                "LEN([Code]) = 3 AND [Code] COLLATE Latin1_General_BIN2 NOT LIKE '%[^A-Z]%'");
 
             table.HasCheckConstraint(
                 "CK_Currencies_NumericCode_Format",
@@ -44,6 +44,10 @@ internal sealed class CurrencyConfiguration : IEntityTypeConfiguration<Currency>
 
         builder.Property(x => x.IsActive)
             .IsRequired();
+
+        builder.HasIndex(x => x.NumericCode)
+            .IsUnique()
+            .HasDatabaseName("UX_Currencies_NumericCode");
 
         // Source: SIX Financial Information ISO 4217 List One (reviewed 2026-11-25).
         builder.HasData(
