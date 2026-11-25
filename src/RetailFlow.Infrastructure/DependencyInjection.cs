@@ -43,6 +43,8 @@ public static class DependencyInjection
         services.AddScoped<IStoreRequestContextAccessor, StoreRequestContextAccessor>();
         services.AddScoped<IStoreDirectoryResolver, StoreDirectoryResolver>();
         services.AddScoped<IPublicCatalogQueryService, PublicCatalogQueryService>();
+        services.AddScoped<IMerchantStoreService, MerchantStoreService>();
+        services.AddScoped<IMerchantCatalogService, MerchantCatalogService>();
 
         return services;
     }

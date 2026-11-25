@@ -17,21 +17,32 @@ public static class PublicCatalogEndpoints
             .AddEndpointFilter<StoreResolutionEndpointFilter>();
 
         storeGroup.MapGet("", GetStoreIdentityAsync)
-            .WithName("GetPublicStoreIdentity");
+            .WithName("GetPublicStoreIdentity")
+            .Produces<PublicStoreIdentityDto>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         storeGroup.MapGet("/delivery-zones", GetDeliveryZonesAsync)
-            .WithName("GetPublicStoreDeliveryZones");
+            .WithName("GetPublicStoreDeliveryZones")
+            .Produces<PublicDeliveryZonesResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         var group = storeGroup.MapGroup("/catalog");
 
         group.MapGet("/categories", GetCategoriesAsync)
-            .WithName("GetPublicStoreCategories");
+            .WithName("GetPublicStoreCategories")
+            .Produces<CatalogCategoriesResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapGet("/products", GetProductsAsync)
-            .WithName("GetPublicStoreProducts");
+            .WithName("GetPublicStoreProducts")
+            .Produces<CatalogProductsResponse>(StatusCodes.Status200OK)
+            .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapGet("/products/{productId:guid}", GetProductDetailsAsync)
-            .WithName("GetPublicStoreProductDetails");
+            .WithName("GetPublicStoreProductDetails")
+            .Produces<CatalogProductDetailsDto>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         return app;
     }

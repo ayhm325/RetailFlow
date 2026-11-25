@@ -25,7 +25,7 @@ Close remaining Engineering Baseline gates (Gate 2–4) before expanding into th
 - [ ] `AUD-011` Reconcile roadmap status with verified Product Host/catalog implementation in Rev2.0 `phase-roadmap.csv`.
 - [ ] `AUD-012` Refresh CI evidence from actual workflow run and exact SHA in Rev2.0 `baseline-evidence.md`.
 - [ ] `AUD-013` Resolve duplicate source-of-truth drift between handbook Chapter 21 and standalone chapter.
-- [ ] `AUD-014` Validate OpenAPI version/tooling compatibility and ensure error responses are represented; confirm against current official spec before changing version.
+- [x] `AUD-014` Added explicit `.Produces<T>(200)`, `.ProducesValidationProblem(400)`, and `.ProducesProblem(404)` metadata on all 5 public endpoints in `PublicCatalogEndpoints.cs` and verified `/openapi/v1.json` via `OpenApiDocument_InDevelopment_IncludesPublicEndpointsAndProblemResponses`.
 - [x] `AUD-015` Removed hard-coded CI SQL credential in `.github/workflows/ci.yml` and adopted per-run masked ephemeral password generation via `prepare` job output.
 
 ## Next recommended task

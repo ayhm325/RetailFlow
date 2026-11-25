@@ -53,3 +53,9 @@
 - Added: `docs/engineering/decisions/ADR-0005-Order-Fulfillment-Payment-State-Models.md` (`Proposed`, `AUD-004`) and `docs/engineering/decisions/ADR-0006-Checkout-Idempotency-Atomic-Claim.md` (`Proposed`, `AUD-005`/`OD-008`).
 - Fixed (`AUD-015`): Replaced hard-coded `MSSQL_SA_PASSWORD` in `.github/workflows/ci.yml` with a masked per-run ephemeral password generated in a `prepare` job.
 - Updated Control Docs: `ACTIVE-WORK.md`, `CURRENT-STATE.md`, `WORK-LOG.md`.
+
+## 2026-11-26 — Merchant Application/Infrastructure Services, OpenAPI Error Metadata & Data Dictionary (EXEC-003)
+- Type: Application/Infrastructure Services, OpenAPI (`AUD-014`), SQL Integration Tests & Data Dictionary (`Data-Dictionary.md`) on `feature/public-store-catalog-read`.
+- Implemented: `IMerchantStoreService`/`MerchantStoreService`, `IMerchantCatalogService`/`MerchantCatalogService` (tenant-scoped by `StoreId`; no unauthenticated HTTP write endpoints exposed), plus `.ProducesProblem(404)`/`.ProducesValidationProblem(400)` OpenAPI metadata on all 5 public endpoints.
+- Added Docs: `docs/03-Database/Data-Dictionary.md` (column-level As-Is schema across all 8 SQL Server tables).
+- Verified: `dotnet build RetailFlow.slnx --configuration Release --no-restore` (`0` warnings, `0` errors), `dotnet test RetailFlow.slnx --configuration Release --no-build` (`6/6` unit + `59/59` integration pass).

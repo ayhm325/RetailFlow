@@ -8,10 +8,12 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 using RetailFlow.Api.Hosting;
 using RetailFlow.Application.Catalog;
+using RetailFlow.Application.Stores;
 using RetailFlow.Domain.Catalog;
 using RetailFlow.Domain.Currencies;
 using RetailFlow.Domain.Fulfillment;
@@ -1190,6 +1192,101 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         }
     }
 
+    [Fact]
+    public async Task MerchantServices_EnforceTenantIsolationAndUpdateCatalogAndDeliveryZones()
+    {
+        var suffix = NewSuffix();
+        var (storeA, settingsA) = CreateStoreWithSettings("Merch A", $"merch-a-{suffix}", StoreType.Physical, StoreStatus.Active, Jod);
+        var (storeB, settingsB) = CreateStoreWithSettings("Merch B", $"merch-b-{suffix}", StoreType.Physical, StoreStatus.Active, Jod);
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            db.Stores.AddRange(storeA, storeB);
+            db.StoreSettings.AddRange(settingsA, settingsB);
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            await using var scope = _fixture.CreateAsyncScope();
+            var storeService = scope.ServiceProvider.GetRequiredService<IMerchantStoreService>();
+            var catalogService = scope.ServiceProvider.GetRequiredService<IMerchantCatalogService>();
+
+            Assert.True(await storeService.UpdateBrandingAsync(
+                storeA.Id,
+                new UpdateStoreBrandingCommand("Merch A Updated", "https://cdn.example/a.png", "#0F172A", "a@example.com", "+962790000001"),
+                CancellationToken.None));
+
+            Assert.True(await storeService.UpdateAddressesAsync(
+                storeA.Id,
+                new UpdateStoreAddressesCommand("Al-Weibdeh, Amman", "Warehouse 12"),
+                CancellationToken.None));
+
+            var zone = await storeService.CreateDeliveryZoneAsync(
+                storeA.Id,
+                new CreateDeliveryZoneCommand("Shmeisani", 2.750m, true),
+                CancellationToken.None);
+
+            // Cross-tenant storeB cannot mutate storeA's zone
+            var crossTenantZoneUpdate = await storeService.UpdateDeliveryZoneAsync(
+                storeB.Id,
+                zone.Id,
+                new UpdateDeliveryZoneCommand(1.000m, false),
+                CancellationToken.None);
+            Assert.Null(crossTenantZoneUpdate);
+
+            var category = await catalogService.CreateCategoryAsync(
+                storeA.Id,
+                new CreateCategoryCommand("Roasts", "roasts", 1, true),
+                CancellationToken.None);
+
+            var product = await catalogService.CreateProductAsync(
+                storeA.Id,
+                new CreateProductCommand(category.Id, "House Blend", "Smooth roast", $"HB-{suffix}", 9.500m, ProductStatus.Draft, 12),
+                CancellationToken.None);
+            Assert.Equal(ProductStatus.Draft, product.Status);
+            Assert.Equal(12, product.OnHand);
+
+            // Cross-tenant storeB cannot publish or update storeA's product or stock
+            Assert.False(await catalogService.PublishProductAsync(storeB.Id, product.Id, CancellationToken.None));
+            Assert.False(await catalogService.SetInventoryOnHandAsync(storeB.Id, product.Id, 0, CancellationToken.None));
+
+            Assert.True(await catalogService.PublishProductAsync(storeA.Id, product.Id, CancellationToken.None));
+            Assert.True(await catalogService.SetInventoryOnHandAsync(storeA.Id, product.Id, 20, CancellationToken.None));
+
+            using var client = _fixture.CreateHttpsClient();
+            var catalogResponse = await client.GetAsync($"/api/stores/{storeA.Slug}/catalog/products");
+            Assert.Equal(HttpStatusCode.OK, catalogResponse.StatusCode);
+            var catalogPayload = await catalogResponse.Content.ReadFromJsonAsync<CatalogProductsResponse>(JsonOptions);
+            Assert.NotNull(catalogPayload);
+            var published = Assert.Single(catalogPayload!.Items);
+            Assert.Equal(product.Id, published.Id);
+            Assert.True(published.IsAvailable);
+        }
+        finally
+        {
+            await _fixture.DeleteStoresAsync(storeA.Id, storeB.Id);
+        }
+    }
+
+    [Fact]
+    public async Task OpenApiDocument_InDevelopment_IncludesPublicEndpointsAndProblemResponses()
+    {
+        using var client = _fixture.CreateHttpsClient();
+        using var response = await client.GetAsync("/openapi/v1.json");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var openApiJson = await response.Content.ReadAsStringAsync();
+        Assert.Contains("/api/stores/{slug}", openApiJson, StringComparison.Ordinal);
+        Assert.Contains("/api/stores/{slug}/delivery-zones", openApiJson, StringComparison.Ordinal);
+        Assert.Contains("/api/stores/{slug}/catalog/categories", openApiJson, StringComparison.Ordinal);
+        Assert.Contains("/api/stores/{slug}/catalog/products", openApiJson, StringComparison.Ordinal);
+        Assert.Contains("/api/stores/{slug}/catalog/products/{productId}", openApiJson, StringComparison.Ordinal);
+        Assert.Contains("\"404\"", openApiJson, StringComparison.Ordinal);
+        Assert.Contains("\"400\"", openApiJson, StringComparison.Ordinal);
+        Assert.Contains("application/problem+json", openApiJson, StringComparison.Ordinal);
+    }
+
     private static string NewSuffix() => Guid.NewGuid().ToString("N")[..8];
 }
 
@@ -1258,6 +1355,12 @@ public sealed class CatalogSqlTestFixture : IAsyncLifetime
                     });
                 });
             });
+    }
+
+    public Microsoft.Extensions.DependencyInjection.AsyncServiceScope CreateAsyncScope()
+    {
+        var factory = _factory ?? throw new InvalidOperationException("Fixture is not initialized.");
+        return factory.Services.CreateAsyncScope();
     }
 
     public RetailFlowDbContext CreateDbContext()

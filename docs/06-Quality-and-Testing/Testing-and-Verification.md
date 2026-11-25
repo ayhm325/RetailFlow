@@ -8,11 +8,11 @@ All four solutions target `.NET 10` (`10.0.15`), `xUnit 2.9.3`, and execute agai
 
 | Solution | Test Assemblies | Latest Verified Release Result |
 |---|---|---|
-| [RetailFlow.slnx](../../RetailFlow.slnx) | `RetailFlow.Domain.UnitTests` (6) + `RetailFlow.Api.IntegrationTests` (57) | **63 Passed, 0 Failed, 0 Skipped** |
+| [RetailFlow.slnx](../../RetailFlow.slnx) | `RetailFlow.Domain.UnitTests` (6) + `RetailFlow.Api.IntegrationTests` (59) | **65 Passed, 0 Failed, 0 Skipped** |
 | [RetailFlow.IdentitySpike.slnx](../../experiments/IdentitySpike/RetailFlow.IdentitySpike.slnx) | `IdentityScopeUnitTests` (14) + `IdentitySqlServerIntegrationTests` (35) | **49 Passed, 0 Failed, 0 Skipped** |
 | [RetailFlow.SessionTransportSpike.slnx](../../experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.slnx) | `UnitTests` (63) + `IntegrationTests` (27) | **90 Passed, 0 Failed, 0 Skipped** |
 | [RetailFlow.SessionTransportSpike.Playwright.slnx](../../experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.Playwright.slnx) | `PlaywrightTests` (Chromium E2E) | **4 Passed, 0 Failed, 0 Skipped** |
-| **Total** | | **206 / 206 Passed** |
+| **Total** | | **208 / 208 Passed** |
 
 ## 2. Production Test Coverage (`RetailFlow.Api.IntegrationTests`)
 - **Host & Security ([ProductHostIntegrationTests.cs](../../tests/RetailFlow.Api.IntegrationTests/ProductHostIntegrationTests.cs)):** `AllowedHosts` startup rejection (`*`, `0.0.0.0`, `[::]`, leading `.`, empty/whitespace), `ForwardedHeaders`, SPA `Accept` header content negotiation (`Vary: Accept`), and `ProblemDetails` exception hiding.

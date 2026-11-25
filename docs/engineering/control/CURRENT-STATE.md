@@ -19,11 +19,11 @@
 - The current product solution (`RetailFlow.slnx`) and the experimental Identity/SessionTransport solutions (`experiments/IdentitySpike/`, `experiments/SessionTransportSpike/`) remain strictly separate.
 
 ## 2. Product Host implementation facts (verified on `feature/public-store-catalog-read`)
-- **Vertical Slice 01 — Public Store Catalog & Identity Read API** is implemented and verified (`6/6` Domain unit tests + `57/57` SQL integration tests):
+- **Vertical Slice 01 — Public Store Catalog & Identity Read API** is implemented and verified (`6/6` Domain unit tests + `59/59` SQL integration tests):
   - Domain model includes `Currency`, `Store`, `StoreSettings`, `Category`, `Product`, `ProductImage`, `InventoryItem`, `DeliveryZone`, `MoneyPrecision`, and related value/status types.
-  - Application contains `StoreRequestContext`, store resolution abstractions, catalog query and read DTO/service contracts (`PublicStoreIdentityDto`, `PublicDeliveryZonesResponse`).
-  - Infrastructure contains `RetailFlowDbContext`, SQL Server persistence, EF Core mappings, 3 migrations (including `20261125232250_AddStoreBrandingAddressesAndDeliveryZones`), `ConnectionStringResolver`, and `StoreDirectoryResolver`.
-  - API exposes `/health/live`, `/health/ready`, and five public read GET endpoints:
+  - Application contains `StoreRequestContext`, store resolution abstractions, catalog query/read contracts (`PublicStoreIdentityDto`, `PublicDeliveryZonesResponse`), and internal tenant-scoped merchant management contracts (`IMerchantStoreService`, `IMerchantCatalogService`).
+  - Infrastructure contains `RetailFlowDbContext`, SQL Server persistence, EF Core mappings, 3 migrations (including `20261125232250_AddStoreBrandingAddressesAndDeliveryZones`), `ConnectionStringResolver`, `StoreDirectoryResolver`, `MerchantStoreService`, and `MerchantCatalogService`.
+  - API exposes `/health/live`, `/health/ready`, Development `/openapi/v1.json` (with `400`/`404` `ProblemDetails` metadata), and five public read GET endpoints (no unauthenticated write HTTP endpoints exposed):
     - `GET /api/stores/{slug}`
     - `GET /api/stores/{slug}/delivery-zones`
     - `GET /api/stores/{slug}/catalog/categories`
