@@ -22,7 +22,11 @@ public static class ProductHostExtensions
 
         services.AddProblemDetails();
         services.AddOpenApi();
-        services.AddHealthChecks();
+        services.AddHealthChecks()
+            .AddCheck<DatabaseReadinessHealthCheck>(
+                "database",
+                failureStatus: HealthStatus.Unhealthy,
+                tags: ["ready"]);
 
         services.AddSingleton<IValidateOptions<HostFilteringOptions>>(
             _ => new HostFilteringAllowedHostsValidator(environment));
@@ -76,8 +80,8 @@ public static class ProductHostExtensions
             app.MapOpenApi();
         }
 
-        // 8. Health endpoints (unauthenticated; readiness does not yet check a DB
-        //    because no production DbContext exists in this bootstrap stage).
+        // 8. Health endpoints (unauthenticated; /health/live checks process liveness only,
+        //    while /health/ready checks dependencies tagged "ready" including SQL Server).
         app.MapHealthChecks(
             "/health/live",
             new HealthCheckOptions

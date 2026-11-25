@@ -104,7 +104,8 @@ public sealed class ProductHostIntegrationTests
                 {
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
-                        ["AllowedHosts"] = allowedHosts
+                        ["AllowedHosts"] = allowedHosts,
+                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;"
                     });
                 });
             });
@@ -146,7 +147,8 @@ public sealed class ProductHostIntegrationTests
                 {
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
-                        ["AllowedHosts"] = ProductionHost
+                        ["AllowedHosts"] = ProductionHost,
+                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;"
                     });
                 });
             });
@@ -176,7 +178,8 @@ public sealed class ProductHostIntegrationTests
                 {
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
-                        ["AllowedHosts"] = ProductionHost
+                        ["AllowedHosts"] = ProductionHost,
+                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;"
                     });
                 });
                 builder.ConfigureServices(services =>
@@ -363,13 +366,15 @@ public sealed class ProductHostIntegrationTests
                 builder.UseEnvironment(Microsoft.Extensions.Hosting.Environments.Production);
                 builder.ConfigureAppConfiguration((_, config) =>
                 {
+                    var values = new Dictionary<string, string?>
+                    {
+                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;"
+                    };
                     if (allowedHosts is not null)
                     {
-                        config.AddInMemoryCollection(new Dictionary<string, string?>
-                        {
-                            ["AllowedHosts"] = allowedHosts
-                        });
+                        values["AllowedHosts"] = allowedHosts;
                     }
+                    config.AddInMemoryCollection(values);
                 });
             });
     }
