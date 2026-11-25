@@ -70,29 +70,20 @@ jobs:
         run: dotnet build experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.Playwright.slnx --configuration Release
 
       - name: Apply EF Core migrations to SQL Server
+        working-directory: experiments/IdentitySpike
         env:
           ConnectionStrings__IdentitySpike: ${{ env.RETAILFLOW_IDENTITY_SPIKE_CONNECTION }}
         run: |
-          set -euo pipefail
-          for attempt in $(seq 1 10); do
-            if dotnet tool run dotnet-ef --tool-manifest experiments/IdentitySpike/dotnet-tools.json database update \
-              --project experiments/IdentitySpike/src/RetailFlow.IdentitySpike.Api \
-              --startup-project experiments/IdentitySpike/src/RetailFlow.IdentitySpike.Api \
-              --configuration Release \
-              --no-build \
-              --connection "$RETAILFLOW_IDENTITY_SPIKE_CONNECTION"; then
-              break
-            fi
-            if [ "$attempt" -eq 10 ]; then
-              echo "SQL Server was not ready after 10 attempts."
-              exit 1
-            fi
-            sleep 3
-          done
+          dotnet tool run dotnet-ef database update \
+            --project src/RetailFlow.IdentitySpike.Api \
+            --startup-project src/RetailFlow.IdentitySpike.Api \
+            --configuration Release \
+            --no-build \
+            --connection "$RETAILFLOW_IDENTITY_SPIKE_CONNECTION"
 
-          dotnet tool run dotnet-ef --tool-manifest experiments/IdentitySpike/dotnet-tools.json database update \
-            --project experiments/SessionTransportSpike/src/RetailFlow.SessionTransportSpike.Api \
-            --startup-project experiments/SessionTransportSpike/src/RetailFlow.SessionTransportSpike.Api \
+          dotnet tool run dotnet-ef database update \
+            --project ../SessionTransportSpike/src/RetailFlow.SessionTransportSpike.Api \
+            --startup-project ../SessionTransportSpike/src/RetailFlow.SessionTransportSpike.Api \
             --configuration Release \
             --no-build \
             --context SessionTicketDbContext \
