@@ -19,4 +19,8 @@ public sealed class PersistedAuthenticationTicket
     public DateTimeOffset LastRenewedUtc { get; set; }
 
     public DateTimeOffset ExpiresUtc { get; set; }
+
+    // Immutable deadline calculated when the session is created.
+    // Sliding renewal must never extend this value.
+    public DateTimeOffset AbsoluteExpiresUtc { get; set; }
 }

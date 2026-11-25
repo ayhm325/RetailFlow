@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 using RetailFlow.IdentitySpike.Api.Domain.Identity;
 using RetailFlow.IdentitySpike.Api.Infrastructure.Identity;
@@ -34,20 +35,25 @@ public sealed class SqlServerTicketStore : ITicketStore
 
     private readonly TimeProvider _timeProvider;
 
+    private readonly SessionLifetimeOptions _sessionLifetimeOptions;
+
     public SqlServerTicketStore(
         IDbContextFactory<SessionTicketDbContext> dbContextFactory,
         IDataProtectionProvider dataProtectionProvider,
         ILogger<SqlServerTicketStore> logger,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        IOptions<SessionLifetimeOptions> sessionLifetimeOptions)
     {
         ArgumentNullException.ThrowIfNull(dbContextFactory);
         ArgumentNullException.ThrowIfNull(dataProtectionProvider);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(timeProvider);
+        ArgumentNullException.ThrowIfNull(sessionLifetimeOptions);
 
         _dbContextFactory = dbContextFactory;
         _logger = logger;
         _timeProvider = timeProvider;
+        _sessionLifetimeOptions = sessionLifetimeOptions.Value;
 
         _ticketProtector = dataProtectionProvider.CreateProtector(
             "RetailFlow",
@@ -94,13 +100,27 @@ public sealed class SqlServerTicketStore : ITicketStore
         var now = _timeProvider.GetUtcNow();
 
         var createdUtc = ticket.Properties.IssuedUtc ?? now;
-        var expiresUtc = GetRequiredExpiration(ticket);
+        var requestedExpiresUtc = GetRequiredExpiration(ticket);
 
-        if (expiresUtc <= now || expiresUtc <= createdUtc)
+        // The absolute deadline is calculated exactly once.
+        var absoluteExpiresUtc = createdUtc.Add(
+            _sessionLifetimeOptions.AbsoluteLifetime);
+
+        // Never allow the initial ticket to exceed the absolute deadline.
+        var expiresUtc = requestedExpiresUtc < absoluteExpiresUtc
+            ? requestedExpiresUtc
+            : absoluteExpiresUtc;
+
+        if (absoluteExpiresUtc <= now ||
+            expiresUtc <= now ||
+            expiresUtc <= createdUtc)
         {
             throw new InvalidOperationException(
-                "The authentication ticket must have a valid future expiration.");
+                "The authentication ticket must have valid future expiration values.");
         }
+
+        // Keep the protected ticket consistent with the SQL expiration.
+        ticket.Properties.ExpiresUtc = expiresUtc;
 
         var sessionKey = GenerateSessionKey();
 
@@ -115,7 +135,8 @@ public sealed class SqlServerTicketStore : ITicketStore
             ProtectedTicket = protectedTicket,
             CreatedUtc = createdUtc,
             LastRenewedUtc = now,
-            ExpiresUtc = expiresUtc
+            ExpiresUtc = expiresUtc,
+            AbsoluteExpiresUtc = absoluteExpiresUtc
         };
 
         await using var dbContext =
@@ -181,15 +202,20 @@ public sealed class SqlServerTicketStore : ITicketStore
 
         var now = _timeProvider.GetUtcNow();
 
-        if (entity.ExpiresUtc <= now)
+        var isIdleExpired = entity.ExpiresUtc <= now;
+        var isAbsoluteExpired = entity.AbsoluteExpiresUtc <= now;
+
+        if (isIdleExpired || isAbsoluteExpired)
         {
-            // Delete only if this exact expired state still exists.
-            // A concurrent renewal may already have extended the session.
+            // Delete only if the exact expiration state still exists.
+            // This prevents deleting a session that was concurrently renewed.
             await dbContext.AuthenticationTickets
                 .Where(ticket =>
                     ticket.Key == entity.Key &&
                     ticket.ExpiresUtc == entity.ExpiresUtc &&
-                    ticket.ExpiresUtc <= now)
+                    ticket.AbsoluteExpiresUtc == entity.AbsoluteExpiresUtc &&
+                    (ticket.ExpiresUtc <= now ||
+                     ticket.AbsoluteExpiresUtc <= now))
                 .ExecuteDeleteAsync(cancellationToken);
 
             return null;
@@ -317,31 +343,68 @@ public sealed class SqlServerTicketStore : ITicketStore
         var metadata = ExtractRequiredMetadata(ticket);
 
         var now = _timeProvider.GetUtcNow();
-        var expiresUtc = GetRequiredExpiration(ticket);
+        var requestedExpiresUtc = GetRequiredExpiration(ticket);
 
-        if (expiresUtc <= now)
+        if (requestedExpiresUtc <= now)
         {
             return;
         }
-
-        var protectedTicket = ProtectTicket(ticket);
 
         await using var dbContext =
             await _dbContextFactory.CreateDbContextAsync(
                 cancellationToken);
 
-        // Session identity and expiration are monotonic:
+        // Read the immutable absolute deadline from the existing session.
+        // Renewal is not allowed to create or replace the session.
+        DateTimeOffset? absoluteExpiresUtc =
+            await dbContext.AuthenticationTickets
+                .AsNoTracking()
+                .Where(existing =>
+                    existing.Key == key &&
+                    existing.UserId == metadata.UserId &&
+                    existing.AccountKind == metadata.AccountKind &&
+                    existing.StoreId == metadata.StoreId &&
+                    existing.ExpiresUtc > now &&
+                    existing.AbsoluteExpiresUtc > now)
+                .Select(existing =>
+                    (DateTimeOffset?)existing.AbsoluteExpiresUtc)
+                .SingleOrDefaultAsync(cancellationToken);
+
+        if (!absoluteExpiresUtc.HasValue)
+        {
+            _logger.LogDebug(
+                "Session renewal was ignored because the session was missing, " +
+                "expired, or identity-mismatched.");
+            return;
+        }
+
+        // Clamp sliding expiration to the immutable absolute deadline.
+        var effectiveExpiresUtc = requestedExpiresUtc < absoluteExpiresUtc.Value
+            ? requestedExpiresUtc
+            : absoluteExpiresUtc.Value;
+
+        if (effectiveExpiresUtc <= now)
+        {
+            return;
+        }
+
+        // The handler uses this ticket after RenewAsync completes.
+        // Updating the property here ensures that the protected ticket,
+        // the SQL expiration, and the handler's refreshed ticket agree.
+        ticket.Properties.ExpiresUtc = effectiveExpiresUtc;
+
+        var protectedTicket = ProtectTicket(ticket);
+
+        // The update remains conditional:
         //
-        // - The same session key must still exist.
-        // - UserId, AccountKind and StoreId must match.
-        // - The existing session must not have expired.
-        // - The incoming ticket must extend the current expiration.
+        // 1. Same session key.
+        // 2. Same user/account/store identity.
+        // 3. Idle expiration has not passed.
+        // 4. Absolute expiration has not passed.
+        // 5. Absolute deadline has not changed.
+        // 6. Incoming expiration is later than current expiration.
         //
-        // The last condition prevents an older concurrent renewal
-        // from overwriting a newer renewal that already reached SQL Server.
-        //
-        // There is deliberately no INSERT fallback:
-        // a removed session must never be resurrected by RenewAsync.
+        // There is deliberately no INSERT fallback.
         var affectedRows = await dbContext.AuthenticationTickets
             .Where(existing =>
                 existing.Key == key &&
@@ -349,7 +412,9 @@ public sealed class SqlServerTicketStore : ITicketStore
                 existing.AccountKind == metadata.AccountKind &&
                 existing.StoreId == metadata.StoreId &&
                 existing.ExpiresUtc > now &&
-                existing.ExpiresUtc < expiresUtc)
+                existing.AbsoluteExpiresUtc > now &&
+                existing.AbsoluteExpiresUtc == absoluteExpiresUtc.Value &&
+                existing.ExpiresUtc < effectiveExpiresUtc)
             .ExecuteUpdateAsync(
                 setters => setters
                     .SetProperty(
@@ -360,14 +425,15 @@ public sealed class SqlServerTicketStore : ITicketStore
                         now)
                     .SetProperty(
                         existing => existing.ExpiresUtc,
-                        expiresUtc),
+                        effectiveExpiresUtc),
                 cancellationToken);
 
         if (affectedRows == 0)
         {
             _logger.LogDebug(
-                "Session renewal was ignored because the session was missing, expired, " +
-                "identity-mismatched, or already renewed to an equal or later expiration.");
+                "Session renewal was ignored because the session was missing, " +
+                "expired, identity-mismatched, or already renewed to an equal " +
+                "or later expiration.");
         }
     }
 

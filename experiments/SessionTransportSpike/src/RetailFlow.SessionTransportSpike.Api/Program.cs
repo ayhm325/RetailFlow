@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -11,7 +13,9 @@ using RetailFlow.IdentitySpike.Api.Infrastructure.Identity;
 using RetailFlow.IdentitySpike.Api.Infrastructure.Persistence;
 
 using RetailFlow.SessionTransportSpike.Api.Authentication;
+using RetailFlow.SessionTransportSpike.Api.Authorization;
 using RetailFlow.SessionTransportSpike.Api.Contracts;
+using RetailFlow.SessionTransportSpike.Api.Infrastructure.DataProtection;
 using RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence;
 using RetailFlow.SessionTransportSpike.Authentication;
 
@@ -57,10 +61,28 @@ builder.Services.AddScoped<
     IdentityScopeResolver>();
 
 // -----------------------------------------------------------------------------
-// Data Protection
+// Shared Data Protection
 // -----------------------------------------------------------------------------
 
-builder.Services.AddDataProtection();
+var dataProtectionApplicationName =
+    builder.Configuration["DataProtection:ApplicationName"]
+    ?? RetailFlowDataProtectionDefaults.ApplicationName;
+
+if (string.IsNullOrWhiteSpace(dataProtectionApplicationName))
+{
+    throw new InvalidOperationException(
+        "Data Protection ApplicationName cannot be empty.");
+}
+
+using var dataProtectionCertificate = DataProtectionCertificateLoader.Load(
+    builder.Configuration);
+
+builder.Services
+    .AddDataProtection()
+    .SetApplicationName(dataProtectionApplicationName)
+    .PersistKeysToDbContext<SessionTicketDbContext>()
+    .ProtectKeysWithCertificate(dataProtectionCertificate)
+    .UnprotectKeysWithAnyCertificate(dataProtectionCertificate);
 
 // -----------------------------------------------------------------------------
 // ASP.NET Core Identity
@@ -113,6 +135,17 @@ builder.Services.AddSingleton<
 // StoreCustomer Authentication
 // -----------------------------------------------------------------------------
 
+builder.Services
+    .AddOptions<SessionLifetimeOptions>()
+    .BindConfiguration(SessionLifetimeOptions.SectionName)
+    .Validate(
+        options => options.IdleTimeout > TimeSpan.Zero,
+        "Session idle timeout must be greater than zero.")
+    .Validate(
+        options => options.AbsoluteLifetime > options.IdleTimeout,
+        "Absolute session lifetime must be greater than idle timeout.")
+    .ValidateOnStart();
+
 builder.Services.AddScoped<
     StoreCustomerCookieAuthenticationEvents>();
 
@@ -155,11 +188,6 @@ builder.Services
             options.EventsType =
                 typeof(StoreCustomerCookieAuthenticationEvents);
 
-            // Experimental idle lifetime only.
-            // This is not yet the final RetailFlow session policy.
-            options.ExpireTimeSpan =
-                TimeSpan.FromMinutes(15);
-
             options.SlidingExpiration = true;
         });
 
@@ -185,6 +213,13 @@ builder.Services
             // CookieAuthenticationHandler and SqlServerTicketStore
             // must use the same clock.
             options.TimeProvider = timeProvider;
+        })
+    .Configure<IOptions<SessionLifetimeOptions>>(
+        (options, sessionLifetimeOptions) =>
+        {
+            // Idle timeout remains controlled by the configured policy.
+            options.ExpireTimeSpan =
+                sessionLifetimeOptions.Value.IdleTimeout;
         });
 
 // -----------------------------------------------------------------------------
@@ -197,7 +232,22 @@ builder.Services.AddHostedService(
     services => services.GetRequiredService<
         ExpiredSessionTicketCleanupService>());
 
-builder.Services.AddAuthorization();
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy(
+        RetailFlowAuthorizationPolicies.StoreCustomerScope,
+        policy =>
+        {
+            policy.RequireAuthenticatedUser();
+
+            policy.AddRequirements(
+                new StoreCustomerScopeRequirement());
+        });
+});
+
+builder.Services.AddScoped<
+    IAuthorizationHandler,
+    StoreCustomerScopeAuthorizationHandler>();
 
 // -----------------------------------------------------------------------------
 // Build Application
@@ -326,7 +376,8 @@ storeCustomerGroup.MapGet(
                 RetailFlowClaimTypes.StoreId)?.Value
         });
     })
-    .RequireAuthorization();
+    .RequireAuthorization(
+        RetailFlowAuthorizationPolicies.StoreCustomerScope);
 
 // -----------------------------------------------------------------------------
 // Logout
@@ -340,7 +391,8 @@ storeCustomerGroup.MapPost(
 
         return Results.NoContent();
     })
-    .RequireAuthorization();
+    .RequireAuthorization(
+        RetailFlowAuthorizationPolicies.StoreCustomerScope);
 
 // -----------------------------------------------------------------------------
 // Run

@@ -7,11 +7,13 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 
 using RetailFlow.IdentitySpike.Api.Domain.Identity;
 using RetailFlow.IdentitySpike.Api.Domain.Stores;
 using RetailFlow.IdentitySpike.Api.Infrastructure.Identity;
 using RetailFlow.IdentitySpike.Api.Infrastructure.Persistence;
+using RetailFlow.SessionTransportSpike.Api.Infrastructure.DataProtection;
 using RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence;
 using RetailFlow.SessionTransportSpike.Authentication;
 using RetailFlow.SessionTransportSpike.IntegrationTests.Infrastructure;
@@ -184,7 +186,7 @@ public sealed class StoreCustomerSessionIntegrationTests
     }
 
     [Fact]
-    public async Task StoreACookie_CannotAuthenticateAgainstStoreB()
+    public async Task StoreACookie_CannotAccessStoreB()
     {
         var tenants = new List<TestTenant>();
 
@@ -253,27 +255,16 @@ public sealed class StoreCustomerSessionIntegrationTests
                 $"{storeBPath}/me",
                 forgedCookieHeader);
 
-            // Authentication events must reject the mismatched StoreId claim
-            // with 401 Unauthorized.
+            // The ticket belongs to a valid Store A session,
+            // but the authorization policy denies access to Store B.
             Assert.Equal(
-                HttpStatusCode.Unauthorized,
+                HttpStatusCode.Forbidden,
                 forgedResponse.StatusCode);
 
-            var forgedResponseCookies =
-                GetSetCookieHeaders(forgedResponse);
+            Assert.Null(forgedResponse.Headers.Location);
 
-            // Rejection must delete the cookie selected for Store B,
-            // using Store B's path.
-            var rejectedCookie = Assert.Single(
-                forgedResponseCookies,
-                header => header.StartsWith(
-                    $"{BuildCookieName(storeB.StoreId)}=",
-                    StringComparison.Ordinal));
-
-            Assert.Contains(
-                $"path=/api/stores/{storeB.Slug}/customers",
-                rejectedCookie,
-                StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(
+                GetSetCookieHeaders(forgedResponse));
 
             // Case 3:
             // A rejected cross-store replay must not revoke Store A's
@@ -287,6 +278,107 @@ public sealed class StoreCustomerSessionIntegrationTests
             Assert.Equal(
                 HttpStatusCode.OK,
                 originalStoreAResponse.StatusCode);
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task StoreACookie_ReplayedAgainstStoreBAfterSecurityStampInterval_ReturnsForbidden_AndPreservesStoreASession()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            var fakeTimeProvider = new FakeTimeProvider(
+                DateTimeOffset.UtcNow);
+
+            using var hostFactory = SessionTransportApiFactory.Create(
+                RetailFlowDataProtectionDefaults.ApplicationName,
+                TestDataProtectionCertificates.Shared.Path,
+                TestDataProtectionCertificates.Shared.Password,
+                fakeTimeProvider);
+
+            using var client = CreateStatelessClient(hostFactory);
+
+            var storeA = await CreateTenantAsync("secstamp-store-a");
+            tenants.Add(storeA);
+
+            var storeB = await CreateTenantAsync("secstamp-store-b");
+            tenants.Add(storeB);
+
+            var storeAPath =
+                $"/api/stores/{storeA.Slug}/customers";
+
+            var storeBPath =
+                $"/api/stores/{storeB.Slug}/customers";
+
+            // 1. Login to Store A and capture Cookie A.
+            var storeACookie = await LoginCustomerAsync(
+                client,
+                storeA);
+
+            // 2. Rename Cookie A to Store B's cookie name.
+            var forgedCookieHeader = RemapCookieName(
+                storeACookie.CookieHeader,
+                storeACookie.Name,
+                BuildCookieName(storeB.StoreId));
+
+            // 3. Advance beyond SecurityStampValidatorOptions.ValidationInterval (5m),
+            //    while remaining well within the 15-minute idle timeout.
+            fakeTimeProvider.Advance(TimeSpan.FromMinutes(6));
+
+            // 4. Replay the remapped cookie against Store B -> must return 403,
+            //    with no Set-Cookie and without revoking Store A's session.
+            using var forgedResponse = await SendWithCookieAsync(
+                client,
+                HttpMethod.Get,
+                $"{storeBPath}/me",
+                forgedCookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.Forbidden,
+                forgedResponse.StatusCode);
+
+            Assert.Null(forgedResponse.Headers.Location);
+
+            Assert.Empty(
+                GetSetCookieHeaders(forgedResponse));
+
+            // 5. Verify Store A's server-side session still exists in SQL.
+            await using (var scope =
+                         hostFactory.Services.CreateAsyncScope())
+            {
+                var factory = scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<SessionTicketDbContext>>();
+
+                await using var db =
+                    await factory.CreateDbContextAsync();
+
+                var storeASessions = await db.AuthenticationTickets
+                    .AsNoTracking()
+                    .Where(ticket =>
+                        ticket.UserId == storeA.UserId &&
+                        ticket.StoreId == storeA.StoreId)
+                    .ToListAsync();
+
+                Assert.Single(storeASessions);
+            }
+
+            // 6. Replay original Cookie A against Store A -> SecurityStampValidator
+            //    validates normally in Store A's scope and returns 200 OK.
+            using var storeAResponse = await SendWithCookieAsync(
+                client,
+                HttpMethod.Get,
+                $"{storeAPath}/me",
+                storeACookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.OK,
+                storeAResponse.StatusCode);
         }
         finally
         {
@@ -536,6 +628,321 @@ public sealed class StoreCustomerSessionIntegrationTests
             Assert.Equal(
                 HttpStatusCode.OK,
                 secondMeResponse.StatusCode);
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task Session_ExpiresAfterFifteenMinutesOfInactivity_ReturnsUnauthorizedAndRemovesTicket()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            // Create an independent API host and independent clock.
+            // This prevents modifying the shared xUnit fixture clock.
+            var fakeTimeProvider = new FakeTimeProvider(
+                DateTimeOffset.UtcNow);
+
+            using var expirationFactory =
+                SessionTransportApiFactory.Create(
+                    RetailFlowDataProtectionDefaults.ApplicationName,
+                    TestDataProtectionCertificates.Shared.Path,
+                    TestDataProtectionCertificates.Shared.Password,
+                    fakeTimeProvider);
+
+            using var client = CreateStatelessClient(
+                expirationFactory);
+
+            // Create test tenant and customer.
+            var tenant = await CreateTenantAsync(
+                "session-idle-expiration");
+
+            tenants.Add(tenant);
+
+            var basePath =
+                $"/api/stores/{tenant.Slug}/customers";
+
+            // 1. Login and capture the original browser cookie.
+            var issuedCookie = await LoginCustomerAsync(
+                client,
+                tenant);
+
+            // 2. Read the actual persisted SQL session.
+            PersistedAuthenticationTicket session;
+
+            await using (var scope =
+                         expirationFactory.Services.CreateAsyncScope())
+            {
+                var factory = scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<SessionTicketDbContext>>();
+
+                await using var db =
+                    await factory.CreateDbContextAsync();
+
+                var sessions = await db.AuthenticationTickets
+                    .AsNoTracking()
+                    .Where(ticket =>
+                        ticket.UserId == tenant.UserId &&
+                        ticket.StoreId == tenant.StoreId)
+                    .ToListAsync();
+
+                session = Assert.Single(sessions);
+            }
+
+            // 3. Verify the configured 15-minute idle lifetime and 8-hour absolute lifetime.
+            Assert.Equal(
+                TimeSpan.FromMinutes(15),
+                session.ExpiresUtc - session.CreatedUtc);
+
+            Assert.Equal(
+                TimeSpan.FromHours(8),
+                session.AbsoluteExpiresUtc - session.CreatedUtc);
+
+            Assert.True(
+                session.ExpiresUtc > fakeTimeProvider.GetUtcNow());
+
+            // 4. Stop the periodic cleanup worker for this dedicated
+            // test host. We want RetrieveAsync itself to handle expiry.
+            var cleanupService = expirationFactory.Services
+                .GetRequiredService<
+                    ExpiredSessionTicketCleanupService>();
+
+            await cleanupService.StopAsync(
+                CancellationToken.None);
+
+            // 5. Advance time beyond this exact ticket expiration.
+            var remainingLifetime =
+                session.ExpiresUtc - fakeTimeProvider.GetUtcNow();
+
+            Assert.True(remainingLifetime > TimeSpan.Zero);
+
+            fakeTimeProvider.Advance(
+                remainingLifetime + TimeSpan.FromSeconds(1));
+
+            // 6. Replay the ORIGINAL browser cookie.
+            using var expiredResponse = await SendAuthenticatedGetAsync(
+                client,
+                $"{basePath}/me",
+                issuedCookie.CookieHeader);
+
+            // The expired ticket must no longer authenticate.
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                expiredResponse.StatusCode);
+
+            // 7. RetrieveAsync must remove the expired SQL session.
+            await using (var verificationScope =
+                         expirationFactory.Services.CreateAsyncScope())
+            {
+                var factory = verificationScope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<SessionTicketDbContext>>();
+
+                await using var db =
+                    await factory.CreateDbContextAsync();
+
+                var remainingSessions =
+                    await db.AuthenticationTickets
+                        .CountAsync(ticket =>
+                            ticket.StoreId == tenant.StoreId);
+
+                Assert.Equal(0, remainingSessions);
+            }
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task Session_ExpiresAtAbsoluteLifetime_EvenWhileContinuouslyActive()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            var fakeTimeProvider = new FakeTimeProvider(
+                DateTimeOffset.UtcNow);
+
+            // The test uses 20 minutes instead of the production 8 hours.
+            // Idle timeout remains 15 minutes.
+            using var expirationFactory =
+                SessionTransportApiFactory.Create(
+                    RetailFlowDataProtectionDefaults.ApplicationName,
+                    TestDataProtectionCertificates.Shared.Path,
+                    TestDataProtectionCertificates.Shared.Password,
+                    fakeTimeProvider,
+                    absoluteLifetime: TimeSpan.FromMinutes(20));
+
+            using var client = CreateStatelessClient(
+                expirationFactory);
+
+            var tenant = await CreateTenantAsync(
+                "absolute-session-expiration");
+
+            tenants.Add(tenant);
+
+            var basePath =
+                $"/api/stores/{tenant.Slug}/customers";
+
+            // 1. Login and capture the original cookie.
+            var issuedCookie = await LoginCustomerAsync(
+                client,
+                tenant);
+
+            // 2. Read the actual session from SQL Server.
+            async Task<PersistedAuthenticationTicket> ReadSessionAsync()
+            {
+                await using var scope =
+                    expirationFactory.Services.CreateAsyncScope();
+
+                var factory = scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<SessionTicketDbContext>>();
+
+                await using var db =
+                    await factory.CreateDbContextAsync();
+
+                var sessions = await db.AuthenticationTickets
+                    .AsNoTracking()
+                    .Where(ticket =>
+                        ticket.UserId == tenant.UserId &&
+                        ticket.StoreId == tenant.StoreId)
+                    .ToListAsync();
+
+                return Assert.Single(sessions);
+            }
+
+            async Task<int> CountSessionsAsync()
+            {
+                await using var scope =
+                    expirationFactory.Services.CreateAsyncScope();
+
+                var factory = scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<SessionTicketDbContext>>();
+
+                await using var db =
+                    await factory.CreateDbContextAsync();
+
+                return await db.AuthenticationTickets
+                    .CountAsync(ticket =>
+                        ticket.StoreId == tenant.StoreId);
+            }
+
+            var initialSession = await ReadSessionAsync();
+
+            // 3. Verify the two independent deadlines.
+            Assert.Equal(
+                TimeSpan.FromMinutes(15),
+                initialSession.ExpiresUtc - initialSession.CreatedUtc);
+
+            Assert.Equal(
+                TimeSpan.FromMinutes(20),
+                initialSession.AbsoluteExpiresUtc - initialSession.CreatedUtc);
+
+            Assert.Equal(
+                1,
+                await CountSessionsAsync());
+
+            // 4. Stop the periodic cleanup worker.
+            // The test must prove that RetrieveAsync enforces expiration.
+            var cleanupService = expirationFactory.Services
+                .GetRequiredService<ExpiredSessionTicketCleanupService>();
+
+            await cleanupService.StopAsync(
+                CancellationToken.None);
+
+            // 5. Advance 8 minutes.
+            // This is beyond half the 15-minute idle timeout.
+            fakeTimeProvider.Advance(
+                TimeSpan.FromMinutes(8));
+
+            using var firstActivity = await SendAuthenticatedGetAsync(
+                client,
+                $"{basePath}/me",
+                issuedCookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.OK,
+                firstActivity.StatusCode);
+
+            var firstRenewedCookie = ReadIssuedCookie(
+                firstActivity,
+                tenant.StoreId,
+                tenant.Slug);
+
+            var afterFirstRenewal = await ReadSessionAsync();
+
+            // Sliding renewal may extend ExpiresUtc,
+            // but it must not change the absolute deadline.
+            Assert.Equal(
+                initialSession.Key,
+                afterFirstRenewal.Key);
+
+            Assert.Equal(
+                initialSession.AbsoluteExpiresUtc,
+                afterFirstRenewal.AbsoluteExpiresUtc);
+
+            // The requested sliding expiration would exceed 20 minutes.
+            // It must be clamped to the absolute deadline.
+            Assert.Equal(
+                afterFirstRenewal.AbsoluteExpiresUtc,
+                afterFirstRenewal.ExpiresUtc);
+
+            // 6. Keep the user active for another 8 minutes.
+            fakeTimeProvider.Advance(
+                TimeSpan.FromMinutes(8));
+
+            using var secondActivity = await SendAuthenticatedGetAsync(
+                client,
+                $"{basePath}/me",
+                firstRenewedCookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.OK,
+                secondActivity.StatusCode);
+
+            var secondRenewedCookie = ReadIssuedCookie(
+                secondActivity,
+                tenant.StoreId,
+                tenant.Slug);
+
+            var afterSecondRenewal = await ReadSessionAsync();
+
+            Assert.Equal(
+                initialSession.AbsoluteExpiresUtc,
+                afterSecondRenewal.AbsoluteExpiresUtc);
+
+            Assert.Equal(
+                initialSession.AbsoluteExpiresUtc,
+                afterSecondRenewal.ExpiresUtc);
+
+            // 7. Advance beyond the absolute deadline.
+            // The user was active at minute 16, but activity must not
+            // extend the session beyond minute 20.
+            fakeTimeProvider.Advance(
+                TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(1));
+
+            using var expiredResponse = await SendAuthenticatedGetAsync(
+                client,
+                $"{basePath}/me",
+                secondRenewedCookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                expiredResponse.StatusCode);
+
+            // 8. RetrieveAsync must remove the expired SQL session.
+            Assert.Equal(
+                0,
+                await CountSessionsAsync());
         }
         finally
         {
@@ -978,6 +1385,258 @@ public sealed class StoreCustomerSessionIntegrationTests
         {
             await RemoveTestDataAsync(tenants);
         }
+    }
+
+    [Fact]
+    public async Task InstanceA_CookieAndTicket_AreReadableByInstanceB_AndAfterRestart()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            using var clientA = CreateStatelessClient();
+
+            var tenant = await CreateTenantAsync(
+                "dataprotection-multi-instance");
+
+            tenants.Add(tenant);
+
+            // Instance A: Login.
+            var originalCookie = await LoginCustomerAsync(
+                clientA,
+                tenant);
+
+            var originalSession = await ReadSingleSessionAsync(tenant);
+
+            Assert.NotEmpty(originalSession.ProtectedTicket);
+
+            var initialKeyCount = await CountDataProtectionKeysAsync();
+            Assert.True(initialKeyCount > 0);
+
+            // Instance B: Independent host and independent DataProtectionProvider.
+            using (var instanceB = CreateDataProtectionInstance())
+            {
+                using var clientB = CreateStatelessClient(instanceB);
+
+                // Directly retrieve and unprotect the SQL AuthenticationTicket.
+                var ticketStoreB = instanceB.Services
+                    .GetRequiredService<ITicketStore>();
+
+                var recoveredTicket = await ticketStoreB.RetrieveAsync(
+                    originalSession.Key);
+
+                Assert.NotNull(recoveredTicket);
+
+                Assert.Equal(
+                    tenant.UserId,
+                    recoveredTicket.Principal.FindFirst(
+                        System.Security.Claims.ClaimTypes.NameIdentifier)?.Value);
+
+                // Full HTTP flow also verifies Cookie unprotection.
+                using var responseB = await SendAuthenticatedGetAsync(
+                    clientB,
+                    $"/api/stores/{tenant.Slug}/customers/me",
+                    originalCookie.CookieHeader);
+
+                Assert.Equal(
+                    HttpStatusCode.OK,
+                    responseB.StatusCode);
+            }
+
+            // Instance C: Fresh host after B has been shut down.
+            using (var instanceC = CreateDataProtectionInstance())
+            {
+                using var clientC = CreateStatelessClient(instanceC);
+
+                var ticketStoreC = instanceC.Services
+                    .GetRequiredService<ITicketStore>();
+
+                var recoveredTicket = await ticketStoreC.RetrieveAsync(
+                    originalSession.Key);
+
+                Assert.NotNull(recoveredTicket);
+
+                Assert.Equal(
+                    tenant.UserId,
+                    recoveredTicket.Principal.FindFirst(
+                        System.Security.Claims.ClaimTypes.NameIdentifier)?.Value);
+
+                using var responseC = await SendAuthenticatedGetAsync(
+                    clientC,
+                    $"/api/stores/{tenant.Slug}/customers/me",
+                    originalCookie.CookieHeader);
+
+                Assert.Equal(
+                    HttpStatusCode.OK,
+                    responseC.StatusCode);
+            }
+
+            // No new session or key ring should be generated just because
+            // another API instance was started.
+            Assert.Equal(1, await CountSessionsAsync(tenant.StoreId));
+
+            Assert.Equal(
+                initialKeyCount,
+                await CountDataProtectionKeysAsync());
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task DifferentApplicationName_CannotUnprotectCookieOrTicket()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            using var clientA = CreateStatelessClient();
+
+            var tenant = await CreateTenantAsync(
+                "dataprotection-wrong-app");
+
+            tenants.Add(tenant);
+
+            var originalCookie = await LoginCustomerAsync(
+                clientA,
+                tenant);
+
+            var session = await ReadSingleSessionAsync(tenant);
+
+            using var wrongInstance = CreateDataProtectionInstance(
+                applicationName: "RetailFlow.Auth.Wrong");
+
+            using var wrongClient = CreateStatelessClient(wrongInstance);
+
+            var ticketStore = wrongInstance.Services
+                .GetRequiredService<ITicketStore>();
+
+            var ticket = await ticketStore.RetrieveAsync(session.Key);
+
+            Assert.Null(ticket);
+
+            using var response = await SendAuthenticatedGetAsync(
+                wrongClient,
+                $"/api/stores/{tenant.Slug}/customers/me",
+                originalCookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                response.StatusCode);
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task WrongCertificate_CannotUnprotectCookieOrTicket()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            using var clientA = CreateStatelessClient();
+
+            var tenant = await CreateTenantAsync(
+                "dataprotection-wrong-cert");
+
+            tenants.Add(tenant);
+
+            var originalCookie = await LoginCustomerAsync(
+                clientA,
+                tenant);
+
+            var session = await ReadSingleSessionAsync(tenant);
+
+            using var wrongInstance = CreateDataProtectionInstance(
+                certificate: TestDataProtectionCertificates.Wrong);
+
+            using var wrongClient = CreateStatelessClient(wrongInstance);
+
+            var ticketStore = wrongInstance.Services
+                .GetRequiredService<ITicketStore>();
+
+            var ticket = await ticketStore.RetrieveAsync(session.Key);
+
+            Assert.Null(ticket);
+
+            using var response = await SendAuthenticatedGetAsync(
+                wrongClient,
+                $"/api/stores/{tenant.Slug}/customers/me",
+                originalCookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                response.StatusCode);
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    private SessionTransportApiFactory CreateDataProtectionInstance(
+        string? applicationName = null,
+        TestDataProtectionCertificate? certificate = null)
+    {
+        var selectedCertificate =
+            certificate ?? TestDataProtectionCertificates.Shared;
+
+        return SessionTransportApiFactory.Create(
+            applicationName ??
+                RetailFlowDataProtectionDefaults.ApplicationName,
+            selectedCertificate.Path,
+            selectedCertificate.Password,
+            _factory.FakeTimeProvider);
+    }
+
+    private static HttpClient CreateStatelessClient(
+        SessionTransportApiFactory factory)
+    {
+        return factory.CreateClient(
+            new WebApplicationFactoryClientOptions
+            {
+                BaseAddress = new Uri("https://localhost"),
+                AllowAutoRedirect = false,
+                HandleCookies = false
+            });
+    }
+
+    private async Task<int> CountDataProtectionKeysAsync()
+    {
+        await using var scope =
+            _factory.Services.CreateAsyncScope();
+
+        var factory = scope.ServiceProvider
+            .GetRequiredService<
+                IDbContextFactory<SessionTicketDbContext>>();
+
+        await using var db = await factory.CreateDbContextAsync();
+
+        var keys = await db.DataProtectionKeys
+            .AsNoTracking()
+            .ToListAsync();
+
+        Assert.NotEmpty(keys);
+
+        foreach (var key in keys)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(key.Xml));
+
+            var document = System.Xml.Linq.XDocument.Parse(key.Xml!);
+
+            Assert.True(
+                document.Descendants().Any(
+                    element => element.Name.LocalName == "encryptedSecret"),
+                "A Data Protection key was stored without the expected " +
+                "certificate-encrypted secret.");
+        }
+
+        return keys.Count;
     }
 
     private HttpClient CreateClient()

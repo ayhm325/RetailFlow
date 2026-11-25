@@ -1,8 +1,10 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 namespace RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence;
 
-public sealed class SessionTicketDbContext : DbContext
+public sealed class SessionTicketDbContext
+    : DbContext, IDataProtectionKeyContext
 {
     public SessionTicketDbContext(
         DbContextOptions<SessionTicketDbContext> options)
@@ -12,6 +14,8 @@ public sealed class SessionTicketDbContext : DbContext
 
     public DbSet<PersistedAuthenticationTicket> AuthenticationTickets =>
         Set<PersistedAuthenticationTicket>();
+
+    public DbSet<DataProtectionKey> DataProtectionKeys { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -52,8 +56,10 @@ public sealed class SessionTicketDbContext : DbContext
                 .HasColumnType("datetimeoffset")
                 .IsRequired();
 
-            // Supports future revocation of all sessions for a user
-            // within a specific store.
+            entity.Property(ticket => ticket.AbsoluteExpiresUtc)
+                .HasColumnType("datetimeoffset")
+                .IsRequired();
+
             entity.HasIndex(ticket => new
             {
                 ticket.UserId,
@@ -61,8 +67,15 @@ public sealed class SessionTicketDbContext : DbContext
                 ticket.AccountKind
             });
 
-            // Supports efficient expiration cleanup.
             entity.HasIndex(ticket => ticket.ExpiresUtc);
+
+            entity.HasIndex(ticket => ticket.AbsoluteExpiresUtc);
+        });
+
+        // Shared ASP.NET Core Data Protection Key Ring.
+        modelBuilder.Entity<DataProtectionKey>(entity =>
+        {
+            entity.ToTable("DataProtectionKeys");
         });
     }
 }
