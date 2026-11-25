@@ -20,7 +20,7 @@
 
 | المرحلة | الحالة |
 | :--- | :--- |
-| **0 — Baseline** | الأساس المحلي وملف CI (`.github/workflows/ci.yml`) منجزان؛ بانتظار أول تشغيل فعلي على GitHub Actions |
+| **0 — Baseline** | الأساس المحلي وخط CI ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) منجزان وناجحان على GitHub Actions |
 | **1 — Model** | نموذج Identity الأساسي منجز، وقرارات Profile/Membership متبقية |
 | **2 — Scoped Store** | منجزة، بما في ذلك Resolve/Scope Middleware وربط Route Groups الفعلية (`StoreCustomer` و`BackOffice`) |
 | **3 — Managers & APIs** | جزئية: Managers وRoute Groups النطاق (`StoreCustomer` و`BackOffice`) منفذة ومختبرة في التطبيق الفعلي؛ Minimal Auth APIs وSignInManager في التطبيق متبقية |
@@ -195,8 +195,8 @@
   - المشغلات (`Triggers`): `push` على `main`، و`pull_request` نحو `main`، و`workflow_dispatch` (بصلاحية دنيا `contents: read` دون `id-token: write` أو أي نشر إلى Azure).
   - بيئة SQL Server في CI: حاوية خدمة `mcr.microsoft.com/mssql/server:2022-latest` على المنفذ `1433` مع `ACCEPT_EULA=Y` وSQL Authentication (`sa`) و`Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True` وتمرير الاتصال عبر `RETAILFLOW_IDENTITY_SPIKE_CONNECTION` وتطبيق ترحيلات `IdentitySpikeDbContext` و`SessionTicketDbContext` قبل الاختبار.
   - الحلول المنفذة بالتسلسل بإعداد `Release`: `RetailFlow.IdentitySpike.slnx`، و`RetailFlow.SessionTransportSpike.slnx`، و`RetailFlow.SessionTransportSpike.Playwright.slnx` مع تثبيت Chromium وتبعياته عبر `playwright.ps1` ورفع تقارير `TRX` وملفات التشخيص عند الفشل أو النجاح (`if: always()`).
-  - حالة التشغيل الفعلي على GitHub Actions: **لم يُشغَّل على GitHub Actions بعد** (لم يُدفع التعديل إلى المستودع البعيد بعد؛ النتائج المثبتة حالياً هي التشغيل المحلي بإعداد `Release`: `49/49` في `IdentitySpike` و`90/90` في `SessionTransportSpike` و`4/4` في `Playwright`).
-- **Next:** دفع ملف CI والتحقق من أول تشغيل فعلي على GitHub Actions، ثم استكمال بوابات `AUTH-ADR-01` المتبقية (التحقق من `ForwardedHeaders` على Azure App Service، واختبارات الأداء، وحسم تعدد المتاجر في المتصفح، ومتطلبات Production Readiness لـ Data Protection).
+  - حالة التشغيل الفعلي على GitHub Actions: **نجح فعلياً (`success`)** في التشغيل [`45599582646`](https://github.com/ayhm325/RetailFlow/actions/runs/45599582646) على Commit `80ee5dae155bccec3455c7b62aa7c933129e6eea` (مدة `2m54s`، على `ubuntu-24.04` مع حاوية SQL Server 2022، شاملاً ترحيل السياقين وجميع اختبارات `IdentitySpike` و`SessionTransportSpike` و`Playwright` بإعداد `Release` ورفع `ci-test-diagnostics`).
+- **Next:** استكمال بوابات `AUTH-ADR-01` المتبقية (التحقق من `ForwardedHeaders` على Azure App Service، واختبارات الأداء، وحسم تعدد المتاجر في المتصفح، ومتطلبات Production Readiness لـ Data Protection).
 - لا يُعد Identity Scope أو Authentication/Authorization مكتملًا إنتاجيًا حتى تنجح اختبارات التكامل السابقة وتُنفذ اختبارات الصلاحيات المطلوبة في المراحل اللاحقة.
 
 ### ز. بوابة القبول قبل Phase 07
