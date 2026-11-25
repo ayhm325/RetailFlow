@@ -133,6 +133,17 @@ builder.Services.AddSingleton<
 // StoreCustomer Authentication
 // -----------------------------------------------------------------------------
 
+builder.Services
+    .AddOptions<SessionLifetimeOptions>()
+    .BindConfiguration(SessionLifetimeOptions.SectionName)
+    .Validate(
+        options => options.IdleTimeout > TimeSpan.Zero,
+        "Session idle timeout must be greater than zero.")
+    .Validate(
+        options => options.AbsoluteLifetime > options.IdleTimeout,
+        "Absolute session lifetime must be greater than idle timeout.")
+    .ValidateOnStart();
+
 builder.Services.AddScoped<
     StoreCustomerCookieAuthenticationEvents>();
 
@@ -175,11 +186,6 @@ builder.Services
             options.EventsType =
                 typeof(StoreCustomerCookieAuthenticationEvents);
 
-            // Experimental idle lifetime only.
-            // This is not yet the final RetailFlow session policy.
-            options.ExpireTimeSpan =
-                TimeSpan.FromMinutes(15);
-
             options.SlidingExpiration = true;
         });
 
@@ -205,6 +211,13 @@ builder.Services
             // CookieAuthenticationHandler and SqlServerTicketStore
             // must use the same clock.
             options.TimeProvider = timeProvider;
+        })
+    .Configure<IOptions<SessionLifetimeOptions>>(
+        (options, sessionLifetimeOptions) =>
+        {
+            // Idle timeout remains controlled by the configured policy.
+            options.ExpireTimeSpan =
+                sessionLifetimeOptions.Value.IdleTimeout;
         });
 
 // -----------------------------------------------------------------------------

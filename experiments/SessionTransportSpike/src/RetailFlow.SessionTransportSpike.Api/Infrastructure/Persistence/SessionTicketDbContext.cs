@@ -56,6 +56,10 @@ public sealed class SessionTicketDbContext
                 .HasColumnType("datetimeoffset")
                 .IsRequired();
 
+            entity.Property(ticket => ticket.AbsoluteExpiresUtc)
+                .HasColumnType("datetimeoffset")
+                .IsRequired();
+
             entity.HasIndex(ticket => new
             {
                 ticket.UserId,
@@ -64,6 +68,8 @@ public sealed class SessionTicketDbContext
             });
 
             entity.HasIndex(ticket => ticket.ExpiresUtc);
+
+            entity.HasIndex(ticket => ticket.AbsoluteExpiresUtc);
         });
 
         // Shared ASP.NET Core Data Protection Key Ring.

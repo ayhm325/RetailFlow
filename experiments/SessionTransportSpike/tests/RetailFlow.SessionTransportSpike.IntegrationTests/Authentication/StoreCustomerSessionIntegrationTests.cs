@@ -604,10 +604,14 @@ public sealed class StoreCustomerSessionIntegrationTests
                 session = Assert.Single(sessions);
             }
 
-            // 3. Verify the configured 15-minute idle lifetime.
+            // 3. Verify the configured 15-minute idle lifetime and 8-hour absolute lifetime.
             Assert.Equal(
                 TimeSpan.FromMinutes(15),
                 session.ExpiresUtc - session.CreatedUtc);
+
+            Assert.Equal(
+                TimeSpan.FromHours(8),
+                session.AbsoluteExpiresUtc - session.CreatedUtc);
 
             Assert.True(
                 session.ExpiresUtc > fakeTimeProvider.GetUtcNow());
@@ -659,6 +663,196 @@ public sealed class StoreCustomerSessionIntegrationTests
 
                 Assert.Equal(0, remainingSessions);
             }
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task Session_ExpiresAtAbsoluteLifetime_EvenWhileContinuouslyActive()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            var fakeTimeProvider = new FakeTimeProvider(
+                DateTimeOffset.UtcNow);
+
+            // The test uses 20 minutes instead of the production 8 hours.
+            // Idle timeout remains 15 minutes.
+            using var expirationFactory =
+                SessionTransportApiFactory.Create(
+                    RetailFlowDataProtectionDefaults.ApplicationName,
+                    TestDataProtectionCertificates.Shared.Path,
+                    TestDataProtectionCertificates.Shared.Password,
+                    fakeTimeProvider,
+                    absoluteLifetime: TimeSpan.FromMinutes(20));
+
+            using var client = CreateStatelessClient(
+                expirationFactory);
+
+            var tenant = await CreateTenantAsync(
+                "absolute-session-expiration");
+
+            tenants.Add(tenant);
+
+            var basePath =
+                $"/api/stores/{tenant.Slug}/customers";
+
+            // 1. Login and capture the original cookie.
+            var issuedCookie = await LoginCustomerAsync(
+                client,
+                tenant);
+
+            // 2. Read the actual session from SQL Server.
+            async Task<PersistedAuthenticationTicket> ReadSessionAsync()
+            {
+                await using var scope =
+                    expirationFactory.Services.CreateAsyncScope();
+
+                var factory = scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<SessionTicketDbContext>>();
+
+                await using var db =
+                    await factory.CreateDbContextAsync();
+
+                var sessions = await db.AuthenticationTickets
+                    .AsNoTracking()
+                    .Where(ticket =>
+                        ticket.UserId == tenant.UserId &&
+                        ticket.StoreId == tenant.StoreId)
+                    .ToListAsync();
+
+                return Assert.Single(sessions);
+            }
+
+            async Task<int> CountSessionsAsync()
+            {
+                await using var scope =
+                    expirationFactory.Services.CreateAsyncScope();
+
+                var factory = scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<SessionTicketDbContext>>();
+
+                await using var db =
+                    await factory.CreateDbContextAsync();
+
+                return await db.AuthenticationTickets
+                    .CountAsync(ticket =>
+                        ticket.StoreId == tenant.StoreId);
+            }
+
+            var initialSession = await ReadSessionAsync();
+
+            // 3. Verify the two independent deadlines.
+            Assert.Equal(
+                TimeSpan.FromMinutes(15),
+                initialSession.ExpiresUtc - initialSession.CreatedUtc);
+
+            Assert.Equal(
+                TimeSpan.FromMinutes(20),
+                initialSession.AbsoluteExpiresUtc - initialSession.CreatedUtc);
+
+            Assert.Equal(
+                1,
+                await CountSessionsAsync());
+
+            // 4. Stop the periodic cleanup worker.
+            // The test must prove that RetrieveAsync enforces expiration.
+            var cleanupService = expirationFactory.Services
+                .GetRequiredService<ExpiredSessionTicketCleanupService>();
+
+            await cleanupService.StopAsync(
+                CancellationToken.None);
+
+            // 5. Advance 8 minutes.
+            // This is beyond half the 15-minute idle timeout.
+            fakeTimeProvider.Advance(
+                TimeSpan.FromMinutes(8));
+
+            using var firstActivity = await SendAuthenticatedGetAsync(
+                client,
+                $"{basePath}/me",
+                issuedCookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.OK,
+                firstActivity.StatusCode);
+
+            var firstRenewedCookie = ReadIssuedCookie(
+                firstActivity,
+                tenant.StoreId,
+                tenant.Slug);
+
+            var afterFirstRenewal = await ReadSessionAsync();
+
+            // Sliding renewal may extend ExpiresUtc,
+            // but it must not change the absolute deadline.
+            Assert.Equal(
+                initialSession.Key,
+                afterFirstRenewal.Key);
+
+            Assert.Equal(
+                initialSession.AbsoluteExpiresUtc,
+                afterFirstRenewal.AbsoluteExpiresUtc);
+
+            // The requested sliding expiration would exceed 20 minutes.
+            // It must be clamped to the absolute deadline.
+            Assert.Equal(
+                afterFirstRenewal.AbsoluteExpiresUtc,
+                afterFirstRenewal.ExpiresUtc);
+
+            // 6. Keep the user active for another 8 minutes.
+            fakeTimeProvider.Advance(
+                TimeSpan.FromMinutes(8));
+
+            using var secondActivity = await SendAuthenticatedGetAsync(
+                client,
+                $"{basePath}/me",
+                firstRenewedCookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.OK,
+                secondActivity.StatusCode);
+
+            var secondRenewedCookie = ReadIssuedCookie(
+                secondActivity,
+                tenant.StoreId,
+                tenant.Slug);
+
+            var afterSecondRenewal = await ReadSessionAsync();
+
+            Assert.Equal(
+                initialSession.AbsoluteExpiresUtc,
+                afterSecondRenewal.AbsoluteExpiresUtc);
+
+            Assert.Equal(
+                initialSession.AbsoluteExpiresUtc,
+                afterSecondRenewal.ExpiresUtc);
+
+            // 7. Advance beyond the absolute deadline.
+            // The user was active at minute 16, but activity must not
+            // extend the session beyond minute 20.
+            fakeTimeProvider.Advance(
+                TimeSpan.FromMinutes(4) + TimeSpan.FromSeconds(1));
+
+            using var expiredResponse = await SendAuthenticatedGetAsync(
+                client,
+                $"{basePath}/me",
+                secondRenewedCookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                expiredResponse.StatusCode);
+
+            // 8. RetrieveAsync must remove the expired SQL session.
+            Assert.Equal(
+                0,
+                await CountSessionsAsync());
         }
         finally
         {

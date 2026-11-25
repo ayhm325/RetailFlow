@@ -83,7 +83,9 @@ public sealed class ExpiredSessionTicketCleanupService : BackgroundService
                 cancellationToken);
 
         var deletedCount = await dbContext.AuthenticationTickets
-            .Where(ticket => ticket.ExpiresUtc <= now)
+            .Where(ticket =>
+                ticket.ExpiresUtc <= now ||
+                ticket.AbsoluteExpiresUtc <= now)
             .ExecuteDeleteAsync(cancellationToken);
 
         if (deletedCount > 0)

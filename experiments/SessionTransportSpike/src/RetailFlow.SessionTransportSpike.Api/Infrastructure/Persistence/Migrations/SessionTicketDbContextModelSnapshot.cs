@@ -48,6 +48,9 @@ namespace RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence.Migrat
                         .IsUnicode(false)
                         .HasColumnType("varchar(64)");
 
+                    b.Property<DateTimeOffset>("AbsoluteExpiresUtc")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<int>("AccountKind")
                         .HasColumnType("int");
 
@@ -73,6 +76,8 @@ namespace RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence.Migrat
                         .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Key");
+
+                    b.HasIndex("AbsoluteExpiresUtc");
 
                     b.HasIndex("ExpiresUtc");
 

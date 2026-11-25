@@ -1,3 +1,5 @@
+using System.Globalization;
+
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -8,6 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Time.Testing;
 
 using RetailFlow.SessionTransportSpike.Api.Infrastructure.DataProtection;
+using RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence;
 
 namespace RetailFlow.SessionTransportSpike.IntegrationTests.Infrastructure;
 
@@ -19,6 +22,7 @@ public sealed class SessionTransportApiFactory
     private readonly string _applicationName;
     private readonly string _certificatePath;
     private readonly string _certificatePassword;
+    private readonly TimeSpan _absoluteLifetime;
 
     public FakeTimeProvider FakeTimeProvider =>
         _fakeTimeProvider;
@@ -30,7 +34,8 @@ public sealed class SessionTransportApiFactory
             RetailFlowDataProtectionDefaults.ApplicationName,
             TestDataProtectionCertificates.Shared.Path,
             TestDataProtectionCertificates.Shared.Password,
-            new FakeTimeProvider(DateTimeOffset.UtcNow))
+            new FakeTimeProvider(DateTimeOffset.UtcNow),
+            SessionLifetimeOptions.DefaultAbsoluteLifetime)
     {
     }
 
@@ -39,7 +44,8 @@ public sealed class SessionTransportApiFactory
         string applicationName,
         string certificatePath,
         string certificatePassword,
-        FakeTimeProvider fakeTimeProvider)
+        FakeTimeProvider fakeTimeProvider,
+        TimeSpan absoluteLifetime)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(applicationName);
         ArgumentException.ThrowIfNullOrWhiteSpace(certificatePath);
@@ -47,11 +53,18 @@ public sealed class SessionTransportApiFactory
 
         ArgumentNullException.ThrowIfNull(fakeTimeProvider);
 
+        if (absoluteLifetime <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(absoluteLifetime));
+        }
+
         _applicationName = applicationName;
         _certificatePath = certificatePath;
         _certificatePassword = certificatePassword;
 
         _fakeTimeProvider = fakeTimeProvider;
+        _absoluteLifetime = absoluteLifetime;
     }
 
     // Factory method for independent instances.
@@ -59,13 +72,16 @@ public sealed class SessionTransportApiFactory
         string applicationName,
         string certificatePath,
         string certificatePassword,
-        FakeTimeProvider fakeTimeProvider)
+        FakeTimeProvider fakeTimeProvider,
+        TimeSpan? absoluteLifetime = null)
     {
         return new SessionTransportApiFactory(
             applicationName,
             certificatePath,
             certificatePassword,
-            fakeTimeProvider);
+            fakeTimeProvider,
+            absoluteLifetime ??
+                SessionLifetimeOptions.DefaultAbsoluteLifetime);
     }
 
     private static string ConnectionString =>
@@ -95,7 +111,12 @@ public sealed class SessionTransportApiFactory
                         _certificatePath,
 
                     ["DataProtection:Certificate:Password"] =
-                        _certificatePassword
+                        _certificatePassword,
+
+                    ["Authentication:Session:AbsoluteLifetime"] =
+                        _absoluteLifetime.ToString(
+                            "c",
+                            CultureInfo.InvariantCulture)
                 });
         });
 
