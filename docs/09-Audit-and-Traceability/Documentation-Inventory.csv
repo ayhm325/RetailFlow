@@ -1,0 +1,19 @@
+Document,Path,Purpose,ValidityStatus,ActionTaken
+Root README,README.md,Repository entry point and quick verification commands,Accurate (Created),Created
+Docs Index,docs/README.md,Central documentation navigation index,Accurate (Created),Created
+Product Host Bootstrap,docs/product-host-bootstrap.md,Initial host bootstrap specification,Partially outdated -> Updated,Updated lines 28 51 91-92 to reflect Slice 01
+Public Catalog Slice,docs/public-store-catalog-slice.md,Vertical Slice 01 implementation record,Accurate,Retained
+AUTH-ADR-01,docs/AUTH-ADR-01-Session-Transport.md,Session transport ADR (v0.14 Proposed),Accurate (Proposed),Retained unchanged
+Phase 06 Spike Status,docs/phase-06-identity-spike-status.md,Identity & Session Transport PoC record,Accurate,Retained unchanged
+Project Overview,docs/00-Project-Overview/Project-Overview.md,Product vision actors and glossary (As-Is vs To-Be),Accurate (Created),Created
+Requirements & Business Rules,docs/01-Requirements/Requirements-and-Business-Rules.md,FR/NFR/BR traceability summary,Accurate (Created),Created
+System Architecture,docs/02-Architecture/System-Architecture.md,Architecture layers dependencies and Mermaid diagrams,Accurate (Created),Created
+Database Design,docs/03-Database/Database-Design-and-Migrations.md,RetailFlowProduct schema constraints and migrations,Accurate (Created),Created
+Security & Identity Architecture,docs/04-Security-and-Identity/Security-and-Identity-Architecture.md,Production security vs PoC boundaries,Accurate (Created),Created
+Public Catalog API,docs/05-API/Public-Catalog-API.md,HTTP endpoint contracts validation and health probes,Accurate (Created),Created
+Testing & Verification,docs/06-Quality-and-Testing/Testing-and-Verification.md,Test suites counts and coverage,Accurate (Created),Created
+Deployment & Configuration,docs/07-Deployment-and-Operations/Deployment-and-Configuration.md,CI pipeline connection resolution and Azure target,Accurate (Created),Created
+Implementation Status & Roadmap,docs/08-Engineering-Management/Implementation-Status-and-Roadmap.md,Status debt and roadmap,Accurate (Created),Created
+ADR Catalog,docs/08-Engineering-Management/Architecture-Decision-Records/ADR-Catalog.md,Consolidated ADRs (ADR-001 to ADR-004),Accurate (Created),Created
+Comprehensive Audit Report,docs/09-Audit-and-Traceability/Comprehensive-Audit-Report.md,Full 20-section engineering audit,Accurate (Created),Created
+Documentation Change Report,docs/09-Audit-and-Traceability/Documentation-Change-Report.md,Audit of documentation changes,Accurate (Created),Created

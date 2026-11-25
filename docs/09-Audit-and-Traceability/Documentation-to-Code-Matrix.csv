@@ -1,0 +1,5 @@
+Document,Statement,CodeEvidence,Accuracy,RequiredAction
+docs/product-host-bootstrap.md,Previously claimed RetailFlow.slnx had only 2 projects and no DbContext/migrations/ready DB check,RetailFlow.slnx (5 projects) RetailFlowDbContext.cs DatabaseReadinessHealthCheck.cs,Was outdated -> Updated,Updated in this audit to reference Slice 01
+docs/public-store-catalog-slice.md,Describes Currency StoreSettings MoneyPrecision DatabaseReadinessHealthCheck ConnectionStringResolver and Category.IsActive visibility,Matches src/ and tests/ implementation at 04392c8,Accurate,Retained
+docs/AUTH-ADR-01-Session-Transport.md,AUTH-ADR-01 status is Proposed (v0.14); Auth not enabled in production,RetailFlow.Api Program.cs has no UseAuthentication/UseAuthorization,Accurate,Retained unchanged
+docs/phase-06-identity-spike-status.md,Documents IdentitySpike (49 tests) and SessionTransportSpike (90 + 4 Playwright tests) in experiments/,Matches experiments/ solutions and test projects,Accurate,Retained unchanged
