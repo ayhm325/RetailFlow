@@ -1,4 +1,7 @@
 Work_ID,Related_ID,Title,Priority,Status,Owner,Next_Action,Acceptance_Evidence,Updated_At
-WORK-001,AUD-001,Resolve AC-07 canonical definition,High,Open,Owner/AI pending approval,Compare source chapter and CSV; propose mapping,Approved canonical AC record plus traceability links,2026-11-26
-WORK-002,AUD-002,Complete FR traceability,High,Open,Owner/AI,Map each FR to AC/BR/NFR/Test/Source/Commit/CI,No generic placeholders; all missing links explicit,2026-11-26
-WORK-003,AUD-003,Map original business rules,High,Open,Owner/AI,Map BR-001..BR-012 to invariant/aggregate/constraint/test,Reviewed one-to-one mapping,2026-11-26
+WORK-001,AUD-001,Resolve AC-07 canonical definition,High,Ready for Review (Pending PO Sign-off on CR-G1-001/004),Owner/AI,Obtain PO confirmation on CR-G1-001 and OD-007,docs/01-Requirements/Acceptance-Criteria.csv + Acceptance-Criteria-Reconciliation.md,2026-11-26
+WORK-002,AUD-002,Complete FR traceability,High,Ready for Review,Owner/AI,Independent semantic review & keep synchronized on feature PRs,docs/09-Audit-and-Traceability/Requirements-Traceability-Matrix.csv + validate-gate1-baseline.ps1 (796/796 mechanical pass),2026-11-26
+WORK-003,AUD-003,Map original business rules,High,Ready for Review,Owner/AI,Independent semantic review & keep BR matrix synchronized in Gate 2+,docs/01-Requirements/Business-Rules-Traceability-Matrix.csv (12/12 mapped),2026-11-26
+WORK-004,AUD-007,Restore detailed Use Case specifications,Medium,Ready for Review,Owner/AI,Resolve OD-001..OD-005 before Gate 4 implementation,docs/01-Requirements/Use-Case-Specifications.md (UC-01..UC-10),2026-11-26
+WORK-005,AUD-004,Separate Order/Fulfillment/Payment state models,High,Open,Backend/Architecture Owner,Begin only after Gate 1 review/approval,Approved state model contract + diagram + tests,2026-11-26
+WORK-006,AUD-005,Redesign Checkout idempotency contract,High,Open,Backend/Architecture Owner,Begin only after Gate 1 review/approval,Approved idempotency contract + concurrency tests,2026-11-26

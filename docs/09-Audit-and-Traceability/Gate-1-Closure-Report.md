@@ -1,25 +1,20 @@
-# Gate 1 Closure Report — Requirements & Business Baseline
+# Gate 1 Review & Readiness Report — Requirements & Business Baseline
 
 **Document ID:** `RF-G1-CLOSE-001` | **Gate:** `Gate 1 (Requirements & Business Baseline)`
-**Baseline `main` Commit:** `b73d30cc0656b5c4f2e3a867bda7885135d047e8` (incorporating `04392c875c275e99f4b5ee378f63b3a8b8fc541d`)
-**Working Branch:** `docs/engineering-baseline-remediation-gate-1`
+**Gate Status:** **`READY FOR INDEPENDENT REVIEW`** *(Not yet approved/closed by Product Owner)*
+**Docs Baseline (`main`):** `e204c9e6f0d570be24fbdb2750889dd464d1e077` | **Code Snapshot:** `04392c875c275e99f4b5ee378f63b3a8b8fc541d`
 
-## 1. Findings Closed in Gate 1
+## 1. Findings Remediated for Review
 
-| Audit ID | Finding | Resolution & Canonical Artifacts | Status |
+| Audit ID | Finding | Remediated Artifacts | Review Status |
 |---|---|---|---|
-| **AUD-001** | Acceptance Criteria conflict (`AC-07` dual meaning) & missing canonical AC register | Created canonical [Acceptance-Criteria.csv](../01-Requirements/Acceptance-Criteria.csv) (`AC-01`–`AC-08`) and [Acceptance-Criteria-Reconciliation.md](../01-Requirements/Acceptance-Criteria-Reconciliation.md); preserved `AC-07` for order-cancellation inventory release, consolidated public storefront `FulfillmentAddress`/`Pickup` under `AC-08`, and documented missing external `AC-09`/`AC-10`. | Closed (Pending PO confirmation on `CR-G1-001`/`CR-G1-004`) |
-| **AUD-002** | Incomplete Requirements Traceability (`FR-001`–`FR-042`, `NFR-001`–`NFR-009`) | Rebuilt [Requirements-Traceability-Matrix.csv](Requirements-Traceability-Matrix.csv) covering all `FR-001`–`FR-042` with 3-dimensional status (`LifecycleStatus`, `ImplementationStatus`, `VerificationStatus`), exact file/test paths, and CI evidence (`04392c875c275e99f4b5ee378f63b3a8b8fc541d` / CI `45622486827`), plus [NFR-Register.csv](../01-Requirements/NFR-Register.csv) (`NFR-001`–`NFR-009`). | Closed |
-| **AUD-003** | Missing Business Rules to Domain Invariants & Aggregates mapping | Created [Business-Rules-Traceability-Matrix.csv](../01-Requirements/Business-Rules-Traceability-Matrix.csv) mapping `BR-001`–`BR-012` to `ST-*`, `PR-*`, `IN-*`, `OR-*`, `MNY-01`, `REL-01`, `TX-01`, `INV-01`, aggregates, enforcement layers, and verified tests. | Closed |
-| **AUD-007** | Incomplete Use Case Specifications (`UC-01`–`UC-10`) | Authored full 12-subsection specifications for `UC-01`–`UC-10` with Gherkin `Given/When/Then` examples, trust boundaries, cross-cutting rules (`UC-C01`–`UC-C07`), and explicit open decisions in [Use-Case-Specifications.md](../01-Requirements/Use-Case-Specifications.md). | Closed |
+| **AUD-001** | Acceptance Criteria conflict (`AC-07` & Rev2.0 `AC-08`–`AC-10`) | [Acceptance-Criteria.csv](../01-Requirements/Acceptance-Criteria.csv) (`AC-01`–`AC-08`) and [Acceptance-Criteria-Reconciliation.md](../01-Requirements/Acceptance-Criteria-Reconciliation.md) (full Phase 02 <-> Rev2.0 <-> Gate 1 crosswalk; preserves Phase 02 `AC-07` as local/staging/API/tests). | Ready for Review (Pending PO Sign-off on `CR-G1-001` & `CR-G1-004`) |
+| **AUD-002** | Incomplete Requirements Traceability (`FR-001`–`FR-042`, `NFR-001`–`NFR-011`) | [Requirements-Traceability-Matrix.csv](Requirements-Traceability-Matrix.csv) and [NFR-Register.csv](../01-Requirements/NFR-Register.csv) with separated `LifecycleStatus`, `ImplementationStatus`, and `VerificationStatus`. | Ready for Review |
+| **AUD-003** | Missing Business Rules to Domain Invariants mapping | [Business-Rules-Traceability-Matrix.csv](../01-Requirements/Business-Rules-Traceability-Matrix.csv) (`BR-001`–`BR-012` mapped accurately without conflating `BR-003` with `ST-02` or `BR-009` with `AC-05`). | Ready for Review |
+| **AUD-007** | Incomplete Use Case Specifications (`UC-01`–`UC-10`) | [Use-Case-Specifications.md](../01-Requirements/Use-Case-Specifications.md) (12-subsection specifications, Gherkin examples, `UC-C01`–`UC-C07`, and explicit open decisions). | Ready for Review |
 
-## 2. Scope & Guardrails Compliance
-
-- **Code / Schema / CI Touched:** None (`src/`, `tests/`, `experiments/`, `.github/` untouched).
-- **Remote Operations:** None (no `git push`, no Pull Request, `main` untouched).
-- **Gate 2–4 Items:** Not modified; dependencies and open decisions recorded in [Change-Log-and-Open-Decisions.md](../08-Engineering-Management/Change-Log-and-Open-Decisions.md).
-
-## 3. Missing External Inputs & Open Decisions
-
-1. **Missing Local Files Referenced in Brief:** `Master_Engineering_Handbook_AR` (Rev 2.0.0), `Documentation_to_Code_Audit_AR` (Rev 1.0), and `registers/acceptance-criteria.csv` (`AC-09`, `AC-10`) were not present in the local workspace or `Downloads`; recorded explicitly under `CR-G1-004` / `OD-007` without fabrication.
-2. **Product & Architecture Open Decisions (`OD-001`–`OD-008`):** Reservation expiry, customer cancellation cutoff, merchant rejection reasons, Jordan delivery GeoAreas, proof-of-delivery minimum data, `AUTH-ADR-01` approval, and order concurrency/idempotency standard remain explicitly open for Product Owner / Architecture sign-off in Gates 2–4.
+## 2. Separation of Verification Layers
+1. **Automated Mechanical Validation (`scripts/validate-gate1-baseline.ps1`):** Verifies row counts, ID uniqueness, cross-reference resolution, status-combination rules, placeholder bans, and C# test method existence. Does **not** prove semantic correctness or owner approval.
+2. **Manual Semantic Review:** Performed during the corrective pass (reconciling `AC-07`, `BR-003`, `BR-009`, `BR-011`, `NFR-010`/`011`, and `ADR-*`/`OD-*` crosswalks).
+3. **Human Owner Approval:** Pending Product Owner / Architecture review on `CR-G1-001`, `CR-G1-004`, and `OD-001`–`OD-008` in [Change-Log-and-Open-Decisions.md](../08-Engineering-Management/Change-Log-and-Open-Decisions.md).
+4. **Implementation & Runtime Verification:** Product Host code/test evidence remains anchored at `04392c875c275e99f4b5ee378f63b3a8b8fc541d` (`53` integration tests); unimplemented slices remain `Not Implemented` / `Not Verified`.

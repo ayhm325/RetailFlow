@@ -251,7 +251,7 @@ Feature: UC-02 Review Store Application
 - **Functional Requirements:** `FR-008`, `FR-009`, `FR-038`, `FR-039`, `FR-040`, `FR-041`
 - **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-007`
 - **Business Rules & Invariants:** `BR-002`, `ST-03`, `ST-04`, `REL-01`
-- **Acceptance Criteria:** `AC-08` (and `AC-07` deprecated alias)
+- **Acceptance Criteria:** `AC-01`, `AC-02` (FulfillmentAddress privacy via `FR-006`/`ST-04`; Pickup rule via `FR-041`/`BR-010`/`ST-03`)
 - **Cross-Cutting Rules:** `UC-C01`, `UC-C02`, `UC-C04`
 
 #### 9. Data Ownership, Tenant Scope & Authorization Condition
@@ -337,7 +337,7 @@ Feature: UC-03 Configure Store Identity & Settings
 - **Functional Requirements:** `FR-010`, `FR-011`, `FR-012`, `FR-013`, `FR-014`, `FR-015`
 - **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-004`, `NFR-006`
 - **Business Rules & Invariants:** `BR-002`, `BR-004`, `BR-005`, `BR-006`, `PR-01`, `PR-02`, `PR-03`, `IN-01`, `IN-02`, `MNY-01`, `REL-01`
-- **Acceptance Criteria:** `AC-01`, `AC-03`, `AC-08`
+- **Acceptance Criteria:** `AC-01`, `AC-02`, `AC-03`
 - **Cross-Cutting Rules:** `UC-C01`, `UC-C02`, `UC-C04`
 
 #### 9. Data Ownership, Tenant Scope & Authorization Condition
@@ -508,7 +508,7 @@ Feature: UC-05 Customer Registration & Sign-In
 - **Functional Requirements:** `FR-012`, `FR-019`, `FR-020`, `FR-021`, `FR-022`
 - **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-003`, `NFR-005`, `NFR-007`, `NFR-009`
 - **Business Rules & Invariants:** `BR-001`, `BR-002`, `BR-003`, `BR-004`, `BR-005`, `ST-01`, `ST-02`, `ST-04`, `PR-02`, `IN-03`, `REL-01`
-- **Acceptance Criteria:** `AC-01`, `AC-03`, `AC-08`
+- **Acceptance Criteria:** `AC-01`, `AC-02`, `AC-03`
 - **Cross-Cutting Rules:** `UC-C02`, `UC-C04`
 
 #### 9. Data Ownership, Tenant Scope & Authorization Condition
@@ -675,7 +675,7 @@ Feature: UC-07 Manage Shopping Cart
 - **7c. Unsupported Delivery Zone (at Step 4):**
   - *Outcome:* `Delivery` is blocked with clear validation error.
 - **7d. `Store Pickup` Unavailable (`OnlineOnly` or `PickupEnabled == false`) (at Step 2):**
-  - *Outcome:* Pickup option is hidden and rejected server-side if submitted (`ST-03`, `AC-08`).
+  - *Outcome:* Pickup option is hidden and rejected server-side if submitted (`FR-041`, `BR-010`, `ST-03`).
 - **7e. Concurrent Last-Unit Purchase (at Step 9):**
   - *Outcome:* Concurrency control (`INV-01` / `IN-02`) ensures only one request reserves the last unit; the second fails cleanly without negative availability (`AC-06`).
 - **7f. Duplicate Checkout Submission / Retry (at Step 7–8):**
@@ -685,7 +685,7 @@ Feature: UC-07 Manage Shopping Cart
 - **Functional Requirements:** `FR-026`, `FR-027`, `FR-028`, `FR-029`, `FR-030`, `FR-031`
 - **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`, `NFR-005`, `NFR-008`
 - **Business Rules & Invariants:** `BR-002`, `BR-006`, `BR-007`, `BR-008`, `BR-009`, `ST-03`, `PR-02`, `IN-01`, `IN-02`, `IN-04`, `OR-01`, `OR-02`, `OR-03`, `MNY-01`, `TX-01`, `INV-01`, `REL-01`
-- **Acceptance Criteria:** `AC-01`, `AC-04`, `AC-05`, `AC-06`, `AC-08`
+- **Acceptance Criteria:** `AC-01`, `AC-04`, `AC-05`
 - **Cross-Cutting Rules:** `UC-C01`..`UC-C07`
 
 #### 9. Data Ownership, Tenant Scope & Authorization Condition
@@ -823,7 +823,7 @@ Feature: UC-09 Manage Order Fulfillment & Delivery/Pickup
 
 #### 3. Stakeholder Interests & Success Guarantee
 - **Customer / Merchant:** Wants eligible orders cancelled cleanly with accurate reason tracking.
-- **Inventory Integrity:** Wants reserved stock returned to available stock **exactly once**, even under concurrent cancellation attempts (`AC-07` / `BR-012`).
+- **Inventory Integrity:** Wants reserved stock returned to available stock **exactly once**, even under concurrent cancellation attempts (`FR-037`, `BR-009`, `IN-04`, `OR-08`).
 - **Success Guarantee:** Order transitions to `Cancelled`, active reservation is marked released and `InventoryItem.Reserved` is decremented **once**, with reason and actor logged.
 
 #### 4. Trigger & Explicit Preconditions
@@ -848,7 +848,7 @@ Feature: UC-09 Manage Order Fulfillment & Delivery/Pickup
 - **7a. Completed Order (`Delivered` or `PickedUp`) (at Step 2):**
   - *Outcome:* Cancellation rejected (`OR-08`).
 - **7b. Already `Cancelled` Order (at Step 2 or Concurrent Request):**
-  - *Outcome:* Idempotent/safe rejection or no-op; inventory is **never** released twice (`AC-07`, `OR-09`).
+  - *Outcome:* Idempotent/safe rejection or no-op; inventory is **never** released twice (`FR-037`, `BR-009`, `IN-04`, `OR-08`).
 - **7c. Concurrent Cancellation Attempts (at Step 4–5):**
   - *Outcome:* Concurrency guard ensures only the first transition releases stock (`BR-012`, `IN-04`, `TX-01`).
 - **7d. Cancellation Requested During Preparation or Out-for-Delivery (at Step 2):**
@@ -858,7 +858,7 @@ Feature: UC-09 Manage Order Fulfillment & Delivery/Pickup
 - **Functional Requirements:** `FR-036`
 - **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`, `NFR-008`
 - **Business Rules & Invariants:** `BR-002`, `BR-011`, `BR-012`, `IN-01`, `IN-02`, `IN-04`, `OR-08`, `OR-09`, `TX-01`, `INV-01`, `REL-01`
-- **Acceptance Criteria:** `AC-01`, `AC-07`
+- **Acceptance Criteria:** `AC-02`, `AC-06` (Reservation release contract traced via `FR-037`, `BR-009`, `IN-04`, `OR-08`)
 - **Cross-Cutting Rules:** `UC-C01`, `UC-C02`, `UC-C05`, `UC-C06`, `UC-C07`
 
 #### 9. Data Ownership, Tenant Scope & Authorization Condition
@@ -879,7 +879,7 @@ Feature: UC-10 Cancel Order & Release Inventory
     Then the Order status becomes "Cancelled"
     And InventoryItem.Reserved becomes 0 (not -2)
 ```
-- **Planned Negative/Abuse Tests:** Cancel `Delivered` order, cancel already-`Cancelled` order twice sequentially and concurrently (`AC-07`), Customer B cancelling Customer A's order.
+- **Planned Negative/Abuse Tests:** Cancel `Delivered` order, cancel already-`Cancelled` order twice sequentially and concurrently (`FR-037` / `BR-009`), Customer B cancelling Customer A's order.
 
 #### 12. Open Decisions, Assumptions, Out-of-Scope Cases, Dependencies & Evidence Status
 - **Open Decisions:** `OD-002` (Customer self-cancellation cutoff stage), `OD-003` (Merchant cancellation reasons).
