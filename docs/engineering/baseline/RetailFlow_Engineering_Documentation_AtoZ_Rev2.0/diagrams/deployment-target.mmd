@@ -1,0 +1,10 @@
+flowchart TB
+  Browser[Browser] --> HTTPS[Azure App Service HTTPS edge / same origin]
+  HTTPS --> Host[ASP.NET Core .NET 10 Product Host]
+  Host --> DB[(Managed SQL Server service - selection pending)]
+  Host --> DP[Shared protected Data Protection key store - after Identity adoption]
+  Host --> Obs[Central telemetry platform - selection pending]
+  GH[GitHub Actions with OIDC] --> CI[Build / Test / Scan]
+  CI --> Staging[Staging deployment]
+  Staging --> Gate[Smoke + E2E + approval]
+  Gate --> Prod[Production release]

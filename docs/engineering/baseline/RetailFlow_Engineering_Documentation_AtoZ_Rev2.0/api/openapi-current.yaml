@@ -1,0 +1,178 @@
+openapi: 3.1.1
+info:
+  title: RetailFlow Public Store Catalog API
+  version: 0.1.0-baseline
+  description: >-
+    Draft contract inferred from Product Host source at commit
+    04392c875c275e99f4b5ee378f63b3a8b8fc541d. It documents current public
+    GET endpoints only; validate against generated OpenAPI before publishing.
+servers:
+  - url: /
+paths:
+  /api/stores/{slug}/catalog/categories:
+    get:
+      operationId: getPublicStoreCategories
+      summary: List active categories for an active store
+      parameters:
+        - $ref: '#/components/parameters/StoreSlug'
+      responses:
+        '200':
+          description: Categories returned for the resolved store
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CategoriesResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/stores/{slug}/catalog/products:
+    get:
+      operationId: getPublicStoreProducts
+      summary: Search and page through published products in active categories
+      parameters:
+        - $ref: '#/components/parameters/StoreSlug'
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: pageSize
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+        - name: search
+          in: query
+          schema: { type: [string, 'null'], maxLength: 100 }
+        - name: categoryId
+          in: query
+          schema: { type: [string, 'null'], format: uuid }
+        - name: categorySlug
+          in: query
+          schema: { type: [string, 'null'] }
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [newest, price_asc, price_desc, name_asc, name_desc]
+            default: newest
+      responses:
+        '200':
+          description: Page of published products
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductsResponse' }
+        '400': { $ref: '#/components/responses/ValidationProblem' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/stores/{slug}/catalog/products/{productId}:
+    get:
+      operationId: getPublicStoreProductDetails
+      summary: Get one published product by identifier inside the resolved store
+      parameters:
+        - $ref: '#/components/parameters/StoreSlug'
+        - name: productId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Product details
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductDetails' }
+        '404': { $ref: '#/components/responses/NotFound' }
+components:
+  parameters:
+    StoreSlug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 100 }
+  responses:
+    NotFound:
+      description: Store or product not found / not publicly available
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
+    ValidationProblem:
+      description: Invalid query parameters
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ValidationProblemDetails' }
+  schemas:
+    CategoriesResponse:
+      type: object
+      required: [storeName, storeSlug, categories]
+      properties:
+        storeName: { type: string }
+        storeSlug: { type: string }
+        categories:
+          type: array
+          items: { $ref: '#/components/schemas/Category' }
+    Category:
+      type: object
+      required: [id, name, slug, sortOrder]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        sortOrder: { type: integer }
+    ProductsResponse:
+      type: object
+      required: [page, pageSize, totalCount, totalPages, items]
+      properties:
+        page: { type: integer }
+        pageSize: { type: integer }
+        totalCount: { type: integer }
+        totalPages: { type: integer }
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/ProductSummary' }
+    ProductSummary:
+      type: object
+      required: [id, categoryId, categoryName, categorySlug, name, price, currencyCode, isAvailable]
+      properties:
+        id: { type: string, format: uuid }
+        categoryId: { type: string, format: uuid }
+        categoryName: { type: string }
+        categorySlug: { type: string }
+        name: { type: string }
+        price: { type: number, format: decimal }
+        currencyCode: { type: string, minLength: 3, maxLength: 3 }
+        primaryImageUrl: { type: [string, 'null'], format: uri }
+        isAvailable: { type: boolean }
+    ProductDetails:
+      type: object
+      required: [id, categoryId, categoryName, categorySlug, name, price, currencyCode, isAvailable, images]
+      properties:
+        id: { type: string, format: uuid }
+        categoryId: { type: string, format: uuid }
+        categoryName: { type: string }
+        categorySlug: { type: string }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        sku: { type: [string, 'null'] }
+        price: { type: number, format: decimal }
+        currencyCode: { type: string }
+        isAvailable: { type: boolean }
+        images:
+          type: array
+          items: { $ref: '#/components/schemas/ProductImage' }
+    ProductImage:
+      type: object
+      required: [imageUrl, sortOrder]
+      properties:
+        imageUrl: { type: string, format: uri }
+        altText: { type: [string, 'null'] }
+        sortOrder: { type: integer }
+    ProblemDetails:
+      type: object
+      properties:
+        type: { type: [string, 'null'], format: uri-reference }
+        title: { type: [string, 'null'] }
+        status: { type: [integer, 'null'] }
+        detail: { type: [string, 'null'] }
+        instance: { type: [string, 'null'], format: uri-reference }
+    ValidationProblemDetails:
+      allOf:
+        - $ref: '#/components/schemas/ProblemDetails'
+        - type: object
+          properties:
+            errors:
+              type: object
+              additionalProperties:
+                type: array
+                items: { type: string }

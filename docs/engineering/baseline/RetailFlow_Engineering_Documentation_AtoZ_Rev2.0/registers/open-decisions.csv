@@ -1,0 +1,27 @@
+﻿Decision ID,Topic,Question to Resolve,Affected Area,Decision Owner,Status,Dependency
+OD-001,Multi-store browser identity,هل يجب دعم جلستين متزامنتين لمتجرين في Tabs ضمن Browser Profile واحد؟,Identity/Session,Security + Product,Open,Blocks final session transport
+OD-002,Identity persistence baseline,ما مخطط Identity النهائي في Product DB وكيف يُفصل Customer عن BackOffice؟,Identity,Security + Data,Open,Before integration
+OD-003,Merchant authorization matrix,ما أفعال Owner وStaff ومن يملك دعوة/تعطيل العضوية؟,Identity/Access,Product + Security,Open,Before merchant writes
+OD-004,Email verification and recovery,هل email verification/password reset داخل MVP؟ وما provider؟,Identity,Product Owner,Open,Before public customer accounts
+OD-005,Reservation expiry,متى تنتهي حجوزات المخزون غير المدفوعة/غير المؤكدة؟,Inventory/Orders,Product + Backend,Open,Before checkout implementation
+OD-006,Stock reservation moment,هل reservation عند checkout أم عند merchant confirmation؟,Inventory/Orders,Product Owner,Open,Before inventory workflow
+OD-007,Order state machine,المسارات النهائية لـ Delivery وPickup والرفض والإلغاء والتسليم,Orders/Fulfillment,Product Owner,Open,Before order API
+OD-008,Cancellation policy,من يستطيع الإلغاء وفي أي حالة، وهل يختلف بعد التجهيز أو الخروج للتوصيل؟,Orders,Product Owner,Open,Before cancellation API
+OD-009,COD collection semantics,من يثبت التحصيل ومتى؟ وكيف تسجل محاولة فاشلة أو مبلغ جزئي؟,Payments/Operations,Product + Operations,Open,Before order completion
+OD-010,Currency default and tenant choice,هل لكل متجر اختيار عملته؟ وهل JOD افتراضي أم لا؟,Stores/Pricing,Product Owner,Open,Before merchant onboarding
+OD-011,Tax/rounding policy,هل الأسعار تشمل الضريبة؟ قواعد rounding للرسوم والخصومات مستقبلية؟,Pricing,Product + Finance,Open,Before checkout acceptance
+OD-012,Delivery zones semantics,كيفية تطبيع المناطق ومنع التداخل وتغيير الرسوم بعد طلب سابق؟,Fulfillment,Product Owner,Open,Before delivery checkout
+OD-013,Store public address,ما البيانات التي تظهر علناً وما هي بيانات fulfilment الداخلية؟,Stores/Privacy,Product + Privacy,Open,Before store profile UI
+OD-014,Image storage provider,Azure Blob أو بديل؟ lifecycle/resize/CDN/quota/abuse controls؟,Media,Platform + Product,Open,Before image upload
+OD-015,Notification channels,Email/SMS/WhatsApp؟ provider/cost/templates/retry/outbox؟,Notifications,Product + Operations,Open,Before production communication
+OD-016,RPO/RTO,ما أهداف فقد البيانات وزمن الاستعادة المقبولة والممولة؟,Operations,Product + Platform,Open,Before production
+OD-017,SLOs and load targets,ما availability/latency/checkout throughput/tenant scale targets؟,Quality/SRE,Product + Platform,Open,Before load test gate
+OD-018,Data retention and erasure,مدد الاحتفاظ للحسابات والعناوين والطلبات والسجلات والحذف؟,Privacy,Legal + Product,Open,Before live PII
+OD-019,Legal market review,المتطلبات القانونية والضريبية وحماية المستهلك في السوق المستهدف؟,Legal,Legal advisor,Open,Before launch
+OD-020,Platform admin support access,متى يسمح بالدخول لبيانات تاجر لأغراض دعم؟ كيف break-glass audit؟,Platform Ops,Security + Product,Open,Before admin support
+OD-021,Deployment target details,Azure App Service plan/region/scale/network/DB service/cost?,Infrastructure,Platform Owner,Open,Before provisioning
+OD-022,React architecture,Router/state/cache/forms/design system/accessibility/error handling?,Frontend,Frontend Owner,Open,Before SPA
+OD-023,API versioning/deprecation,ما سياسة contract changes وإشعار clients؟,API Governance,Architecture Owner,Open,Before external clients
+OD-024,Audit retention/integrity,ما الأحداث التي تسجل، من يقرأها، وما مدة عدم قابلية العبث؟,Audit,Security + Legal,Open,Before merchant/admin operations
+OD-025,Incident response,من on-call؟ severity model؟ customer notification?,Operations,Product + Platform,Open,Before launch
+OD-026,Backup key recovery,كيف تحفظ/تستعيد Data Protection keys والشهادات بأمان؟,Security/Operations,Security + Platform,Open,Before multi-instance production

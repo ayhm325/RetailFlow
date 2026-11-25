@@ -1,0 +1,6 @@
+flowchart TB
+  Customer[Customer / browser] --> RF[RetailFlow platform]
+  Merchant[Merchant / future back office] -. planned .-> RF
+  PlatformAdmin[Platform Admin / future operations] -. planned .-> RF
+  RF --> SQL[(SQL Server RetailFlowProduct)]
+  RF -. current slice only .-> PublicCatalog[Public Catalog Read API]

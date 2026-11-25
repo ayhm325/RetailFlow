@@ -1,0 +1,22 @@
+sequenceDiagram
+  participant C as Customer Browser
+  participant API as Product API
+  participant APP as Checkout Use Case
+  participant DB as SQL Server
+  C->>API: POST Checkout + Idempotency-Key
+  API->>APP: Resolve trusted Store + Customer
+  APP->>DB: Look up idempotency result
+  alt Existing completed key
+    DB-->>APP: Stored result
+    APP-->>API: Existing order response
+  else New checkout
+    APP->>DB: Begin transaction
+    APP->>DB: Re-read products/prices/settings/stock
+    APP->>DB: Validate fulfillment/fees/address
+    APP->>DB: Reserve stock atomically
+    APP->>DB: Insert Order + snapshots + history + idempotency result
+    APP->>DB: Commit
+    DB-->>APP: Commit succeeded
+    APP-->>API: Order response
+  end
+  API-->>C: 201/200 contract result
