@@ -1,0 +1,140 @@
+name: RetailFlow CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build, SQL Integration & Playwright E2E
+    runs-on: ubuntu-24.04
+
+    services:
+      sqlserver:
+        image: mcr.microsoft.com/mssql/server:2022-latest
+        env:
+          ACCEPT_EULA: "Y"
+          MSSQL_SA_PASSWORD: "RetailFlow_Ci_Sql_2026!#9a"
+        ports:
+          - 1433:1433
+        options: >-
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'RetailFlow_Ci_Sql_2026!#9a' -C -Q 'SELECT 1' || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 12
+
+    env:
+      DOTNET_NOLOGO: "true"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+      RETAILFLOW_IDENTITY_SPIKE_CONNECTION: "Server=localhost,1433;Database=RetailFlowIdentitySpike;User Id=sa;Password=RetailFlow_Ci_Sql_2026!#9a;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK from global.json
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/*.slnx', 'global.json') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore .NET local tools
+        run: dotnet tool restore --tool-manifest experiments/IdentitySpike/dotnet-tools.json
+
+      - name: Build IdentitySpike (Release)
+        run: dotnet build experiments/IdentitySpike/RetailFlow.IdentitySpike.slnx --configuration Release
+
+      - name: Build SessionTransportSpike (Release)
+        run: dotnet build experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.slnx --configuration Release
+
+      - name: Build SessionTransportSpike Playwright (Release)
+        run: dotnet build experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.Playwright.slnx --configuration Release
+
+      - name: Apply EF Core migrations to SQL Server
+        env:
+          ConnectionStrings__IdentitySpike: ${{ env.RETAILFLOW_IDENTITY_SPIKE_CONNECTION }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 10); do
+            if dotnet tool run dotnet-ef --tool-manifest experiments/IdentitySpike/dotnet-tools.json database update \
+              --project experiments/IdentitySpike/src/RetailFlow.IdentitySpike.Api \
+              --startup-project experiments/IdentitySpike/src/RetailFlow.IdentitySpike.Api \
+              --configuration Release \
+              --no-build \
+              --connection "$RETAILFLOW_IDENTITY_SPIKE_CONNECTION"; then
+              break
+            fi
+            if [ "$attempt" -eq 10 ]; then
+              echo "SQL Server was not ready after 10 attempts."
+              exit 1
+            fi
+            sleep 3
+          done
+
+          dotnet tool run dotnet-ef --tool-manifest experiments/IdentitySpike/dotnet-tools.json database update \
+            --project experiments/SessionTransportSpike/src/RetailFlow.SessionTransportSpike.Api \
+            --startup-project experiments/SessionTransportSpike/src/RetailFlow.SessionTransportSpike.Api \
+            --configuration Release \
+            --no-build \
+            --context SessionTicketDbContext \
+            --connection "$RETAILFLOW_IDENTITY_SPIKE_CONNECTION"
+
+      - name: Install Playwright Chromium and OS dependencies
+        run: pwsh experiments/SessionTransportSpike/tests/RetailFlow.SessionTransportSpike.PlaywrightTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Run IdentitySpike Unit & SQL Integration Tests (Release)
+        run: |
+          dotnet test experiments/IdentitySpike/RetailFlow.IdentitySpike.slnx \
+            --configuration Release \
+            --no-build \
+            --results-directory TestResults/IdentitySpike \
+            --logger "trx" \
+            --logger "console;verbosity=normal"
+
+      - name: Run SessionTransportSpike Unit & SQL Integration Tests (Release)
+        run: |
+          dotnet test experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.slnx \
+            --configuration Release \
+            --no-build \
+            --results-directory TestResults/SessionTransportSpike \
+            --logger "trx" \
+            --logger "console;verbosity=normal"
+
+      - name: Run SessionTransportSpike Playwright Browser Tests (Release)
+        run: |
+          dotnet test experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.Playwright.slnx \
+            --configuration Release \
+            --no-build \
+            --results-directory TestResults/Playwright \
+            --logger "trx" \
+            --logger "console;verbosity=normal"
+
+      - name: Upload test reports and Playwright diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-test-diagnostics
+          if-no-files-found: warn
+          path: |
+            TestResults/**/*.trx
+            TestResults/**/In/**
+            experiments/SessionTransportSpike/tests/RetailFlow.SessionTransportSpike.PlaywrightTests/bin/Release/net10.0/test-artifacts/**
