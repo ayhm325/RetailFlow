@@ -9,21 +9,21 @@ This register records every material requirement/acceptance change request (`CR-
 
 ## 1. Change Requests (`CR-*`)
 
-### CR-G1-001 — Reconcile `AC-07` Identifier Conflict & Deprecate Duplicate Alias
+### CR-G1-001 — Reconcile `AC-07` Identifier Conflict Between Phase 02 and Rev2.0
 - **Status:** `Proposed (Pending Product Owner Confirmation)`
-- **Source / Problem (`AUD-001`):** Phase 02 §8 defines `AC-07` as *Order cancellation releases reserved inventory once*, whereas the reconstructed `Comprehensive-Audit-Report.md` / `Findings.csv` referenced `AC-07` as *FulfillmentAddress hidden from public catalog responses* and `AC-08` as *Store Pickup hidden/disallowed for OnlineOnly stores*.
-- **Current Requirement:** Two conflicting definitions of `AC-07` in project documentation.
+- **Source / Problem (`AUD-001`):** Original Phase 02 (`v1.0`, p. 9) defines `AC-07` as *Local run, Preview/Staging deployment, documented API & baseline tests*, whereas Rev2.0 [acceptance-criteria.csv](../engineering/baseline/RetailFlow_Engineering_Documentation_AtoZ_Rev2.0/registers/acceptance-criteria.csv) renumbered `AC-07` as *Operational recovery (backup restore & Data Protection key recovery)*.
+- **Current Requirement:** Two conflicting definitions of `AC-07` across Phase 02 and Rev2.0.
 - **Proposed Change:**
-  1. Preserve `AC-07` for its original Phase 02 §8 meaning (*Order cancellation releases reserved inventory once* — `UC-10`, `BR-012`, `OR-09`).
-  2. Assign `AC-08` as the single canonical Acceptance Criterion for *Storefront hides `FulfillmentAddress` and blocks/hides `Pickup` for `OnlineOnly` stores* (`ST-03`, `ST-04`, `UC-03`, `UC-06`).
-  3. Record `AC-07 (audit alias)` as `DeprecatedAlias` in [Acceptance-Criteria-Reconciliation.md](../01-Requirements/Acceptance-Criteria-Reconciliation.md).
-- **Rationale / Evidence:** Preserves original Phase 02 primary requirements numbering without breaking `BR-012` / `UC-10` traceability while keeping `AC-08` implemented and verified by `StoreSettings_PickupAllowedOnlyForPhysicalStores` and `PublicStoreCatalogIntegrationTests`.
-- **Options Considered:** (A) Renumber Phase 02 `AC-07` to `AC-09` (rejected: breaks primary Phase 02 baseline); (B) Keep `AC-07` as Phase 02 cancellation criterion and consolidate public-storefront `FulfillmentAddress`/`Pickup` under `AC-08` (selected).
-- **Impact Analysis:** Updates [Acceptance-Criteria.csv](../01-Requirements/Acceptance-Criteria.csv), [Acceptance-Criteria-Reconciliation.md](../01-Requirements/Acceptance-Criteria-Reconciliation.md), and cross-references in `Requirements-Traceability-Matrix.csv`. Zero code impact.
-- **Related IDs:** `AC-07`, `AC-08`, `BR-012`, `ST-03`, `ST-04`, `UC-03`, `UC-06`, `UC-10`
-- **Owner / Approver:** Product Owner & Technical Documentation Architect
+  1. Preserve `AC-07` for its original Phase 02 meaning (*Local run, Staging/Preview deployment, documented API & baseline tests*).
+  2. Assign `AC-08` (`Proposed`) to *Operational recovery (backup restore, schema/domain data & Data Protection key recovery)* in [Acceptance-Criteria.csv](../01-Requirements/Acceptance-Criteria.csv) and [Acceptance-Criteria-Reconciliation.md](../01-Requirements/Acceptance-Criteria-Reconciliation.md).
+  3. Trace order-cancellation inventory release (`FR-037`, `BR-009`, `UC-10`, `IN-04`, `OR-08`) separately without conflating it with `AC-07` or `AC-05`.
+- **Rationale / Evidence:** Preserves original Phase 02 primary requirements numbering without losing Rev2.0's operational recovery requirement.
+- **Options Considered:** (A) Overwrite Phase 02 `AC-07` with Rev2.0's operational recovery (rejected: breaks Phase 02 baseline); (B) Keep `AC-07` as Phase 02 local/staging/API criterion and track operational recovery under `AC-08` pending PO/Ops approval (selected).
+- **Impact Analysis:** Updates [Acceptance-Criteria.csv](../01-Requirements/Acceptance-Criteria.csv) and [Acceptance-Criteria-Reconciliation.md](../01-Requirements/Acceptance-Criteria-Reconciliation.md). Zero code impact.
+- **Related IDs:** `AC-07`, `AC-08`, `NFR-011`, `AUD-001`
+- **Owner / Approver:** Product Owner & Ops/Security Owners
 - **Date:** `2026-11-26`
-- **Verification Plan:** Verified via `scripts/validate-gate1-baseline.ps1` checking AC uniqueness and zero active meaning collisions.
+- **Verification Plan:** Verified via `scripts/validate-gate1-baseline.ps1` and [Acceptance-Criteria-Reconciliation.md](../01-Requirements/Acceptance-Criteria-Reconciliation.md).
 
 ---
 
@@ -84,3 +84,30 @@ This register records every material requirement/acceptance change request (`CR-
 | **OD-006** | Production Session Transport (`AUTH-ADR-01`) | Approve or revise `AUTH-ADR-01` (currently `Proposed`, v0.14) before integrating `UC-01`, `UC-02`, `UC-05`, and protected write APIs. | `FR-016`–`FR-018`, `NFR-001`, `ID-01`–`ID-03`, `UC-01`, `UC-02`, `UC-05` | Security & Architecture Owners | Gate 3 | `Pending Engineering/Security Approval` |
 | **OD-007** | Promote Rev2.0 `AC-08..AC-10` into Canonical Register | Confirm whether to promote Rev2.0 `AC-08` (Session security), `AC-09` (API error contract), and `AC-10` (Release traceability) from `docs/engineering/baseline/.../registers/acceptance-criteria.csv` into `Acceptance-Criteria.csv` as `AC-09`–`AC-11`. | `AC-07`, `AC-08`, `AUD-001`, `CR-G1-004` | Product Owner / Doc Owner | Gate 1 / Gate 2 | `Pending Product Owner Confirmation` |
 | **OD-008** | Automated Order/Cart Concurrency & Idempotency Standard | Confirm standard concurrency mechanism (`RowVersion` vs pessimistic lock) and `Idempotency-Key` storage/TTL for `UC-08` and `UC-10`. | `FR-030`, `FR-031`, `FR-036`, `NFR-004`, `TX-01`, `INV-01`, `OR-09` | Principal Software Architect | Gate 2 / Gate 4 | `Pending Architecture Approval` |
+
+---
+
+## 3. Identifier Crosswalk (`OD-*` and `ADR-*` — Gate 1 vs Rev2.0)
+
+Because Gate 1 (`Change-Log-and-Open-Decisions.md` / `ADR-Catalog.md`) and Rev2.0 (`open-decisions.csv` / `decision-register.csv`) assigned overlapping IDs independently, the crosswalk below prevents silent ID collisions:
+
+### 3.1 Open Decisions Crosswalk (`OD-*`)
+| Gate 1 ID | Topic | Rev2.0 `open-decisions.csv` Equivalent |
+|---|---|---|
+| `OD-001` | Inventory Reservation Expiry Policy | `OD-005` (Reservation expiry) |
+| `OD-002` | Customer Self-Cancellation Cutoff Stage | `OD-008` (Cancellation policy) |
+| `OD-003` | Merchant Cancellation & Rejection Reasons | `OD-007` / `OD-008` (Order state machine & cancellation) |
+| `OD-004` | Delivery GeoAreas & Fee Schedule (Jordan) | `OD-012` (Delivery zones semantics) |
+| `OD-005` | Proof of Delivery / Pickup Evidence | `OD-007` / `OD-009` (Order completion & COD collection) |
+| `OD-006` | Production Session Transport (`AUTH-ADR-01`) | `OD-001` / `OD-002` (Multi-store browser identity & persistence) |
+| `OD-007` | Promote Rev2.0 `AC-08..AC-10` into Canonical Register | *(Gate 1 reconciliation item; no Rev2.0 OD)* |
+| `OD-008` | Order/Cart Concurrency & Idempotency Standard | `ADR-011` / `ADR-012` (in Rev2.0 `decision-register.csv`) |
+
+### 3.2 Architecture Decision Records Crosswalk (`ADR-*`)
+| `ADR-Catalog.md` ID | Topic | Rev2.0 `decision-register.csv` Equivalent |
+|---|---|---|
+| `ADR-001` | Modular Monolith with Clean Layering | `ADR-001` (Architecture style) |
+| `ADR-002` | Shared DB / Shared Schema with `StoreId` & Composite FKs | `ADR-004` (SQL Server + EF Core) / `ADR-002` (Path-based slug routing) |
+| `ADR-003` | Global ISO 4217 Currency Catalog & `MoneyPrecision` | `ADR-010` (Currency and price precision) |
+| `ADR-004` | Same-Origin Hosting on Azure App Service Linux | `ADR-005` (Same-Origin) / `ADR-014` (Azure App Service Linux) |
+| `AUTH-ADR-01` | Session Transport Strategy (`Proposed`, v0.14) | `ADR-007` / `ADR-008` / `ADR-009` (Session transport, lifetime, CSRF) |

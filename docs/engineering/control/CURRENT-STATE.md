@@ -3,8 +3,8 @@
 > Snapshot date: 2026-11-26  
 > Observed repository: `ayhm325/RetailFlow`  
 > Observed `main` HEAD: `e204c9e6f0d570be24fbdb2750889dd464d1e077` (PR #3 merged)  
-> Active working branch: `feature/public-store-catalog-read` (`2c020de`)  
-> Verified Product Host code/test snapshot: `04392c875c275e99f4b5ee378f63b3a8b8fc541d` (PR #2 and PR #3 modified documentation/governance only)
+> Active working branch: `feature/public-store-catalog-read` (`d867bc2` + local Gate 1 corrective pass)  
+> Verified Product Host code/test snapshot: `04392c875c275e99f4b5ee378f63b3a8b8fc541d` (PR #2, PR #3, and subsequent commits modified documentation/governance/scripts only)
 
 ## 1. Verified repository shape at current HEAD
 - Root contains `RetailFlow.slnx`, `global.json`, `.github/workflows/ci.yml`, `README.md`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `src/`, `tests/`, `experiments/`, `docs/`, `scripts/`, and `tools/`.

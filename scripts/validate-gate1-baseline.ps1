@@ -2,8 +2,10 @@
 .SYNOPSIS
     Validates RetailFlow Gate 1 Requirements & Business Baseline deliverables.
 .DESCRIPTION
-    Checks completeness, uniqueness, cross-reference integrity, absence of generic
-    placeholders, and evidence/path validity for Implemented/Passed claims.
+    Performs mechanical validation ONLY: completeness, uniqueness, cross-reference
+    integrity, absence of generic placeholders, valid status combinations, and
+    resolution of test/source file paths and C# test method names.
+    NOTE: Mechanical validation does NOT prove semantic correctness or PO approval.
 #>
 [CmdletBinding()]
 param(
@@ -14,6 +16,7 @@ $ErrorActionPreference = "Stop"
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
     $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 }
+
 $failures = [System.Collections.Generic.List[string]]::new()
 $checksPassed = 0
 
@@ -33,7 +36,7 @@ function Assert-Condition {
 function Split-Ids {
     param([string]$Value)
     if ([string]::IsNullOrWhiteSpace($Value)) { return @() }
-    return @($Value -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    return @($Value -split ';' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' -and $_ -ne 'None' })
 }
 
 $frPath = Join-Path $RepoRoot "docs/09-Audit-and-Traceability/Requirements-Traceability-Matrix.csv"
@@ -43,9 +46,17 @@ $acPath = Join-Path $RepoRoot "docs/01-Requirements/Acceptance-Criteria.csv"
 $ucPath = Join-Path $RepoRoot "docs/01-Requirements/Use-Case-Specifications.md"
 $acRecPath = Join-Path $RepoRoot "docs/01-Requirements/Acceptance-Criteria-Reconciliation.md"
 $clOdPath = Join-Path $RepoRoot "docs/08-Engineering-Management/Change-Log-and-Open-Decisions.md"
+$ctrlFiles = @(
+    (Join-Path $RepoRoot "README.md"),
+    (Join-Path $RepoRoot "docs/README.md"),
+    (Join-Path $RepoRoot "docs/engineering/control/CURRENT-STATE.md"),
+    (Join-Path $RepoRoot "docs/engineering/control/ACTIVE-WORK.md"),
+    (Join-Path $RepoRoot "docs/engineering/control/AI-HANDOFF.md"),
+    (Join-Path $RepoRoot "docs/engineering/control/WORK-LOG.md")
+)
 
-foreach ($p in @($frPath, $brPath, $nfrPath, $acPath, $ucPath, $acRecPath, $clOdPath)) {
-    Assert-Condition (Test-Path -LiteralPath $p) "Missing required Gate 1 artifact: $p"
+foreach ($p in (@($frPath, $brPath, $nfrPath, $acPath, $ucPath, $acRecPath, $clOdPath) + $ctrlFiles)) {
+    Assert-Condition (Test-Path -LiteralPath $p) "Missing required artifact: $p"
 }
 
 if ($failures.Count -gt 0) {
@@ -76,10 +87,10 @@ foreach ($id in $expectedBRs) {
     Assert-Condition ($actualBRs -contains $id) "Missing canonical BR ID: $id"
 }
 
-$expectedNFRs = 1..9 | ForEach-Object { "NFR-{0:D3}" -f $_ }
+$expectedNFRs = 1..11 | ForEach-Object { "NFR-{0:D3}" -f $_ }
 $actualNFRs = @($nfrRows | ForEach-Object { $_.NFR_ID.Trim() })
-Assert-Condition ($actualNFRs.Count -eq 9) "Expected 9 NFR rows, found $($actualNFRs.Count)"
-Assert-Condition ((@($actualNFRs | Select-Object -Unique)).Count -eq 9) "Duplicate NFR_ID detected"
+Assert-Condition ($actualNFRs.Count -eq 11) "Expected 11 NFR rows (NFR-001..NFR-011), found $($actualNFRs.Count)"
+Assert-Condition ((@($actualNFRs | Select-Object -Unique)).Count -eq 11) "Duplicate NFR_ID detected"
 foreach ($id in $expectedNFRs) {
     Assert-Condition ($actualNFRs -contains $id) "Missing canonical NFR ID: $id"
 }
@@ -100,7 +111,7 @@ foreach ($id in $expectedUCs) {
     Assert-Condition ($ucMatches -contains $id) "Missing UC section: $id"
 }
 
-# 2. Cross-reference resolution
+# 2. Cross-reference resolution, status consistency, and C# test method verification
 $frSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$actualFRs)
 $brSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$actualBRs)
 $nfrSet = [System.Collections.Generic.HashSet[string]]::new([string[]]$actualNFRs)
@@ -117,8 +128,11 @@ foreach ($row in $frRows) {
     Assert-Condition (-not [string]::IsNullOrWhiteSpace($row.ImplementationStatus)) "$($row.FR_ID): missing ImplementationStatus"
     Assert-Condition (-not [string]::IsNullOrWhiteSpace($row.VerificationStatus)) "$($row.FR_ID): missing VerificationStatus"
 
-    if ($row.ImplementationStatus -eq "Not Implemented") {
-        Assert-Condition ($row.VerificationStatus -ne "Passed") "$($row.FR_ID): Not Implemented cannot have VerificationStatus=Passed"
+    if ($row.ImplementationStatus -in @("Not Implemented", "PoC Only")) {
+        Assert-Condition ($row.VerificationStatus -notin @("Passed", "Partially Verified")) "$($row.FR_ID): $($row.ImplementationStatus) cannot claim VerificationStatus=$($row.VerificationStatus)"
+    }
+    if ($row.ImplementationStatus -eq "Partially Implemented") {
+        Assert-Condition ($row.VerificationStatus -ne "Passed") "$($row.FR_ID): Partially Implemented cannot claim full VerificationStatus=Passed (use Partially Verified or Not Verified)"
     }
 
     if ($row.ImplementationStatus -eq "Implemented") {
@@ -130,10 +144,16 @@ foreach ($row in $frRows) {
         }
     }
 
-    if ($row.VerificationStatus -eq "Passed") {
-        Assert-Condition ($row.TestSourcePath -and $row.TestSourcePath -ne "Test Planned") "$($row.FR_ID): Passed row missing TestSourcePath"
-        $testFile = ($row.TestSourcePath -split '#')[0].Trim()
-        Assert-Condition (Test-Path -LiteralPath (Join-Path $RepoRoot $testFile)) "$($row.FR_ID): TestSourcePath file does not exist: $testFile"
+    if ($row.VerificationStatus -in @("Passed", "Partially Verified")) {
+        Assert-Condition ($row.TestSourcePath -and $row.TestSourcePath -ne "Test Planned") "$($row.FR_ID): $($row.VerificationStatus) row missing TestSourcePath"
+        $testFile = (($row.TestSourcePath -split '\(')[0] -split '#')[0].Trim()
+        $fullTestPath = Join-Path $RepoRoot $testFile
+        Assert-Condition (Test-Path -LiteralPath $fullTestPath) "$($row.FR_ID): TestSourcePath file does not exist: $testFile"
+        if ((Test-Path -LiteralPath $fullTestPath) -and $row.TestCaseID -match '^([A-Za-z0-9_]+)\.([A-Za-z0-9_]+)$') {
+            $methodName = $Matches[2]
+            $testRaw = Get-Content -LiteralPath $fullTestPath -Raw
+            Assert-Condition ($testRaw -match "\b$([regex]::Escape($methodName))\s*\(") "$($row.FR_ID): Test method '$methodName' not found in $testFile"
+        }
     }
 }
 
@@ -149,6 +169,9 @@ foreach ($row in $acRows) {
     foreach ($br in (Split-Ids $row.RelatedBRs)) { Assert-Condition ($brSet.Contains($br)) "$($row.AC_ID): unresolved BR '$br'" }
     foreach ($nfr in (Split-Ids $row.RelatedNFRs)) { Assert-Condition ($nfrSet.Contains($nfr)) "$($row.AC_ID): unresolved NFR '$nfr'" }
     foreach ($uc in (Split-Ids $row.RelatedUCs)) { Assert-Condition ($ucSet.Contains($uc)) "$($row.AC_ID): unresolved UC '$uc'" }
+    if ($row.ImplementationStatus -eq "Not Implemented") {
+        Assert-Condition ($row.VerificationStatus -notin @("Passed", "Partially Verified")) "$($row.AC_ID): Not Implemented cannot claim $($row.VerificationStatus)"
+    }
 }
 
 # 3. Placeholder ban check across Gate 1 files
@@ -160,11 +183,11 @@ foreach ($file in @($frPath, $brPath, $nfrPath, $acPath, $ucPath, $acRecPath, $c
     }
 }
 
-Write-Output "Gate 1 Baseline Validation Summary"
+Write-Output "Gate 1 Baseline Validation Summary (Mechanical Checks Only)"
 Write-Output "Repository Root : $RepoRoot"
 Write-Output "FR Rows         : $($frRows.Count) / 42"
 Write-Output "BR Rows         : $($brRows.Count) / 12"
-Write-Output "NFR Rows        : $($nfrRows.Count) / 9"
+Write-Output "NFR Rows        : $($nfrRows.Count) / 11"
 Write-Output "AC Rows         : $($acRows.Count) / 8"
 Write-Output "UC Sections     : $($ucMatches.Count) / 10"
 Write-Output "Checks Passed   : $checksPassed"
@@ -178,5 +201,5 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
-Write-Output "RESULT: PASS"
+Write-Output "RESULT: PASS (Mechanical integrity verified; semantic review & PO approval remain separate gates)"
 exit 0

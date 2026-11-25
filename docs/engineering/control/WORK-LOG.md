@@ -28,3 +28,7 @@
 ## 2026-11-26 — Repository Structure & Root Hygiene Organization
 - Type: Repository and documentation structure cleanup on `feature/public-store-catalog-read`.
 - Actions: Removed obsolete `RetailFlow-Catalog-Hardening.patch` (`AUD-04` resolved), moved `INSTALLATION-GUIDE-AR.md`, `PACKAGE-MANIFEST.json`, and `SHA256SUMS.txt` into `docs/engineering/package-meta/`, and updated `README.md` and `docs/README.md` with a unified repository and documentation structure map.
+
+## 2026-11-26 — Gate 1 Corrective Review & Defect Remediation (Local)
+- Type: Corrective documentation & traceability pass on `feature/public-store-catalog-read` (local only, no push/PR/merge).
+- Fixes: Restored original Phase 02 `AC-07` reconciliation in `CR-G1-001` and full `AC-01`–`AC-10` crosswalk; added `NFR-010`/`NFR-011` (`NFR-OPS-01`, `NFR-REC-01`) and `Rev2_NFR_ID` crosswalk; separated `Passed` vs `Partially Verified`/`Not Verified` across `AC`, `NFR`, and `FR` matrices; fixed `BR-003` (`ST-02` decouple), `BR-009` (`AC-05` decouple), `BR-011`, and `BR-006`; corrected `UC-03`/`04`/`06`/`08`/`10` AC references; added `OD-*`/`ADR-*` crosswalk; enhanced `validate-gate1-baseline.ps1` with C# test method verification (`796/796` mechanical checks pass); set Gate 1 status to `READY FOR INDEPENDENT REVIEW`.

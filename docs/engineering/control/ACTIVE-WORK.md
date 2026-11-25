@@ -5,10 +5,10 @@
 ## Current objective
 Close remaining Engineering Baseline gates (Gate 2–4) before expanding into the next major commerce feature (Merchant Write APIs / Identity Integration / Cart & Checkout).
 
-## Gate 1 — Requirements and business-rule traceability (Completed — Pending PO Sign-off on `CR-G1-001` & `OD-001`–`OD-008`)
-- [x] `AUD-001` Resolved conflicting `AC-07` definitions and established canonical `docs/01-Requirements/Acceptance-Criteria.csv` + `Acceptance-Criteria-Reconciliation.md`.
-- [x] `AUD-002` Replaced generic acceptance evidence for all 42 FR rows (`FR-001`–`FR-042`) in `docs/09-Audit-and-Traceability/Requirements-Traceability-Matrix.csv` and created `NFR-Register.csv` (`NFR-001`–`NFR-009`).
-- [x] `AUD-003` Mapped `BR-001`–`BR-012` to domain invariants, aggregates, SQL constraints, and tests in `docs/01-Requirements/Business-Rules-Traceability-Matrix.csv`.
+## Gate 1 — Requirements and business-rule traceability (`READY FOR INDEPENDENT REVIEW` — Pending PO Sign-off on `CR-G1-001`, `CR-G1-004` & `OD-001`–`OD-008`)
+- [x] `AUD-001` Reconciled `AC-07` (preserving Phase 02 local/staging/API/tests meaning) and mapped Rev2.0 `AC-07`–`AC-10` in `Acceptance-Criteria.csv` + `Acceptance-Criteria-Reconciliation.md` (pending PO sign-off).
+- [x] `AUD-002` Populated `FR-001`–`FR-042` traceability with separated `ImplementationStatus` / `VerificationStatus` and `NFR-001`–`NFR-011` crosswalk (ready for independent review).
+- [x] `AUD-003` Mapped `BR-001`–`BR-012` to invariants, aggregates, SQL constraints, and tests without conflating `BR-003`/`ST-02` or `BR-009`/`AC-05`.
 - [x] `AUD-007` Restored complete Use Case specifications (`UC-01`–`UC-10`) with Gherkin examples and explicit open decisions in `docs/01-Requirements/Use-Case-Specifications.md`.
 
 ## Gate 2 — Commerce correctness contracts (Next)
