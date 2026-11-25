@@ -36,3 +36,14 @@
 ## 2026-11-26 — Gate 1 Semantic FR-UC-NFR Pass 2 & Governance Sync
 - Type: Second corrective pass focusing on bidirectional `FR <-> UC` semantic accuracy, `NFR-012` (`NFR-SEC-02`) separation, manual semantic review documentation, and governance inventory sync.
 - Actions: Corrected `UC-01`–`UC-10` FR/BR/AC links to match `Requirements-Traceability-Matrix.csv` 100% bidirectionally; added bidirectional `FR <-> UC` enforcement to `scripts/validate-gate1-baseline.ps1`; split `NFR-012` (`NFR-SEC-02`); recorded Manual Semantic Review Record in `Gate-1-Closure-Report.md`; updated `Documentation-Inventory.csv` and `Gate-1-Validation-Report.md`.
+
+## 2026-11-26 — Autonomous Implementation Pass (EXEC-001)
+- Type: Domain, Persistence, Public Store Identity API, Unit/SQL Tests & Continuous Documentation on `feature/public-store-catalog-read` (uncommitted local changes).
+- Implemented: `Store` branding/lifecycle methods, `StoreSettings.PublicAddress`/`FulfillmentAddress` (`ST-04`/`BR-011`), `Category`/`Product`/`InventoryItem` domain mutators, `DeliveryZone` entity & migration `20261125232250_AddStoreBrandingAddressesAndDeliveryZones`, `GET /api/stores/{slug}` (`PublicStoreIdentityDto`), and `tests/RetailFlow.Domain.UnitTests` (`AUD-06` resolved).
+- Verified: `dotnet test RetailFlow.slnx --configuration Release --no-build` (`56/56` integration + `6/6` unit pass).
+
+## 2026-11-26 — Public Delivery Zones API & Documentation Sync (EXEC-002)
+- Type: Public Read API, Integration Testing, Technical & Control Documentation Sync on `feature/public-store-catalog-read`.
+- Implemented: `GET /api/stores/{slug}/delivery-zones` (`PublicDeliveryZonesResponse`, `PublicDeliveryZoneDto`, `GetEnabledDeliveryZonesAsync`), returning enabled zones ordered by `Name` when `DeliveryEnabled == true` and an empty list when disabled.
+- Updated Docs: `Database-Design-and-Migrations.md`, `Public-Catalog-API.md`, `Testing-and-Verification.md`, `Reference-Register.csv` (`REF-09`, `REF-10`), `CURRENT-STATE.md`, `IMPLEMENTATION-EXECUTION-LOG.md`, `FINAL-IMPLEMENTATION-REPORT.md`.
+- Verified: `dotnet build RetailFlow.slnx --configuration Release --no-restore` (`0` warnings, `0` errors), `dotnet test RetailFlow.slnx --configuration Release --no-build` (`6/6` unit + `57/57` integration pass), `validate-gate1-baseline.ps1` (`923` checks, `0` failures), `validate_operating_memory.py` (`VALIDATION PASSED`).

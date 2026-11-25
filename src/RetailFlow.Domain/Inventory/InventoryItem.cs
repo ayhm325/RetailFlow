@@ -75,4 +75,28 @@ public sealed class InventoryItem
             Reserved = reserved
         };
     }
+
+    public void SetOnHand(int newOnHand)
+    {
+        if (newOnHand < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(newOnHand),
+                "OnHand cannot be negative.");
+        }
+
+        if (newOnHand < Reserved)
+        {
+            throw new InvalidOperationException(
+                $"OnHand ({newOnHand}) cannot be less than Reserved ({Reserved}).");
+        }
+
+        OnHand = newOnHand;
+    }
+
+    public void AdjustOnHand(int delta)
+    {
+        var updated = checked(OnHand + delta);
+        SetOnHand(updated);
+    }
 }

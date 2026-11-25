@@ -255,6 +255,48 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RetailFlow.Domain.Fulfillment.DeliveryZone", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasPrecision(3)
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<decimal>("FlatFee")
+                        .HasPrecision(19, 4)
+                        .HasColumnType("decimal(19,4)");
+
+                    b.Property<bool>("IsEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("NormalizedName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid>("StoreId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StoreId", "NormalizedName")
+                        .IsUnique()
+                        .HasDatabaseName("UX_DeliveryZones_StoreId_NormalizedName");
+
+                    b.ToTable("DeliveryZones", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_DeliveryZones_FlatFee_NonNegative", "[FlatFee] >= 0");
+                        });
+                });
+
             modelBuilder.Entity("RetailFlow.Domain.Inventory.InventoryItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -301,14 +343,30 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ContactEmail")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("ContactPhone")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasPrecision(3)
                         .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<string>("LogoUrl")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("PrimaryColor")
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
 
                     b.Property<string>("Slug")
                         .IsRequired()
@@ -351,8 +409,16 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                     b.Property<bool>("DeliveryEnabled")
                         .HasColumnType("bit");
 
+                    b.Property<string>("FulfillmentAddress")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<bool>("PickupEnabled")
                         .HasColumnType("bit");
+
+                    b.Property<string>("PublicAddress")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<Guid>("StoreId")
                         .HasColumnType("uniqueidentifier");
@@ -412,6 +478,16 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("FK_ProductImages_Products_StoreId_ProductId");
+                });
+
+            modelBuilder.Entity("RetailFlow.Domain.Fulfillment.DeliveryZone", b =>
+                {
+                    b.HasOne("RetailFlow.Domain.Stores.Store", null)
+                        .WithMany()
+                        .HasForeignKey("StoreId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_DeliveryZones_Stores_StoreId");
                 });
 
             modelBuilder.Entity("RetailFlow.Domain.Inventory.InventoryItem", b =>

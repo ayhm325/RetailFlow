@@ -38,6 +38,18 @@ internal sealed class StoreConfiguration : IEntityTypeConfiguration<Store>
             .HasConversion<short>()
             .IsRequired();
 
+        builder.Property(x => x.LogoUrl)
+            .HasMaxLength(500);
+
+        builder.Property(x => x.PrimaryColor)
+            .HasMaxLength(32);
+
+        builder.Property(x => x.ContactEmail)
+            .HasMaxLength(256);
+
+        builder.Property(x => x.ContactPhone)
+            .HasMaxLength(32);
+
         builder.Property(x => x.CreatedAtUtc)
             .HasPrecision(3)
             .IsRequired();

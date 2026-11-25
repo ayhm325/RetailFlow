@@ -12,9 +12,17 @@ public static class PublicCatalogEndpoints
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        var group = app
-            .MapGroup("/api/stores/{slug}/catalog")
+        var storeGroup = app
+            .MapGroup("/api/stores/{slug}")
             .AddEndpointFilter<StoreResolutionEndpointFilter>();
+
+        storeGroup.MapGet("", GetStoreIdentityAsync)
+            .WithName("GetPublicStoreIdentity");
+
+        storeGroup.MapGet("/delivery-zones", GetDeliveryZonesAsync)
+            .WithName("GetPublicStoreDeliveryZones");
+
+        var group = storeGroup.MapGroup("/catalog");
 
         group.MapGet("/categories", GetCategoriesAsync)
             .WithName("GetPublicStoreCategories");
@@ -26,6 +34,34 @@ public static class PublicCatalogEndpoints
             .WithName("GetPublicStoreProductDetails");
 
         return app;
+    }
+
+    private static async Task<IResult> GetStoreIdentityAsync(
+        IStoreRequestContextAccessor storeContextAccessor,
+        IPublicCatalogQueryService catalogQueryService,
+        CancellationToken cancellationToken)
+    {
+        var store = storeContextAccessor.Current
+            ?? throw new InvalidOperationException("Store context was not resolved.");
+
+        var response = await catalogQueryService.GetStoreIdentityAsync(store, cancellationToken);
+        return response is null
+            ? TypedResults.NotFound()
+            : TypedResults.Ok(response);
+    }
+
+    private static async Task<IResult> GetDeliveryZonesAsync(
+        IStoreRequestContextAccessor storeContextAccessor,
+        IPublicCatalogQueryService catalogQueryService,
+        CancellationToken cancellationToken)
+    {
+        var store = storeContextAccessor.Current
+            ?? throw new InvalidOperationException("Store context was not resolved.");
+
+        var response = await catalogQueryService.GetEnabledDeliveryZonesAsync(store, cancellationToken);
+        return response is null
+            ? TypedResults.NotFound()
+            : TypedResults.Ok(response);
     }
 
     private static async Task<IResult> GetCategoriesAsync(

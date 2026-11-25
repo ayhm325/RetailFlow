@@ -18,6 +18,14 @@ public sealed class Store
 
     public StoreStatus Status { get; private set; }
 
+    public string? LogoUrl { get; private set; }
+
+    public string? PrimaryColor { get; private set; }
+
+    public string? ContactEmail { get; private set; }
+
+    public string? ContactPhone { get; private set; }
+
     public DateTimeOffset CreatedAtUtc { get; private set; }
 
     public StoreSettings? Settings { get; private set; }
@@ -55,6 +63,58 @@ public sealed class Store
         };
     }
 
+    public void UpdateBranding(
+        string name,
+        string? logoUrl = null,
+        string? primaryColor = null,
+        string? contactEmail = null,
+        string? contactPhone = null)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Store name is required.", nameof(name));
+        }
+
+        Name = name.Trim();
+        LogoUrl = NormalizeOptional(logoUrl);
+        PrimaryColor = NormalizeOptional(primaryColor);
+        ContactEmail = NormalizeOptional(contactEmail);
+        ContactPhone = NormalizeOptional(contactPhone);
+    }
+
+    public void Approve()
+    {
+        if (Status != StoreStatus.PendingApproval && Status != StoreStatus.Suspended)
+        {
+            throw new InvalidOperationException(
+                $"Cannot approve or reactivate store from status '{Status}'.");
+        }
+
+        Status = StoreStatus.Active;
+    }
+
+    public void Reject()
+    {
+        if (Status != StoreStatus.PendingApproval)
+        {
+            throw new InvalidOperationException(
+                $"Cannot reject store from status '{Status}'.");
+        }
+
+        Status = StoreStatus.Rejected;
+    }
+
+    public void Suspend()
+    {
+        if (Status != StoreStatus.Active)
+        {
+            throw new InvalidOperationException(
+                $"Cannot suspend store from status '{Status}'.");
+        }
+
+        Status = StoreStatus.Suspended;
+    }
+
     public static string NormalizeSlug(string slug)
     {
         if (string.IsNullOrWhiteSpace(slug))
@@ -64,4 +124,7 @@ public sealed class Store
 
         return slug.Trim().ToLowerInvariant();
     }
+
+    private static string? NormalizeOptional(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

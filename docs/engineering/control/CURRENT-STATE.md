@@ -14,15 +14,18 @@
   - `src/RetailFlow.Domain`
   - `src/RetailFlow.Infrastructure`
   - `tests/RetailFlow.Api.IntegrationTests`
+  - `tests/RetailFlow.Domain.UnitTests`
 - `global.json` pins .NET SDK `10.0.404` with `latestPatch` roll-forward.
 - The current product solution (`RetailFlow.slnx`) and the experimental Identity/SessionTransport solutions (`experiments/IdentitySpike/`, `experiments/SessionTransportSpike/`) remain strictly separate.
 
-## 2. Product Host implementation facts (verified at `04392c8`)
-- **Vertical Slice 01 — Public Store Catalog Read API** is implemented and verified:
-  - Domain model includes `Currency`, `Store`, `StoreSettings`, `Category`, `Product`, `ProductImage`, `InventoryItem`, `MoneyPrecision`, and related value/status types.
-  - Application contains `StoreRequestContext`, store resolution abstractions, catalog query and read DTO/service contracts.
-  - Infrastructure contains `RetailFlowDbContext`, SQL Server persistence, EF Core mappings, 2 migrations, `ConnectionStringResolver`, and `StoreDirectoryResolver`.
-  - API exposes `/health/live`, `/health/ready`, and three public catalog GET endpoints:
+## 2. Product Host implementation facts (verified on `feature/public-store-catalog-read`)
+- **Vertical Slice 01 — Public Store Catalog & Identity Read API** is implemented and verified (`6/6` Domain unit tests + `57/57` SQL integration tests):
+  - Domain model includes `Currency`, `Store`, `StoreSettings`, `Category`, `Product`, `ProductImage`, `InventoryItem`, `DeliveryZone`, `MoneyPrecision`, and related value/status types.
+  - Application contains `StoreRequestContext`, store resolution abstractions, catalog query and read DTO/service contracts (`PublicStoreIdentityDto`, `PublicDeliveryZonesResponse`).
+  - Infrastructure contains `RetailFlowDbContext`, SQL Server persistence, EF Core mappings, 3 migrations (including `20261125232250_AddStoreBrandingAddressesAndDeliveryZones`), `ConnectionStringResolver`, and `StoreDirectoryResolver`.
+  - API exposes `/health/live`, `/health/ready`, and five public read GET endpoints:
+    - `GET /api/stores/{slug}`
+    - `GET /api/stores/{slug}/delivery-zones`
     - `GET /api/stores/{slug}/catalog/categories`
     - `GET /api/stores/{slug}/catalog/products`
     - `GET /api/stores/{slug}/catalog/products/{productId:guid}`
@@ -36,7 +39,7 @@
 ## 4. Explicitly not established in Product Host
 - ASP.NET Core Identity integration, Authentication, Authorization.
 - Merchant/Admin catalog & store write APIs.
-- Shopping Cart, Checkout, Orders, Payments, Delivery Zones.
+- Shopping Cart, Checkout, Orders, Payments, and DeliveryZone/Merchant write APIs.
 - React frontend/ClientApp (`wwwroot` SPA assets).
 - Production Azure deployment workflow.
 

@@ -14,6 +14,7 @@ using RetailFlow.Api.Hosting;
 using RetailFlow.Application.Catalog;
 using RetailFlow.Domain.Catalog;
 using RetailFlow.Domain.Currencies;
+using RetailFlow.Domain.Fulfillment;
 using RetailFlow.Domain.Inventory;
 using RetailFlow.Domain.Stores;
 using RetailFlow.Infrastructure.Persistence;
@@ -944,6 +945,251 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         return (store, settings);
     }
 
+    [Fact]
+    public async Task PublicStoreIdentity_ReturnsBrandingAndPublicAddress_AndNeverExposesFulfillmentAddress()
+    {
+        var suffix = NewSuffix();
+        var physicalStore = Store.Create(
+            Guid.NewGuid(),
+            "Amman Roastery",
+            $"roastery-{suffix}",
+            StoreType.Physical,
+            StoreStatus.Active,
+            DateTimeOffset.UtcNow);
+        physicalStore.UpdateBranding(
+            "Amman Roastery",
+            "https://cdn.example/logo.png",
+            "#1E293B",
+            "hello@roastery.example",
+            "+962790000001");
+        var physicalSettings = StoreSettings.Create(
+            Guid.NewGuid(),
+            physicalStore,
+            Jod,
+            "Asia/Amman",
+            deliveryEnabled: true,
+            pickupEnabled: true,
+            publicAddress: "Rainbow St 42, Amman",
+            fulfillmentAddress: "INTERNAL-WAREHOUSE-BAY-9");
+
+        var onlineStore = Store.Create(
+            Guid.NewGuid(),
+            "Cloud Roastery",
+            $"cloud-{suffix}",
+            StoreType.OnlineOnly,
+            StoreStatus.Active,
+            DateTimeOffset.UtcNow);
+        var onlineSettings = StoreSettings.Create(
+            Guid.NewGuid(),
+            onlineStore,
+            Usd,
+            "UTC",
+            deliveryEnabled: true,
+            pickupEnabled: false,
+            publicAddress: null,
+            fulfillmentAddress: "SECRET-FULFILLMENT-DOCK-3");
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            db.Stores.AddRange(physicalStore, onlineStore);
+            db.StoreSettings.AddRange(physicalSettings, onlineSettings);
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            using var client = _fixture.CreateHttpsClient();
+
+            using var physResponse = await client.GetAsync($"/api/stores/{physicalStore.Slug}");
+            Assert.Equal(HttpStatusCode.OK, physResponse.StatusCode);
+            var physRaw = await physResponse.Content.ReadAsStringAsync();
+            Assert.DoesNotContain("INTERNAL-WAREHOUSE-BAY-9", physRaw, StringComparison.Ordinal);
+            Assert.DoesNotContain("fulfillmentAddress", physRaw, StringComparison.OrdinalIgnoreCase);
+
+            var physDto = System.Text.Json.JsonSerializer.Deserialize<PublicStoreIdentityDto>(physRaw, JsonOptions);
+            Assert.NotNull(physDto);
+            Assert.Equal("Amman Roastery", physDto.StoreName);
+            Assert.Equal("JOD", physDto.CurrencyCode);
+            Assert.Equal("https://cdn.example/logo.png", physDto.LogoUrl);
+            Assert.Equal("#1E293B", physDto.PrimaryColor);
+            Assert.True(physDto.PickupEnabled);
+            Assert.Equal("Rainbow St 42, Amman", physDto.PublicAddress);
+
+            using var onlineResponse = await client.GetAsync($"/api/stores/{onlineStore.Slug}");
+            Assert.Equal(HttpStatusCode.OK, onlineResponse.StatusCode);
+            var onlineRaw = await onlineResponse.Content.ReadAsStringAsync();
+            Assert.DoesNotContain("SECRET-FULFILLMENT-DOCK-3", onlineRaw, StringComparison.Ordinal);
+
+            var onlineDto = System.Text.Json.JsonSerializer.Deserialize<PublicStoreIdentityDto>(onlineRaw, JsonOptions);
+            Assert.NotNull(onlineDto);
+            Assert.False(onlineDto.PickupEnabled);
+            Assert.Null(onlineDto.PublicAddress);
+        }
+        finally
+        {
+            await _fixture.DeleteStoresAsync(physicalStore.Id, onlineStore.Id);
+        }
+    }
+
+    [Fact]
+    public async Task PublicStoreIdentity_UnknownOrNonActiveStore_Returns404ProblemDetails()
+    {
+        var suffix = NewSuffix();
+        var (pendingStore, pendingSettings) = CreateStoreWithSettings(
+            "Pending Shop",
+            $"pending-id-{suffix}",
+            StoreType.Physical,
+            StoreStatus.PendingApproval,
+            Usd);
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            db.Stores.Add(pendingStore);
+            db.StoreSettings.Add(pendingSettings);
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            using var client = _fixture.CreateHttpsClient();
+
+            using var pendingResp = await client.GetAsync($"/api/stores/{pendingStore.Slug}");
+            Assert.Equal(HttpStatusCode.NotFound, pendingResp.StatusCode);
+            Assert.Equal("application/problem+json", pendingResp.Content.Headers.ContentType?.MediaType);
+
+            using var unknownResp = await client.GetAsync($"/api/stores/does-not-exist-{suffix}");
+            Assert.Equal(HttpStatusCode.NotFound, unknownResp.StatusCode);
+        }
+        finally
+        {
+            await _fixture.DeleteStoresAsync(pendingStore.Id);
+        }
+    }
+
+    [Fact]
+    public async Task DeliveryZones_SqlConstraints_EnforceUniqueNamePerStoreAndNonNegativeFee()
+    {
+        var suffix = NewSuffix();
+        var (storeA, settingsA) = CreateStoreWithSettings("Zone A", $"zone-a-{suffix}", StoreType.Physical, StoreStatus.Active, Jod);
+        var (storeB, settingsB) = CreateStoreWithSettings("Zone B", $"zone-b-{suffix}", StoreType.Physical, StoreStatus.Active, Jod);
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            db.Stores.AddRange(storeA, storeB);
+            db.StoreSettings.AddRange(settingsA, settingsB);
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            await using (var db = _fixture.CreateDbContext())
+            {
+                db.DeliveryZones.Add(DeliveryZone.Create(Guid.NewGuid(), storeA.Id, "West Amman", 2.500m, settingsA, Jod, DateTimeOffset.UtcNow));
+                db.DeliveryZones.Add(DeliveryZone.Create(Guid.NewGuid(), storeB.Id, "West Amman", 3.000m, settingsB, Jod, DateTimeOffset.UtcNow));
+                await db.SaveChangesAsync();
+            }
+
+            // Duplicate normalized name in same store fails UX_DeliveryZones_StoreId_NormalizedName
+            await using (var db = _fixture.CreateDbContext())
+            {
+                db.DeliveryZones.Add(DeliveryZone.Create(Guid.NewGuid(), storeA.Id, "west amman", 2.000m, settingsA, Jod, DateTimeOffset.UtcNow));
+                await Assert.ThrowsAsync<DbUpdateException>(() => db.SaveChangesAsync());
+            }
+
+            // Negative fee fails CK_DeliveryZones_FlatFee_NonNegative
+            await using (var db = _fixture.CreateDbContext())
+            {
+                var ex = await Assert.ThrowsAnyAsync<Exception>(() =>
+                    db.Database.ExecuteSqlInterpolatedAsync($"""
+                        INSERT INTO [DeliveryZones] ([Id], [StoreId], [Name], [NormalizedName], [FlatFee], [IsEnabled], [CreatedAtUtc])
+                        VALUES ({Guid.NewGuid()}, {storeA.Id}, 'Neg', 'NEG', -1.0000, 1, SYSUTCDATETIME())
+                        """));
+                Assert.NotNull(ex);
+            }
+        }
+        finally
+        {
+            await _fixture.DeleteStoresAsync(storeA.Id, storeB.Id);
+        }
+    }
+
+    [Fact]
+    public async Task PublicStoreDeliveryZones_ReturnsOnlyEnabledZonesForTargetStore()
+    {
+        var suffix = NewSuffix();
+        var (storeA, settingsA) = CreateStoreWithSettings("Delivery A", $"deliv-a-{suffix}", StoreType.OnlineOnly, StoreStatus.Active, Jod);
+        var (storeB, settingsB) = CreateStoreWithSettings("Delivery B", $"deliv-b-{suffix}", StoreType.OnlineOnly, StoreStatus.Active, Jod);
+        var storeDisabled = Store.Create(
+            Guid.NewGuid(),
+            "Delivery Off",
+            $"deliv-off-{suffix}",
+            StoreType.OnlineOnly,
+            StoreStatus.Active,
+            DateTimeOffset.UtcNow);
+        var settingsDisabled = StoreSettings.Create(
+            Guid.NewGuid(),
+            storeDisabled,
+            Jod,
+            "Asia/Amman",
+            deliveryEnabled: false,
+            pickupEnabled: false);
+
+        var enabledZoneZ = DeliveryZone.Create(Guid.NewGuid(), storeA.Id, "Zarqa", 3.500m, settingsA, Jod, DateTimeOffset.UtcNow);
+        var enabledZoneA = DeliveryZone.Create(Guid.NewGuid(), storeA.Id, "Abdoun", 2.000m, settingsA, Jod, DateTimeOffset.UtcNow);
+        var disabledZone = DeliveryZone.Create(Guid.NewGuid(), storeA.Id, "Irbid", 5.000m, settingsA, Jod, DateTimeOffset.UtcNow);
+        disabledZone.SetEnabled(false);
+
+        var otherStoreZone = DeliveryZone.Create(Guid.NewGuid(), storeB.Id, "Other Store Zone", 1.500m, settingsB, Jod, DateTimeOffset.UtcNow);
+        var disabledStoreModeZone = DeliveryZone.Create(Guid.NewGuid(), storeDisabled.Id, "Disabled Mode Zone", 2.000m, settingsDisabled, Jod, DateTimeOffset.UtcNow);
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            db.Stores.AddRange(storeA, storeB, storeDisabled);
+            db.StoreSettings.AddRange(settingsA, settingsB, settingsDisabled);
+            db.DeliveryZones.AddRange(enabledZoneZ, enabledZoneA, disabledZone, otherStoreZone, disabledStoreModeZone);
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            using var client = _fixture.CreateHttpsClient();
+
+            var response = await client.GetAsync($"/api/stores/{storeA.Slug}/delivery-zones");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            var payload = await response.Content.ReadFromJsonAsync<PublicDeliveryZonesResponse>(JsonOptions);
+            Assert.NotNull(payload);
+            Assert.True(payload!.DeliveryEnabled);
+            Assert.Equal("JOD", payload.CurrencyCode);
+            Assert.Collection(
+                payload.Zones,
+                first =>
+                {
+                    Assert.Equal(enabledZoneA.Id, first.Id);
+                    Assert.Equal("Abdoun", first.Name);
+                    Assert.Equal(2.000m, first.FlatFee);
+                },
+                second =>
+                {
+                    Assert.Equal(enabledZoneZ.Id, second.Id);
+                    Assert.Equal("Zarqa", second.Name);
+                    Assert.Equal(3.500m, second.FlatFee);
+                });
+
+            var disabledModeResponse = await client.GetAsync($"/api/stores/{storeDisabled.Slug}/delivery-zones");
+            Assert.Equal(HttpStatusCode.OK, disabledModeResponse.StatusCode);
+
+            var disabledModePayload = await disabledModeResponse.Content.ReadFromJsonAsync<PublicDeliveryZonesResponse>(JsonOptions);
+            Assert.NotNull(disabledModePayload);
+            Assert.False(disabledModePayload!.DeliveryEnabled);
+            Assert.Empty(disabledModePayload.Zones);
+        }
+        finally
+        {
+            await _fixture.DeleteStoresAsync(storeA.Id, storeB.Id, storeDisabled.Id);
+        }
+    }
+
     private static string NewSuffix() => Guid.NewGuid().ToString("N")[..8];
 }
 
@@ -1034,6 +1280,7 @@ public sealed class CatalogSqlTestFixture : IAsyncLifetime
         await db.InventoryItems.Where(x => storeIds.Contains(x.StoreId)).ExecuteDeleteAsync();
         await db.Products.Where(x => storeIds.Contains(x.StoreId)).ExecuteDeleteAsync();
         await db.Categories.Where(x => storeIds.Contains(x.StoreId)).ExecuteDeleteAsync();
+        await db.DeliveryZones.Where(x => storeIds.Contains(x.StoreId)).ExecuteDeleteAsync();
         await db.StoreSettings.Where(x => storeIds.Contains(x.StoreId)).ExecuteDeleteAsync();
         await db.Stores.Where(x => storeIds.Contains(x.Id)).ExecuteDeleteAsync();
     }

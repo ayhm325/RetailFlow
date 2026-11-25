@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 
 using RetailFlow.Domain.Catalog;
 using RetailFlow.Domain.Currencies;
+using RetailFlow.Domain.Fulfillment;
 using RetailFlow.Domain.Inventory;
 using RetailFlow.Domain.Stores;
 
@@ -27,6 +28,8 @@ public sealed class RetailFlowDbContext : DbContext
     public DbSet<ProductImage> ProductImages => Set<ProductImage>();
 
     public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
+
+    public DbSet<DeliveryZone> DeliveryZones => Set<DeliveryZone>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
