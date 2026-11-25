@@ -211,6 +211,63 @@ public sealed class MerchantCatalogService : IMerchantCatalogService
         return true;
     }
 
+    public async Task<MerchantProductImageDto?> AddProductImageAsync(
+        Guid storeId,
+        Guid productId,
+        AddProductImageCommand command,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+
+        var productExists = await _dbContext.Products
+            .AnyAsync(p => p.Id == productId && p.StoreId == storeId, cancellationToken);
+
+        if (!productExists)
+        {
+            return null;
+        }
+
+        var image = ProductImage.Create(
+            Guid.NewGuid(),
+            storeId,
+            productId,
+            command.ImageUrl,
+            command.SortOrder,
+            command.AltText);
+
+        _dbContext.ProductImages.Add(image);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        return new MerchantProductImageDto(
+            image.Id,
+            image.StoreId,
+            image.ProductId,
+            image.ImageUrl,
+            image.AltText,
+            image.SortOrder);
+    }
+
+    public async Task<bool> RemoveProductImageAsync(
+        Guid storeId,
+        Guid productId,
+        Guid imageId,
+        CancellationToken cancellationToken)
+    {
+        var image = await _dbContext.ProductImages
+            .SingleOrDefaultAsync(
+                i => i.Id == imageId && i.ProductId == productId && i.StoreId == storeId,
+                cancellationToken);
+
+        if (image is null)
+        {
+            return false;
+        }
+
+        _dbContext.ProductImages.Remove(image);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
     private static MerchantCategoryDto Map(Category category) =>
         new(category.Id, category.StoreId, category.Name, category.Slug, category.SortOrder, category.IsActive);
 

@@ -18,7 +18,7 @@ Close remaining Engineering Baseline gates (Gate 2–4) before expanding into th
 ## Gate 3 — Baseline completeness and quality
 - [ ] `AUD-006` Produce separate Current and Target ERDs plus column-level Data Dictionary.
 - [ ] `AUD-008` Correct C4 context/container diagrams and label Current vs Target accurately.
-- [ ] `AUD-009` Map security controls to applicable OWASP ASVS requirements and concrete tests/evidence.
+- [x] `AUD-009` Mapped implemented and PoC/target security controls to OWASP ASVS v4.0.3 & Cheat Sheets with concrete tests/evidence in `docs/07-Security/OWASP-ASVS-Security-Mapping.md`.
 - [ ] `AUD-010` Obtain owner-approved NFR targets (latency, scale, availability, RPO/RTO, retention, cost); do not invent values.
 
 ## Gate 4 — Governance and consistency

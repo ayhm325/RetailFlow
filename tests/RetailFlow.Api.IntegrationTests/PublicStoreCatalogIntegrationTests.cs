@@ -1287,6 +1287,104 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
         Assert.Contains("application/problem+json", openApiJson, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task PlatformStoreLifecycle_AndProductImages_EnforceVisibilityAndTenantIsolation()
+    {
+        var suffix = NewSuffix();
+        Guid createdStoreId = Guid.Empty;
+
+        try
+        {
+            await using var scope = _fixture.CreateAsyncScope();
+            var platformService = scope.ServiceProvider.GetRequiredService<IPlatformStoreService>();
+            var catalogService = scope.ServiceProvider.GetRequiredService<IMerchantCatalogService>();
+
+            var created = await platformService.CreateStoreAsync(
+                new CreateStoreCommand(
+                    "Lifecycle Roastery",
+                    $"lifecycle-{suffix}",
+                    StoreType.Physical,
+                    "JOD",
+                    "Asia/Amman",
+                    DeliveryEnabled: true,
+                    PickupEnabled: true,
+                    PublicAddress: "Amman Blvd",
+                    FulfillmentAddress: "Dock 7",
+                    InitialStatus: StoreStatus.PendingApproval),
+                CancellationToken.None);
+            createdStoreId = created.Id;
+
+            using var client = _fixture.CreateHttpsClient();
+
+            // PendingApproval store is not publicly accessible
+            var pendingResponse = await client.GetAsync($"/api/stores/{created.Slug}");
+            Assert.Equal(HttpStatusCode.NotFound, pendingResponse.StatusCode);
+
+            // Approve makes store publicly accessible
+            Assert.True(await platformService.ApproveStoreAsync(created.Id, CancellationToken.None));
+            var activeResponse = await client.GetAsync($"/api/stores/{created.Slug}");
+            Assert.Equal(HttpStatusCode.OK, activeResponse.StatusCode);
+
+            // Add category, published product, and ordered gallery images
+            var category = await catalogService.CreateCategoryAsync(
+                created.Id,
+                new CreateCategoryCommand("Beans", "beans", 1, true),
+                CancellationToken.None);
+            var product = await catalogService.CreateProductAsync(
+                created.Id,
+                new CreateProductCommand(category.Id, "Single Origin", "Floral", $"SO-{suffix}", 14.000m, ProductStatus.Published, 5),
+                CancellationToken.None);
+
+            var img2 = await catalogService.AddProductImageAsync(
+                created.Id,
+                product.Id,
+                new AddProductImageCommand("https://cdn.example/2.png", SortOrder: 2, AltText: "Second"),
+                CancellationToken.None);
+            var img1 = await catalogService.AddProductImageAsync(
+                created.Id,
+                product.Id,
+                new AddProductImageCommand("https://cdn.example/1.png", SortOrder: 1, AltText: "First"),
+                CancellationToken.None);
+            Assert.NotNull(img1);
+            Assert.NotNull(img2);
+
+            // Cross-tenant image add/remove is rejected
+            Assert.Null(await catalogService.AddProductImageAsync(
+                Guid.NewGuid(),
+                product.Id,
+                new AddProductImageCommand("https://cdn.example/x.png"),
+                CancellationToken.None));
+            Assert.False(await catalogService.RemoveProductImageAsync(
+                Guid.NewGuid(),
+                product.Id,
+                img1!.Id,
+                CancellationToken.None));
+
+            var details = await client.GetFromJsonAsync<CatalogProductDetailsDto>(
+                $"/api/stores/{created.Slug}/catalog/products/{product.Id}",
+                JsonOptions);
+            Assert.NotNull(details);
+            Assert.Collection(
+                details!.Images,
+                first => Assert.Equal("https://cdn.example/1.png", first.ImageUrl),
+                second => Assert.Equal("https://cdn.example/2.png", second.ImageUrl));
+
+            Assert.True(await catalogService.RemoveProductImageAsync(created.Id, product.Id, img2!.Id, CancellationToken.None));
+
+            // Suspend hides store publicly again
+            Assert.True(await platformService.SuspendStoreAsync(created.Id, CancellationToken.None));
+            var suspendedResponse = await client.GetAsync($"/api/stores/{created.Slug}");
+            Assert.Equal(HttpStatusCode.NotFound, suspendedResponse.StatusCode);
+        }
+        finally
+        {
+            if (createdStoreId != Guid.Empty)
+            {
+                await _fixture.DeleteStoresAsync(createdStoreId);
+            }
+        }
+    }
+
     private static string NewSuffix() => Guid.NewGuid().ToString("N")[..8];
 }
 

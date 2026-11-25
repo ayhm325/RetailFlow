@@ -51,6 +51,19 @@ public sealed record MerchantProductDto(
     int OnHand,
     int Reserved);
 
+public sealed record AddProductImageCommand(
+    string ImageUrl,
+    int SortOrder = 0,
+    string? AltText = null);
+
+public sealed record MerchantProductImageDto(
+    Guid Id,
+    Guid StoreId,
+    Guid ProductId,
+    string ImageUrl,
+    string? AltText,
+    int SortOrder);
+
 public interface IMerchantCatalogService
 {
     Task<MerchantCategoryDto> CreateCategoryAsync(
@@ -89,5 +102,17 @@ public interface IMerchantCatalogService
         Guid storeId,
         Guid productId,
         int onHand,
+        CancellationToken cancellationToken);
+
+    Task<MerchantProductImageDto?> AddProductImageAsync(
+        Guid storeId,
+        Guid productId,
+        AddProductImageCommand command,
+        CancellationToken cancellationToken);
+
+    Task<bool> RemoveProductImageAsync(
+        Guid storeId,
+        Guid productId,
+        Guid imageId,
         CancellationToken cancellationToken);
 }

@@ -59,3 +59,9 @@
 - Implemented: `IMerchantStoreService`/`MerchantStoreService`, `IMerchantCatalogService`/`MerchantCatalogService` (tenant-scoped by `StoreId`; no unauthenticated HTTP write endpoints exposed), plus `.ProducesProblem(404)`/`.ProducesValidationProblem(400)` OpenAPI metadata on all 5 public endpoints.
 - Added Docs: `docs/03-Database/Data-Dictionary.md` (column-level As-Is schema across all 8 SQL Server tables).
 - Verified: `dotnet build RetailFlow.slnx --configuration Release --no-restore` (`0` warnings, `0` errors), `dotnet test RetailFlow.slnx --configuration Release --no-build` (`6/6` unit + `59/59` integration pass).
+
+## 2026-11-26 — Platform Store Lifecycle, Product Images & OWASP ASVS Mapping (EXEC-004)
+- Type: Application/Infrastructure Services, SQL Integration Tests & Security Mapping (`AUD-009`) on `feature/public-store-catalog-read`.
+- Implemented: `IPlatformStoreService`/`PlatformStoreService` (store creation + `Approve`/`Reject`/`Suspend` lifecycle) and `AddProductImageAsync`/`RemoveProductImageAsync` in `IMerchantCatalogService`/`MerchantCatalogService`.
+- Added Docs: `docs/07-Security/OWASP-ASVS-Security-Mapping.md` (`AUD-009`) and `Reference-Register.csv` (`REF-11`, `REF-12`).
+- Verified: `dotnet build RetailFlow.slnx --configuration Release --no-restore` (`0` warnings, `0` errors), `dotnet test RetailFlow.slnx --configuration Release --no-build` (`6/6` unit + `60/60` integration pass).
