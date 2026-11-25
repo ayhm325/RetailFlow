@@ -444,14 +444,22 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
   - `WrongCertificate_CannotUnprotectCookieOrTicket`: يثبت فشل فك التذكرة والـ Cookie (`RetrieveAsync == null` و`401 Unauthorized`) عند استخدام شهادة X.509 مختلفة.
   - **المتبقي لإغلاق بوابات ADR:** اختبارات المتصفح بـ Playwright (قسم 10.5)، وقياس الأداء (قسم 10.3)، إضافةً إلى متطلبات ما قبل الإنتاج الخاصة بـ Data Protection (`Certificate Rotation`، و`Backup/Restore` لملف PFX، واختبار عمليتي OS مستقلتين، ومراقبة مزامنة Key Ring)، وحسم قرارات Origin وURL وتعدد جلسات المتاجر، وتكامل `BackOffice StoreMembership` لاحقاً.
 
-### 10.5 اختبارات المتصفح المطلوبة لاحقاً (Browser-Level Acceptance)
+### 10.5 اختبارات المتصفح الفعلية (Browser-Level Acceptance — منفذة على API)
 
-لا توجد بنية Playwright أو اختبارات متصفح حقيقية في المستودع حتى الآن؛ واختبارات `WebApplicationFactory` (`HttpClient`) لا تغني عن اختبار Cookie Jar الفعلي وتعدد التبويبات في المتصفح. الاختبارات المطلوبة قبل إغلاق ADR بالكامل:
-- تسجيل الدخول إلى Store A وStore B في تبويبين ضمن المتصفح نفسه.
-- نجاح طلبات كل تبويب على متجره دون تداخل جلسات.
-- رفض Cross-Site POST من صفحة خارجية فعلية.
-- رفض Login CSRF قبل إصدار أي Cookie في المتصفح.
-- Logout من متجر A لا يؤدي إلى حذف Cookie متجر B.
+أُنشئ مشروع اختبارات المتصفح المعزول [`RetailFlow.SessionTransportSpike.Playwright.slnx`](../experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.Playwright.slnx) (`RetailFlow.SessionTransportSpike.PlaywrightTests`) لتشغيل Chromium الحقيقي ضد عملية Kestrel HTTPS فعلية:
+
+- **الحزمة والمتصفح:** `Microsoft.Playwright 1.65.1` مع Chromium (`Chrome for Testing 159.0.8154.6` / `playwright chromium v1255`).
+- **ترتيب مضيف HTTPS:** تشغيل `RetailFlow.SessionTransportSpike.Api.dll` كعملية `dotnet` مستقلة ببيئة `ASPNETCORE_ENVIRONMENT=Testing` على منفذ ديناميكي `https://localhost:{port}` بشهادة HTTPS مؤقتة مخصصة منفصلة عن شهادة Data Protection، مع `IgnoreHTTPSErrors = true` في `BrowserContext`، وخادم مهاجم خارجي حقيقي (`BrowserAttackerServer` على `http://127.0.0.1:{attackerPort}`).
+- **قاعدة البيانات:** `RetailFlowIdentitySpike` (تجهيز البيانات وتنظيفها مباشرة عبر `IdentitySpikeDbContext` و`SessionTicketDbContext` دون تشغيل Migrations ودون مساس بجدول `DataProtectionKeys`).
+- **نتائج اختبارات المتصفح (`3 / 3 Passed`، `0 Failed · 0 Skipped`):**
+  - `StoreAAndStoreB_CanMaintainSeparateSessionsInTwoTabs_AndLogoutIsIsolated` (`904 ms`): يثبت تسجيل الدخول لمتجر A في Tab 1 ومتجر B في Tab 2 ضمن `BrowserContext` واحد (`204`)، واسترجاع هوية كل متجر مستقلة من `/me` (`200`)، ثم `Logout` من متجر A (`204`) وإزالة Cookie A مع بقاء Cookie B صالحة (`A/me -> 401` و`B/me -> 200`).
+  - `CrossSiteLoginFormPost_IsRejectedBeforeIssuingAuthenticationCookie` (`176 ms`): يثبت إرسال HTML form `POST` تلقائي من `BrowserAttackerServer` (`Origin` خارجي، `Sec-Fetch-Site: cross-site`، دون `X-RetailFlow-Request`)، ورفضه بـ `403` دون `Set-Cookie` ودون أي Cookie مصادقة في Cookie Jar.
+  - `CrossSiteLogoutFormPost_IsRejectedAndExistingSessionRemainsValid` (`2 s`): يثبت إرسال HTML form `POST` إلى `/logout` من `BrowserAttackerServer` (`Sec-Fetch-Site: cross-site`، دون `X-RetailFlow-Request`) ورفضه بـ `403` دون `Set-Cookie` مع بقاء جلسة Store A صالحة (`200`).
+- **خصائص Cookie المرصودة فعلياً في Chromium Cookie Jar:**
+  - الاسم: `__Secure-RetailFlow.StoreCustomer.store.{storeId:N}` (مستقل لكل متجر).
+  - المسار: `/api/stores/{canonicalSlug}/customers` (مستقل لكل متجر).
+  - السمات: `Secure = true`، `HttpOnly = true`، `SameSite = Lax`.
+- **حدود الإثبات والقرارات المفتوحة:** تثبت هذه الاختبارات سلوك المتصفح الحقيقي (Cookie Jar، Fetch Metadata، Cross-Origin Form POST) **مباشرةً ضد API** (`API browser E2E`)، وليست `React SPA E2E` (لا يوجد تطبيق React في المستودع بعد). وما زالت قرارات `Origin`/URL النهائية وسياسة تعدد الجلسات مقابل تبديل الحساب على مستوى المنتج غير محسومة حتى إغلاق ADR.
 
 ## 11. معايير قبول ADR
 

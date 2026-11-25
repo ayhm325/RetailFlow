@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RetailFlow.SessionTransportSpike/RetailFlow.SessionTransportSpike.csproj" />
+
+    <Project Path="src/RetailFlow.SessionTransportSpike.Api/RetailFlow.SessionTransportSpike.Api.csproj" />
+  </Folder>
+
+  <Folder Name="/tests/">
+    <Project Path="tests/RetailFlow.SessionTransportSpike.PlaywrightTests/RetailFlow.SessionTransportSpike.PlaywrightTests.csproj" />
+  </Folder>
+</Solution>
