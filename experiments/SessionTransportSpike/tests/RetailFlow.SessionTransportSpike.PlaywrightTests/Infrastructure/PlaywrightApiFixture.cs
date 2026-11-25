@@ -16,6 +16,7 @@ public sealed class PlaywrightApiFixture : IAsyncLifetime
 
     private TestHttpsCertificateFactory? _httpsCertificate;
     private TestDataProtectionCertificateFactory? _dataProtectionCertificate;
+    private string? _keysDirectory;
     private Process? _apiProcess;
     private IPlaywright? _playwright;
     private IBrowser? _browser;
@@ -23,6 +24,8 @@ public sealed class PlaywrightApiFixture : IAsyncLifetime
     public string BaseUrl { get; private set; } = string.Empty;
 
     public int ApiPort { get; private set; }
+
+    public int InitialDataProtectionKeysCount { get; private set; }
 
     public string ConnectionString { get; } =
         Environment.GetEnvironmentVariable(
@@ -53,7 +56,16 @@ public sealed class PlaywrightApiFixture : IAsyncLifetime
         _dataProtectionCertificate =
             TestDataProtectionCertificateFactory.Create();
 
+        _keysDirectory = Path.Combine(
+            Path.GetTempPath(),
+            "RetailFlow",
+            "PlaywrightDataProtectionKeys",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_keysDirectory);
+
         Seeder = new SqlTestDataSeeder(ConnectionString);
+        InitialDataProtectionKeysCount =
+            await Seeder.CountDataProtectionKeysAsync();
 
         var startInfo = new ProcessStartInfo
         {
@@ -74,6 +86,8 @@ public sealed class PlaywrightApiFixture : IAsyncLifetime
             BaseUrl;
         startInfo.Environment["DataProtection__ApplicationName"] =
             RetailFlowDataProtectionDefaults.ApplicationName;
+        startInfo.Environment["DataProtection__KeysDirectory"] =
+            _keysDirectory;
         startInfo.Environment["DataProtection__Certificate__Path"] =
             _dataProtectionCertificate.CertificatePath;
         startInfo.Environment["DataProtection__Certificate__Password"] =
@@ -287,6 +301,7 @@ public sealed class PlaywrightApiFixture : IAsyncLifetime
 
         _playwright?.Dispose();
 
+        // Stop the API child process before deleting temporary keys and certificates.
         if (_apiProcess is not null)
         {
             try
@@ -306,6 +321,21 @@ public sealed class PlaywrightApiFixture : IAsyncLifetime
             finally
             {
                 _apiProcess.Dispose();
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(_keysDirectory))
+        {
+            try
+            {
+                if (Directory.Exists(_keysDirectory))
+                {
+                    Directory.Delete(_keysDirectory, recursive: true);
+                }
+            }
+            catch
+            {
+                // Best-effort cleanup of temporary Data Protection keys directory.
             }
         }
 
@@ -382,33 +412,28 @@ public sealed class PlaywrightApiFixture : IAsyncLifetime
 
     private static string LocateBuiltApiDll(string apiProjectDirectory)
     {
-        var candidatePaths = new[]
-        {
-            Path.Combine(
-                apiProjectDirectory,
-                "bin",
-                "Debug",
-                "net10.0",
-                "RetailFlow.SessionTransportSpike.Api.dll"),
-            Path.Combine(
-                apiProjectDirectory,
-                "bin",
-                "Release",
-                "net10.0",
-                "RetailFlow.SessionTransportSpike.Api.dll")
-        };
+#if DEBUG
+        const string configuration = "Debug";
+#else
+        const string configuration = "Release";
+#endif
 
-        var existing = candidatePaths.FirstOrDefault(File.Exists);
+        var expectedPath = Path.Combine(
+            apiProjectDirectory,
+            "bin",
+            configuration,
+            "net10.0",
+            "RetailFlow.SessionTransportSpike.Api.dll");
 
-        if (existing is null)
+        if (!File.Exists(expectedPath))
         {
             throw new FileNotFoundException(
-                "Built RetailFlow.SessionTransportSpike.Api.dll was not found. " +
-                "Build the Playwright solution before running tests.",
-                candidatePaths[0]);
+                $"Built RetailFlow.SessionTransportSpike.Api.dll for configuration '{configuration}' " +
+                $"was not found at '{expectedPath}'. Build the Playwright solution in '{configuration}' configuration first.",
+                expectedPath);
         }
 
-        return existing;
+        return expectedPath;
     }
 
     private static int GetAvailablePort()

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Encodings.Web;
 
@@ -14,36 +15,105 @@ namespace RetailFlow.SessionTransportSpike.PlaywrightTests.Infrastructure;
 internal sealed class BrowserAttackerServer : IAsyncDisposable
 {
     private readonly WebApplication _app;
+    private readonly TestHttpsCertificateFactory? _httpsCertificate;
+
+    private readonly ConcurrentDictionary<string, LoginAttackPayload>
+        _loginPayloads = new(StringComparer.Ordinal);
+
+    private readonly ConcurrentDictionary<string, string>
+        _logoutTargets = new(StringComparer.Ordinal);
 
     public string Origin { get; }
 
     private BrowserAttackerServer(
         WebApplication app,
-        string origin)
+        string origin,
+        TestHttpsCertificateFactory? httpsCertificate)
     {
         _app = app;
         Origin = origin;
+        _httpsCertificate = httpsCertificate;
     }
 
-    public static async Task<BrowserAttackerServer> StartAsync(
+    public static Task<BrowserAttackerServer> StartHttpAsync(
         CancellationToken cancellationToken = default)
+    {
+        return StartAsync(useHttpsLocalhost: false, cancellationToken);
+    }
+
+    public static Task<BrowserAttackerServer> StartHttpsLocalhostAsync(
+        CancellationToken cancellationToken = default)
+    {
+        return StartAsync(useHttpsLocalhost: true, cancellationToken);
+    }
+
+    public string RegisterLoginAttack(
+        string actionUrl,
+        string email,
+        string password)
+    {
+        var id = Guid.NewGuid().ToString("N");
+        var payloads = _sharedLoginPayloads ?? _loginPayloads;
+        payloads[id] = new LoginAttackPayload(actionUrl, email, password);
+        return $"{Origin}/attack-login/{id}";
+    }
+
+    public string RegisterLogoutAttack(string actionUrl)
+    {
+        var id = Guid.NewGuid().ToString("N");
+        var targets = _sharedLogoutTargets ?? _logoutTargets;
+        targets[id] = actionUrl;
+        return $"{Origin}/attack-logout/{id}";
+    }
+
+    private static async Task<BrowserAttackerServer> StartAsync(
+        bool useHttpsLocalhost,
+        CancellationToken cancellationToken)
     {
         var builder = WebApplication.CreateBuilder();
 
         builder.Logging.ClearProviders();
 
-        builder.WebHost.ConfigureKestrel(options =>
+        TestHttpsCertificateFactory? httpsCertificate = null;
+
+        if (useHttpsLocalhost)
         {
-            options.Listen(IPAddress.Loopback, 0);
-        });
+            httpsCertificate = TestHttpsCertificateFactory.Create();
+
+            builder.WebHost.ConfigureKestrel(options =>
+            {
+                options.Listen(
+                    IPAddress.Loopback,
+                    0,
+                    listenOptions =>
+                    {
+                        listenOptions.UseHttps(
+                            httpsCertificate.CertificatePath,
+                            httpsCertificate.Password);
+                    });
+            });
+        }
+        else
+        {
+            builder.WebHost.ConfigureKestrel(options =>
+            {
+                options.Listen(IPAddress.Loopback, 0);
+            });
+        }
 
         var app = builder.Build();
 
-        app.MapGet("/attack-login", (HttpRequest request) =>
+        var loginPayloads = new ConcurrentDictionary<string, LoginAttackPayload>(
+            StringComparer.Ordinal);
+        var logoutTargets = new ConcurrentDictionary<string, string>(
+            StringComparer.Ordinal);
+
+        app.MapGet("/attack-login/{id}", (string id) =>
         {
-            var action = request.Query["action"].ToString();
-            var email = request.Query["email"].ToString();
-            var password = request.Query["password"].ToString();
+            if (!loginPayloads.TryRemove(id, out var payload))
+            {
+                return Results.NotFound();
+            }
 
             var encoder = HtmlEncoder.Default;
 
@@ -57,9 +127,9 @@ internal sealed class BrowserAttackerServer : IAsyncDisposable
                 <body>
                     <form id="attackForm"
                           method="POST"
-                          action="{{encoder.Encode(action)}}">
-                        <input type="hidden" name="Email" value="{{encoder.Encode(email)}}" />
-                        <input type="hidden" name="Password" value="{{encoder.Encode(password)}}" />
+                          action="{{encoder.Encode(payload.ActionUrl)}}">
+                        <input type="hidden" name="Email" value="{{encoder.Encode(payload.Email)}}" />
+                        <input type="hidden" name="Password" value="{{encoder.Encode(payload.Password)}}" />
                     </form>
                     <script>
                         document.getElementById("attackForm").submit();
@@ -71,9 +141,13 @@ internal sealed class BrowserAttackerServer : IAsyncDisposable
             return Results.Content(html, "text/html; charset=utf-8");
         });
 
-        app.MapGet("/attack-logout", (HttpRequest request) =>
+        app.MapGet("/attack-logout/{id}", (string id) =>
         {
-            var action = request.Query["action"].ToString();
+            if (!logoutTargets.TryRemove(id, out var actionUrl))
+            {
+                return Results.NotFound();
+            }
+
             var encoder = HtmlEncoder.Default;
 
             var html = $$"""
@@ -86,7 +160,7 @@ internal sealed class BrowserAttackerServer : IAsyncDisposable
                 <body>
                     <form id="attackForm"
                           method="POST"
-                          action="{{encoder.Encode(action)}}">
+                          action="{{encoder.Encode(actionUrl)}}">
                     </form>
                     <script>
                         document.getElementById("attackForm").submit();
@@ -98,22 +172,59 @@ internal sealed class BrowserAttackerServer : IAsyncDisposable
             return Results.Content(html, "text/html; charset=utf-8");
         });
 
-        await app.StartAsync(cancellationToken);
+        try
+        {
+            await app.StartAsync(cancellationToken);
 
-        var server = app.Services.GetRequiredService<IServer>();
-        var addresses = server.Features.Get<IServerAddressesFeature>();
-        var address = addresses?.Addresses.FirstOrDefault()
-            ?? throw new InvalidOperationException(
-                "Could not determine the attacker server address.");
+            var server = app.Services.GetRequiredService<IServer>();
+            var addresses = server.Features.Get<IServerAddressesFeature>();
+            var address = addresses?.Addresses.FirstOrDefault()
+                ?? throw new InvalidOperationException(
+                    "Could not determine the attacker server address.");
 
-        var origin = new Uri(address).GetLeftPart(UriPartial.Authority);
+            var rawUri = new Uri(address);
+            var origin = useHttpsLocalhost
+                ? $"https://localhost:{rawUri.Port}"
+                : rawUri.GetLeftPart(UriPartial.Authority);
 
-        return new BrowserAttackerServer(app, origin);
+            var instance = new BrowserAttackerServer(
+                app,
+                origin,
+                httpsCertificate);
+
+            // Share the endpoint dictionaries with the instance.
+            instance.ShareState(loginPayloads, logoutTargets);
+
+            return instance;
+        }
+        catch
+        {
+            httpsCertificate?.Dispose();
+            await app.DisposeAsync();
+            throw;
+        }
+    }
+
+    private ConcurrentDictionary<string, LoginAttackPayload>? _sharedLoginPayloads;
+    private ConcurrentDictionary<string, string>? _sharedLogoutTargets;
+
+    private void ShareState(
+        ConcurrentDictionary<string, LoginAttackPayload> loginPayloads,
+        ConcurrentDictionary<string, string> logoutTargets)
+    {
+        _sharedLoginPayloads = loginPayloads;
+        _sharedLogoutTargets = logoutTargets;
     }
 
     public async ValueTask DisposeAsync()
     {
         await _app.StopAsync();
         await _app.DisposeAsync();
+        _httpsCertificate?.Dispose();
     }
+
+    private sealed record LoginAttackPayload(
+        string ActionUrl,
+        string Email,
+        string Password);
 }

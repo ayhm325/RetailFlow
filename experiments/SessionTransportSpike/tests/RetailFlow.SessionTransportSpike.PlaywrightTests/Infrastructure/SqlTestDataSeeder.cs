@@ -118,6 +118,12 @@ public sealed class SqlTestDataSeeder
         }
     }
 
+    public async Task<int> CountDataProtectionKeysAsync()
+    {
+        await using var ticketDb = CreateTicketDbContext();
+        return await ticketDb.DataProtectionKeys.CountAsync();
+    }
+
     private IdentitySpikeDbContext CreateIdentityDbContext()
     {
         var options = new DbContextOptionsBuilder<IdentitySpikeDbContext>()

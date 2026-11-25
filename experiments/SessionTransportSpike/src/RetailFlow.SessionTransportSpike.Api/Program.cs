@@ -77,10 +77,24 @@ if (string.IsNullOrWhiteSpace(dataProtectionApplicationName))
 using var dataProtectionCertificate = DataProtectionCertificateLoader.Load(
     builder.Configuration);
 
-builder.Services
+var dataProtectionBuilder = builder.Services
     .AddDataProtection()
-    .SetApplicationName(dataProtectionApplicationName)
-    .PersistKeysToDbContext<SessionTicketDbContext>()
+    .SetApplicationName(dataProtectionApplicationName);
+
+var testingKeysDirectory = builder.Configuration["DataProtection:KeysDirectory"];
+
+if (builder.Environment.IsEnvironment("Testing") &&
+    !string.IsNullOrWhiteSpace(testingKeysDirectory))
+{
+    var keysDirectoryInfo = Directory.CreateDirectory(testingKeysDirectory);
+    dataProtectionBuilder.PersistKeysToFileSystem(keysDirectoryInfo);
+}
+else
+{
+    dataProtectionBuilder.PersistKeysToDbContext<SessionTicketDbContext>();
+}
+
+dataProtectionBuilder
     .ProtectKeysWithCertificate(dataProtectionCertificate)
     .UnprotectKeysWithAnyCertificate(dataProtectionCertificate);
 

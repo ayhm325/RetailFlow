@@ -182,6 +182,11 @@ public sealed class StoreCustomerBrowserSessionTests
                     Assert.Equal(
                         storeB.StoreId.ToString("D"),
                         meBAfter.StoreId);
+
+                    // Shared SQL DataProtectionKeys must remain untouched by Testing runs.
+                    Assert.Equal(
+                        _fixture.InitialDataProtectionKeysCount,
+                        await _fixture.Seeder.CountDataProtectionKeysAsync());
                 });
         }
         finally
