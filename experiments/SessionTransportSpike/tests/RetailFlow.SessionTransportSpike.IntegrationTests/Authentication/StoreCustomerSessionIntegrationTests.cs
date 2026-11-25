@@ -286,6 +286,107 @@ public sealed class StoreCustomerSessionIntegrationTests
     }
 
     [Fact]
+    public async Task StoreACookie_ReplayedAgainstStoreBAfterSecurityStampInterval_ReturnsForbidden_AndPreservesStoreASession()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            var fakeTimeProvider = new FakeTimeProvider(
+                DateTimeOffset.UtcNow);
+
+            using var hostFactory = SessionTransportApiFactory.Create(
+                RetailFlowDataProtectionDefaults.ApplicationName,
+                TestDataProtectionCertificates.Shared.Path,
+                TestDataProtectionCertificates.Shared.Password,
+                fakeTimeProvider);
+
+            using var client = CreateStatelessClient(hostFactory);
+
+            var storeA = await CreateTenantAsync("secstamp-store-a");
+            tenants.Add(storeA);
+
+            var storeB = await CreateTenantAsync("secstamp-store-b");
+            tenants.Add(storeB);
+
+            var storeAPath =
+                $"/api/stores/{storeA.Slug}/customers";
+
+            var storeBPath =
+                $"/api/stores/{storeB.Slug}/customers";
+
+            // 1. Login to Store A and capture Cookie A.
+            var storeACookie = await LoginCustomerAsync(
+                client,
+                storeA);
+
+            // 2. Rename Cookie A to Store B's cookie name.
+            var forgedCookieHeader = RemapCookieName(
+                storeACookie.CookieHeader,
+                storeACookie.Name,
+                BuildCookieName(storeB.StoreId));
+
+            // 3. Advance beyond SecurityStampValidatorOptions.ValidationInterval (5m),
+            //    while remaining well within the 15-minute idle timeout.
+            fakeTimeProvider.Advance(TimeSpan.FromMinutes(6));
+
+            // 4. Replay the remapped cookie against Store B -> must return 403,
+            //    with no Set-Cookie and without revoking Store A's session.
+            using var forgedResponse = await SendWithCookieAsync(
+                client,
+                HttpMethod.Get,
+                $"{storeBPath}/me",
+                forgedCookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.Forbidden,
+                forgedResponse.StatusCode);
+
+            Assert.Null(forgedResponse.Headers.Location);
+
+            Assert.Empty(
+                GetSetCookieHeaders(forgedResponse));
+
+            // 5. Verify Store A's server-side session still exists in SQL.
+            await using (var scope =
+                         hostFactory.Services.CreateAsyncScope())
+            {
+                var factory = scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<SessionTicketDbContext>>();
+
+                await using var db =
+                    await factory.CreateDbContextAsync();
+
+                var storeASessions = await db.AuthenticationTickets
+                    .AsNoTracking()
+                    .Where(ticket =>
+                        ticket.UserId == storeA.UserId &&
+                        ticket.StoreId == storeA.StoreId)
+                    .ToListAsync();
+
+                Assert.Single(storeASessions);
+            }
+
+            // 6. Replay original Cookie A against Store A -> SecurityStampValidator
+            //    validates normally in Store A's scope and returns 200 OK.
+            using var storeAResponse = await SendWithCookieAsync(
+                client,
+                HttpMethod.Get,
+                $"{storeAPath}/me",
+                storeACookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.OK,
+                storeAResponse.StatusCode);
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
     public async Task CsrfProtection_EnforcesCustomHeader_OriginReferer_AndFetchMetadata()
     {
         var tenants = new List<TestTenant>();

@@ -4,12 +4,23 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Identity;
 
 using RetailFlow.IdentitySpike.Api.Domain.Identity;
+using RetailFlow.IdentitySpike.Api.Infrastructure.Identity;
 
 namespace RetailFlow.SessionTransportSpike.Api.Authentication;
 
 public sealed class StoreCustomerCookieAuthenticationEvents
     : CookieAuthenticationEvents
 {
+    private readonly IIdentityLookupScopeAccessor _scopeAccessor;
+
+    public StoreCustomerCookieAuthenticationEvents(
+        IIdentityLookupScopeAccessor scopeAccessor)
+    {
+        ArgumentNullException.ThrowIfNull(scopeAccessor);
+
+        _scopeAccessor = scopeAccessor;
+    }
+
     public override async Task ValidatePrincipal(
         CookieValidatePrincipalContext context)
     {
@@ -57,10 +68,22 @@ public sealed class StoreCustomerCookieAuthenticationEvents
             return;
         }
 
-        // A structurally valid identity is authenticated here.
-        //
-        // Whether it belongs to the current StoreId is an
-        // authorization decision handled by StoreCustomerScopePolicy.
+        var scope = _scopeAccessor.Current;
+
+        var matchesCurrentStore =
+            scope is not null &&
+            scope.AccountKind == AccountKind.StoreCustomer &&
+            scope.StoreId is Guid currentStoreId &&
+            currentStoreId != Guid.Empty &&
+            currentStoreId == claimedStoreId;
+
+        if (!matchesCurrentStore)
+        {
+            // Do not validate a Store A identity using Store B's scoped UserManager.
+            // Keep the ticket authenticated and let Authorization deny this request.
+            return;
+        }
+
         await SecurityStampValidator.ValidatePrincipalAsync(context);
     }
 
