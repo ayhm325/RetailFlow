@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Time.Testing;
 
 using RetailFlow.IdentitySpike.Api.Domain.Identity;
 using RetailFlow.IdentitySpike.Api.Domain.Stores;
@@ -537,6 +538,127 @@ public sealed class StoreCustomerSessionIntegrationTests
             Assert.Equal(
                 HttpStatusCode.OK,
                 secondMeResponse.StatusCode);
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task Session_ExpiresAfterFifteenMinutesOfInactivity_ReturnsUnauthorizedAndRemovesTicket()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            // Create an independent API host and independent clock.
+            // This prevents modifying the shared xUnit fixture clock.
+            var fakeTimeProvider = new FakeTimeProvider(
+                DateTimeOffset.UtcNow);
+
+            using var expirationFactory =
+                SessionTransportApiFactory.Create(
+                    RetailFlowDataProtectionDefaults.ApplicationName,
+                    TestDataProtectionCertificates.Shared.Path,
+                    TestDataProtectionCertificates.Shared.Password,
+                    fakeTimeProvider);
+
+            using var client = CreateStatelessClient(
+                expirationFactory);
+
+            // Create test tenant and customer.
+            var tenant = await CreateTenantAsync(
+                "session-idle-expiration");
+
+            tenants.Add(tenant);
+
+            var basePath =
+                $"/api/stores/{tenant.Slug}/customers";
+
+            // 1. Login and capture the original browser cookie.
+            var issuedCookie = await LoginCustomerAsync(
+                client,
+                tenant);
+
+            // 2. Read the actual persisted SQL session.
+            PersistedAuthenticationTicket session;
+
+            await using (var scope =
+                         expirationFactory.Services.CreateAsyncScope())
+            {
+                var factory = scope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<SessionTicketDbContext>>();
+
+                await using var db =
+                    await factory.CreateDbContextAsync();
+
+                var sessions = await db.AuthenticationTickets
+                    .AsNoTracking()
+                    .Where(ticket =>
+                        ticket.UserId == tenant.UserId &&
+                        ticket.StoreId == tenant.StoreId)
+                    .ToListAsync();
+
+                session = Assert.Single(sessions);
+            }
+
+            // 3. Verify the configured 15-minute idle lifetime.
+            Assert.Equal(
+                TimeSpan.FromMinutes(15),
+                session.ExpiresUtc - session.CreatedUtc);
+
+            Assert.True(
+                session.ExpiresUtc > fakeTimeProvider.GetUtcNow());
+
+            // 4. Stop the periodic cleanup worker for this dedicated
+            // test host. We want RetrieveAsync itself to handle expiry.
+            var cleanupService = expirationFactory.Services
+                .GetRequiredService<
+                    ExpiredSessionTicketCleanupService>();
+
+            await cleanupService.StopAsync(
+                CancellationToken.None);
+
+            // 5. Advance time beyond this exact ticket expiration.
+            var remainingLifetime =
+                session.ExpiresUtc - fakeTimeProvider.GetUtcNow();
+
+            Assert.True(remainingLifetime > TimeSpan.Zero);
+
+            fakeTimeProvider.Advance(
+                remainingLifetime + TimeSpan.FromSeconds(1));
+
+            // 6. Replay the ORIGINAL browser cookie.
+            using var expiredResponse = await SendAuthenticatedGetAsync(
+                client,
+                $"{basePath}/me",
+                issuedCookie.CookieHeader);
+
+            // The expired ticket must no longer authenticate.
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                expiredResponse.StatusCode);
+
+            // 7. RetrieveAsync must remove the expired SQL session.
+            await using (var verificationScope =
+                         expirationFactory.Services.CreateAsyncScope())
+            {
+                var factory = verificationScope.ServiceProvider
+                    .GetRequiredService<
+                        IDbContextFactory<SessionTicketDbContext>>();
+
+                await using var db =
+                    await factory.CreateDbContextAsync();
+
+                var remainingSessions =
+                    await db.AuthenticationTickets
+                        .CountAsync(ticket =>
+                            ticket.StoreId == tenant.StoreId);
+
+                Assert.Equal(0, remainingSessions);
+            }
         }
         finally
         {
