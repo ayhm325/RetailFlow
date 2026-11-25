@@ -2,8 +2,8 @@
 
 | الحقل | القيمة |
 |---|---|
-| **الحالة** | **Proposed — Session Transport Spike قيد التنفيذ (CSRF + Per-Session `ITicketStore` + `TimeProvider` + `ExpiredSessionTicketCleanupService` + `Shared Data Protection Key Ring` + `Idle 15m / Absolute 8h Expiration` منفذة ومختبرة؛ متبقي `403 Authorization Policy` وPlaywright وقياس الأداء)** |
-| **الإصدار** | 0.9 |
+| **الحالة** | **Proposed — Session Transport Spike قيد التنفيذ (CSRF + Per-Session `ITicketStore` + `TimeProvider` + `ExpiredSessionTicketCleanupService` + `Shared Data Protection Key Ring` + `Idle 15m / Absolute 8h Expiration` + `403 Authorization Policy` منفذة ومختبرة؛ متبقي Playwright وقياس الأداء ومتطلبات Production Readiness)** |
+| **الإصدار** | 0.10 |
 | **التاريخ** | 25 نوفمبر 2026 |
 | **النطاق** | Browser Authentication · StoreCustomer · BackOffice boundary |
 | **المنصة** | .NET 10 · ASP.NET Core Identity · React + TypeScript · SQL Server |
@@ -54,7 +54,7 @@ GET  /api/stores/{slug}/customers/me
 
 - `IdentityScopeResolver` و`IdentityScopeMiddleware` و`ScopedUserStore` منفذة ومختبرة ضمن Identity Spike (مع إغلاق فجوات خصائص المستخدم في `ScopedUserStore` ونجاح Regression **`49 / 49`**).
 - Route Group الخاص بعملاء المتاجر وRoute Group الخاص بـ BackOffice مربوطان في `Program.cs`.
-- أُنشئت تجربة [`SessionTransportSpike`](../experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.slnx) المعزولة لإثبات نقل الجلسات بالـ Cookies لكل متجر وحماية CSRF، ونجحت اختبارات **`71 / 71`** (`57` Unit + `14` Integration على SQL Server و`WebApplicationFactory`).
+- أُنشئت تجربة [`SessionTransportSpike`](../experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.slnx) المعزولة لإثبات نقل الجلسات بالـ Cookies لكل متجر وحماية CSRF، ونجحت اختبارات **`78 / 78`** (`63` Unit + `15` Integration على SQL Server و`WebApplicationFactory`).
 - `AddAuthentication` و`UseAuthentication` و`UseAuthorization` وHTTP Authentication endpoints لم تُعتمد بعد في التطبيق الفعلي لـ `IdentitySpike` بانتظار استكمال بقية بوابات القبول في هذا ADR.
 - هذا القرار لا يغيّر Identity Schema أو UserStore أو Scope model.
 
@@ -419,14 +419,17 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
   - تنفيذ `SqlServerTicketStore` و`SessionLifetimeOptions` (`IdleTimeout = 15m`، `AbsoluteLifetime = 8h`): مفتاح جلسة عشوائي `32 bytes` Base64Url بطول `43` محرفاً، حماية `AuthenticationTicket` عبر `IDataProtector`، التحقق من `StoreCustomer` metadata عند التخزين والاسترجاع والتجديد، حقن `TimeProvider` وتمريره إلى `CookieAuthenticationOptions.TimeProvider`، حساب `AbsoluteExpiresUtc` مرة واحدة عند الإنشاء، تقييد `Sliding Renewal` بالموعد المطلق دون تعديله مع فرض تجديد رتيب (`existing.ExpiresUtc < effectiveExpiresUtc`) يمنع `Stale Renewal` ويمنع إحياء جلسة محذوفة.
   - تنفيذ `ExpiredSessionTicketCleanupService` (`BackgroundService` يعتمد على `PeriodicTimer` كل 5 دقائق و`TimeProvider` و`ExecuteDeleteAsync` لإزالة الجلسات المنتهية وفق `ExpiresUtc <= now || AbsoluteExpiresUtc <= now` دورياً).
   - إضافة حارس `409 Conflict` في `POST /login` لمنع تبديل الحساب داخل جلسة نشطة قبل `Logout`.
-- **`StoreCustomerCookieAuthenticationEvents` و`StoreCustomerClaimsPrincipalFactory`:** يربطان الجلسة بـ `AccountKind` و`StoreId`، ويعيدان `401 Unauthorized` / `403 Forbidden` (بدل `302` redirect) للـ SPA/API، ويرفضان إعادة استخدام Ticket متجر A على مسار متجر B مع حذف Cookie النطاق الحالي فقط (`DeleteCurrentScopeCookie` بدل `SignOutAsync`) حتى لا تُبطَل جلسة Store A على الخادم.
+- **`StoreCustomerCookieAuthenticationEvents` و`StoreCustomerClaimsPrincipalFactory` و`403 Authorization Policy`:**
+  - يربطان الجلسة بـ `AccountKind` و`StoreId`، ويعيدان `401 Unauthorized` (فشل Authentication) و`403 Forbidden` (فشل Authorization عبر `RetailFlowAuthorizationPolicies.StoreCustomerScope` و`StoreCustomerScopeRequirement` و`StoreCustomerScopeAuthorizationHandler` المسجل بعمر `Scoped` على `/me` و`/logout` دون `/login`).
+  - يفحص `StoreCustomerCookieAuthenticationEvents.ValidatePrincipal` سلامة بنية الـ Claims أولاً، ثم يتجاوز `SecurityStampValidator.ValidatePrincipalAsync` إذا اختلف `claimedStoreId` عن `IIdentityLookupScopeAccessor.Current` حتى لا يبحث `ScopedUserStore` عن مستخدم Store A داخل Scope Store B فيبطل جلسة Store A بعد مرور `ValidationInterval = 5m`، ويترك قرار الرفض للـ Authorization Policy (`403 Forbidden` دون حذف Cookie أو إبطال التذكرة الخادمية)؛ مع `6` اختبارات وحدة مستقلة في `StoreCustomerScopeAuthorizationHandlerTests`.
 - **`Shared Data Protection Key Ring` (`Microsoft.AspNetCore.DataProtection.EntityFrameworkCore 10.0.15`):**
   - توسيع `SessionTicketDbContext` لتنفيذ `IDataProtectionKeyContext` (`DataProtectionKeys`) وتطبيق Migration `20261125063008_AddDataProtectionKeys` (`AddDataProtectionKeys.sql`) على قاعدة التطوير المحلية `RetailFlowIdentitySpike` دون تعديل `AuthenticationSessionTickets` أو جداول Identity.
   - تثبيت `ApplicationName = "RetailFlow.Auth"` (`RetailFlowDataProtectionDefaults.ApplicationName`) وحماية مفاتيح Key Ring بشهادة X.509 عبر `DataProtectionCertificateLoader` (`X509CertificateLoader.LoadPkcs12FromFile` مع `EphemeralKeySet`، و`PersistKeysToDbContext<SessionTicketDbContext>()`، و`ProtectKeysWithCertificate`، و`UnprotectKeysWithAnyCertificate`).
 - **ضوابط إضافية:** ضبط `SecurityStampValidatorOptions.ValidationInterval = 5m` (أقل من `ExpireTimeSpan = 15m`)، وموازنة زمن `POST /login` بـ Dummy Hash عند عدم وجود المستخدم.
-- **اختبارات التكامل على SQL Server (`14/14` Passed، 0 تحذيرات، عبر `WebApplicationFactory` و`FakeTimeProvider` عبر `Microsoft.Extensions.TimeProvider.Testing 10.0.0`):**
+- **اختبارات التكامل على SQL Server (`15/15` Passed، 0 تحذيرات، عبر `WebApplicationFactory` و`FakeTimeProvider` عبر `Microsoft.Extensions.TimeProvider.Testing 10.0.0`):**
   - `Login_Me_Logout_RemovesBrowserSessionCookie`: يثبت `Login (204)` -> `Me (200)` -> رفض `Logout` دون `X-RetailFlow-Request` (`403`) -> رفض `Logout` من Origin خارجي (`403`) -> `Logout` صحيح (`204 + حذف Cookie + حذف سجل SQL`) -> إعادة إرسال Cookie الأصلية نفسها بعد `Logout` تعيد **`401 Unauthorized`** (إبطال خادمي فعلي).
-  - `StoreACookie_CannotAuthenticateAgainstStoreB`: يثبت رفض Cookie متجر A على متجر B ورفض Ticket A المنسوخ باسم Cookie متجر B (`401 Unauthorized` مع حذف Cookie B)، مع بقاء جلسة Store A صالحة (`200 OK`).
+  - `StoreACookie_CannotAccessStoreB`: يثبت رفض Cookie متجر A على متجر B (`401 Unauthorized`) ورفض Ticket A المنسوخ باسم Cookie متجر B عبر سياسة الصلاحية (`403 Forbidden` دون `Location` ودون `Set-Cookie`)، مع بقاء جلسة Store A صالحة (`200 OK`).
+  - `StoreACookie_ReplayedAgainstStoreBAfterSecurityStampInterval_ReturnsForbidden_AndPreservesStoreASession`: يقدّم `FakeTimeProvider` بمقدار 6 دقائق (متجاوزاً `ValidationInterval = 5m`) ويرسل Cookie متجر A المعاد تسميتها إلى Store B، فيثبت إرجاع `403 Forbidden` دون `Set-Cookie` وبقاء سجل جلسة A في SQL Server، ثم نجاح إعادة استخدام Cookie A الأصلية على Store A (`200 OK`) مع تحقق `SecurityStampValidator` ضمن Scope الصحيح.
   - `CsrfProtection_EnforcesCustomHeader_OriginReferer_AndFetchMetadata`: يثبت رفض `Login` (بـ `403` ودون إصدار Cookie) عند غياب Header أو Origin خارجي أو `Origin: null` أو غياب Origin وReferer أو `Sec-Fetch-Site` بقيم `cross-site`/`same-site`/`none` أو Origin غير صالح مع Referer صالح، ويثبت قبول الطلب الصحيح عند غياب `Sec-Fetch-Site` أو عند غياب `Origin` مع `Referer` صالح.
   - `SlidingRenewal_UpdatesExistingSessionWithoutCreatingAnother`: يقدّم `FakeTimeProvider` بمقدار 8 دقائق (بعد منتصف عمر `15m`) ثم يرسل `GET /me`، ويثبت إصدار Cookie مجددة وتحديث السجل نفسه في SQL Server (`Key` ثابت، تمديد `ExpiresUtc` و`LastRenewedUtc`، عدد السجلات `1`) ونجاح المصادقة بالـ Cookie المجددة.
   - `Session_ExpiresAfterFifteenMinutesOfInactivity_ReturnsUnauthorizedAndRemovesTicket`: يوقف `ExpiredSessionTicketCleanupService` ويقدّم `FakeTimeProvider` إلى ما بعد انتهاء مهلة الخمول (`15m + 1s`)، ويثبت رفض الـ Cookie الأصلية بـ `401 Unauthorized` وحذف السجل من SQL بواسطة `SqlServerTicketStore.RetrieveAsync` (مع التحقق من `AbsoluteExpiresUtc = CreatedUtc + 8h`).
@@ -439,7 +442,7 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
   - `InstanceA_CookieAndTicket_AreReadableByInstanceB_AndAfterRestart`: يثبت على ثلاث مراحل (`Instance A` -> `Instance B` مستقل -> `Instance C` جديد بعد إيقاف `B`) استرجاع الـ Cookie والتذكرة المحمية من SQL Server والتحقق من `<encryptedSecret>` في `DataProtectionKeys`.
   - `DifferentApplicationName_CannotUnprotectCookieOrTicket`: يثبت فشل فك التذكرة والـ Cookie (`RetrieveAsync == null` و`401 Unauthorized`) عند اختلاف `ApplicationName`.
   - `WrongCertificate_CannotUnprotectCookieOrTicket`: يثبت فشل فك التذكرة والـ Cookie (`RetrieveAsync == null` و`401 Unauthorized`) عند استخدام شهادة X.509 مختلفة.
-  - **المتبقي لإغلاق بوابات ADR:** `403 Authorization Policy`، واختبارات المتصفح بـ Playwright (قسم 10.5)، وقياس الأداء (قسم 10.3)، إضافةً إلى متطلبات ما قبل الإنتاج الخاصة بـ Data Protection (`Certificate Rotation`، و`Backup/Restore` لملف PFX، واختبار عمليتي OS مستقلتين، ومراقبة مزامنة Key Ring).
+  - **المتبقي لإغلاق بوابات ADR:** اختبارات المتصفح بـ Playwright (قسم 10.5)، وقياس الأداء (قسم 10.3)، إضافةً إلى متطلبات ما قبل الإنتاج الخاصة بـ Data Protection (`Certificate Rotation`، و`Backup/Restore` لملف PFX، واختبار عمليتي OS مستقلتين، ومراقبة مزامنة Key Ring)، وحسم قرارات Origin وURL وتعدد جلسات المتاجر، وتكامل `BackOffice StoreMembership` لاحقاً.
 
 ### 10.5 اختبارات المتصفح المطلوبة لاحقاً (Browser-Level Acceptance)
 
@@ -551,3 +554,4 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 | 0.7 | 2026-11-25 | إضافة `ExpiredSessionTicketCleanupService` (`BackgroundService` بفاصل 5 دقائق مع `PeriodicTimer` و`ExecuteDeleteAsync`) واختباري تنظيف الجلسات المنتهية والنشطة (`66/66` في `SessionTransportSpike`). |
 | 0.8 | 2026-11-25 | تنفيذ `Shared Data Protection Key Ring` عبر `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore 10.0.15` وMigration `20261125063008_AddDataProtectionKeys` (`DataProtectionKeys`)، وحماية X.509 (`DataProtectionCertificateLoader`) و`ApplicationName = "RetailFlow.Auth"`، وإثبات اختبارات `A/B/C` وعزل `ApplicationName` والشهادة الخاطئة (`69/69` في `SessionTransportSpike`). |
 | 0.9 | 2026-11-25 | إضافة سياسة انتهاء الجلسة المزدوجة (`Idle Timeout = 15m` و`Absolute Session Lifetime = 8h`) عبر `SessionLifetimeOptions` و`AbsoluteExpiresUtc` وMigration `20261125072108_AddAbsoluteSessionExpiration` (مع Backfill آمن)، وتقييد `Sliding Renewal` بالحد المطلق، وإثبات اختباري انتهاء الخمول والحد المطلق مع استمرار النشاط (`71/71` في `SessionTransportSpike`). |
+| 0.10 | 2026-11-25 | فصل `403 Authorization Policy` (`RetailFlow.StoreCustomerScope` و`StoreCustomerScopeAuthorizationHandler`) عن `401 Authentication`، وحماية `SecurityStampValidator` عند اختلاف `StoreId` مع Scope الطلب، وإضافة `6` اختبارات وحدة واختبار التكامل المتأخر بعد 6 دقائق (`StoreACookie_ReplayedAgainstStoreBAfterSecurityStampInterval_ReturnsForbidden_AndPreservesStoreASession`) مع نتيجة `78/78` في `SessionTransportSpike`. |
