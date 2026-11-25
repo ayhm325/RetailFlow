@@ -54,7 +54,7 @@ GET  /api/stores/{slug}/customers/me
 
 - `IdentityScopeResolver` و`IdentityScopeMiddleware` و`ScopedUserStore` منفذة ومختبرة ضمن Identity Spike (مع إغلاق فجوات خصائص المستخدم في `ScopedUserStore` ونجاح Regression **`49 / 49`**).
 - Route Group الخاص بعملاء المتاجر وRoute Group الخاص بـ BackOffice مربوطان في `Program.cs`.
-- أُنشئت تجربة [`SessionTransportSpike`](../experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.slnx) المعزولة لإثبات نقل الجلسات بالـ Cookies لكل متجر وحماية CSRF، ونجحت اختبارات **`78 / 78`** (`63` Unit + `15` Integration على SQL Server و`WebApplicationFactory`).
+- أُنشئت تجربة [`SessionTransportSpike`](../experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.slnx) المعزولة لإثبات نقل الجلسات بالـ Cookies لكل متجر وحماية CSRF، ونجحت اختبارات **`85 / 85`** (`63` Unit + `22` Integration على SQL Server و`WebApplicationFactory`)، إضافةً إلى **`4 / 4`** Playwright Browser Tests.
 - `AddAuthentication` و`UseAuthentication` و`UseAuthorization` وHTTP Authentication endpoints لم تُعتمد بعد في التطبيق الفعلي لـ `IdentitySpike` بانتظار استكمال بقية بوابات القبول في هذا ADR.
 - هذا القرار لا يغيّر Identity Schema أو UserStore أو Scope model.
 
@@ -487,11 +487,17 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 - **التحقق الدوري من `SecurityStamp`:**
   - عند تغيير `SecurityStamp` خارجياً (مثل إعادة تعيين إداري)، يلتقط `SecurityStampValidator` (بفاصل `ValidationInterval = 5m` مع `TimeProvider` المحقون) عدم التطابق في الطلب التالي بعد انقضاء الفاصل، ويرفض الكوكي (`401 Unauthorized`) ويحذف تذكرتها من `AuthenticationSessionTickets`.
   - تم تسجيل مخطط `IdentityConstants.TwoFactorRememberMeScheme` عبر `.AddCookie(IdentityConstants.TwoFactorRememberMeScheme)` إلى جانب `IdentityConstants.ApplicationScheme` لضمان نجاح `SecurityStampValidator.ValidateAsync` عند استدعاء `SignOutAsync`.
-- **اختبارات التكامل المضافة (ضمن `19/19` في `IntegrationTests`):**
+- **تزامن `Login` مع تغيير كلمة المرور على مستوى SQL (`UPDLOCK, ROWLOCK`):**
+  - يأخذ كل من `SqlServerTicketStore.StoreCoreAsync` و`StoreCustomerPasswordChangeService.ChangePasswordAndRevokeSessionsAsync` قفلاً تحديثياً على صف المستخدم في `[dbo].[AspNetUsers]` (`WITH (UPDLOCK, ROWLOCK)`) كأول خطوة داخل معاملة SQL (نفس ترتيب القفل لمنع `Deadlock` والتنسيق عبر عدة نسخ API دون `SemaphoreSlim`).
+  - يتحقق `SqlServerTicketStore.StoreCoreAsync` من مطابقة `SecurityStamp` الحالي في SQL لـ `SecurityStamp` الموجود في `AuthenticationTicket` قبل الإدراج؛ فإن سبق تغيير كلمة المرور يرمي `StaleSecurityStampException` ويعيد `/login` الحالة `401 Unauthorized` دون إنشاء تذكرة أو إرسال `Set-Cookie`. وإن سبق `Login` القفلَ، ينتظر تغيير كلمة المرور ثم يحذف التذكرة المضافة حديثاً.
+- **اختبارات التكامل المضافة (ضمن `22/22` في `IntegrationTests`):**
   - `ChangePassword_RevokesAllUserSessions_AndRequiresNewPassword`
   - `ChangePassword_FailedValidation_DoesNotRevokeSessions`
   - `SecurityStampChange_InvalidatesSessionsAtNextValidationInterval`
   - `ChangePassword_WithCrossStoreCookie_ReturnsForbidden_AndPreservesStoreASession`
+  - `ConcurrentLogin_DelayedUntilAfterPasswordChange_IsRejected_AndCreatesNoSession`
+  - `ConcurrentLogin_AcquiringUserLockFirst_WaitsForPasswordChangeToDeleteNewTicket`
+  - `ChangePassword_WhenTicketDeletionFails_RollsBackPasswordAndSecurityStamp_AndPreservesSessions`
 
 ## 11. معايير قبول ADR
 
@@ -596,4 +602,4 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 | 0.9 | 2026-11-25 | إضافة سياسة انتهاء الجلسة المزدوجة (`Idle Timeout = 15m` و`Absolute Session Lifetime = 8h`) عبر `SessionLifetimeOptions` و`AbsoluteExpiresUtc` وMigration `20261125072108_AddAbsoluteSessionExpiration` (مع Backfill آمن)، وتقييد `Sliding Renewal` بالحد المطلق، وإثبات اختباري انتهاء الخمول والحد المطلق مع استمرار النشاط (`71/71` في `SessionTransportSpike`). |
 | 0.10 | 2026-11-25 | فصل `403 Authorization Policy` (`RetailFlow.StoreCustomerScope` و`StoreCustomerScopeAuthorizationHandler`) عن `401 Authentication`، وحماية `SecurityStampValidator` عند اختلاف `StoreId` مع Scope الطلب، وإضافة `6` اختبارات وحدة واختبار التكامل المتأخر بعد 6 دقائق (`StoreACookie_ReplayedAgainstStoreBAfterSecurityStampInterval_ReturnsForbidden_AndPreservesStoreASession`) مع نتيجة `78/78` في `SessionTransportSpike`. |
 | 0.11 | 2026-11-25 | إكمال Browser-Level Acceptance (`4/4` Playwright)، وإضافة Same-Site Cross-Origin Logout CSRF مع إرسال Cookie فعلية، وعزل مفاتيح `Testing` في File System مؤقت محمية بـ X.509، والتحقق من عدم تغيير `DataProtectionKeys`، وتحسين Credential Hygiene وBuild Configuration. بقي ADR `Proposed`. |
-| 0.12 | 2026-11-25 | تنفيذ `ST-14` (تغيير كلمة المرور وإبطال جميع جلسات المستخدم ذرّياً ضمن معاملة SQL مشتركة، وتغطية إبطال `SecurityStampValidator` بعد `5m`، وتسجيل `IdentityConstants.TwoFactorRememberMeScheme` لنجاح `SignOutAsync` أثناء التحقق، وحماية `POST /password/change` بسياسة `403`)، وتقوية `PlaywrightApiFixture.DisposeAsync()`، وإزالة ذكر Playwright المتبقي من الترويسة (`82/82` في `SessionTransportSpike` + `4/4` Playwright). بقي ADR `Proposed`. |
+| 0.12 | 2026-11-25 | تنفيذ `ST-14` (تغيير كلمة المرور وإبطال جميع جلسات المستخدم ذرّياً ضمن معاملة SQL مشتركة، ومزامنة `Login` مع تغيير كلمة المرور عبر `UPDLOCK, ROWLOCK` على `AspNetUsers` والتحقق من `SecurityStamp` قبل إدراج التذكرة، وتغطية إبطال `SecurityStampValidator` بعد `5m`، وتسجيل `IdentityConstants.TwoFactorRememberMeScheme` لنجاح `SignOutAsync`، وحماية `POST /password/change` بسياسة `403`، واختبارات التزامن وRollback) وتقوية `PlaywrightApiFixture.DisposeAsync()` (`85/85` في `SessionTransportSpike` + `4/4` Playwright). بقي ADR `Proposed`. |

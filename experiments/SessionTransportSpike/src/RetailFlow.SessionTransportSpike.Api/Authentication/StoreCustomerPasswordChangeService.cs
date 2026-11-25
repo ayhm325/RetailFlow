@@ -1,3 +1,5 @@
+using System.Data;
+
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -19,10 +21,13 @@ public sealed class StoreCustomerPasswordChangeService
 
     private readonly IIdentityLookupScopeAccessor _scopeAccessor;
 
+    private readonly IStoreCustomerSessionOperationHook _operationHook;
+
     public StoreCustomerPasswordChangeService(
         IdentitySpikeDbContext identityDbContext,
         UserManager<ApplicationUser> userManager,
-        IIdentityLookupScopeAccessor scopeAccessor)
+        IIdentityLookupScopeAccessor scopeAccessor,
+        IStoreCustomerSessionOperationHook? operationHook = null)
     {
         ArgumentNullException.ThrowIfNull(identityDbContext);
         ArgumentNullException.ThrowIfNull(userManager);
@@ -31,6 +36,8 @@ public sealed class StoreCustomerPasswordChangeService
         _identityDbContext = identityDbContext;
         _userManager = userManager;
         _scopeAccessor = scopeAccessor;
+        _operationHook = operationHook
+            ?? NoOpStoreCustomerSessionOperationHook.Instance;
     }
 
     public async Task<IdentityResult> ChangePasswordAndRevokeSessionsAsync(
@@ -70,11 +77,20 @@ public sealed class StoreCustomerPasswordChangeService
                 cancellationToken);
 
         // -------------------------------------------------------------
-        // 3. Create SessionTicketDbContext using the SAME DbConnection.
+        // 3. Lock the user row first (same lock order as SqlServerTicketStore)
+        //    and create SessionTicketDbContext using the SAME DbConnection.
         // -------------------------------------------------------------
 
         var sharedConnection =
             _identityDbContext.Database.GetDbConnection();
+
+        await AcquireUserRowUpdateLockAsync(
+            sharedConnection,
+            transaction.GetDbTransaction(),
+            user.Id,
+            AccountKind.StoreCustomer,
+            storeId,
+            cancellationToken);
 
         var ticketOptions =
             new DbContextOptionsBuilder<SessionTicketDbContext>()
@@ -117,6 +133,12 @@ public sealed class StoreCustomerPasswordChangeService
         // 5. Revoke every session belonging to this exact user/scope.
         // -------------------------------------------------------------
 
+        await _operationHook.OnBeforePasswordChangeTicketDeleteAsync(
+            ticketDbContext,
+            user.Id,
+            storeId,
+            cancellationToken);
+
         await ticketDbContext.AuthenticationTickets
             .Where(ticket =>
                 ticket.UserId == user.Id &&
@@ -131,5 +153,49 @@ public sealed class StoreCustomerPasswordChangeService
         await transaction.CommitAsync(cancellationToken);
 
         return result;
+    }
+
+    private static async Task AcquireUserRowUpdateLockAsync(
+        System.Data.Common.DbConnection connection,
+        System.Data.Common.DbTransaction transaction,
+        string userId,
+        AccountKind accountKind,
+        Guid storeId,
+        CancellationToken cancellationToken)
+    {
+        if (connection.State != ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT [Id]
+            FROM [dbo].[AspNetUsers] WITH (UPDLOCK, ROWLOCK)
+            WHERE [Id] = @userId
+              AND [AccountKind] = @accountKind
+              AND [StoreId] = @storeId;
+            """;
+
+        var userIdParam = command.CreateParameter();
+        userIdParam.ParameterName = "@userId";
+        userIdParam.DbType = DbType.String;
+        userIdParam.Value = userId;
+        command.Parameters.Add(userIdParam);
+
+        var accountKindParam = command.CreateParameter();
+        accountKindParam.ParameterName = "@accountKind";
+        accountKindParam.DbType = DbType.Int32;
+        accountKindParam.Value = (int)accountKind;
+        command.Parameters.Add(accountKindParam);
+
+        var storeIdParam = command.CreateParameter();
+        storeIdParam.ParameterName = "@storeId";
+        storeIdParam.DbType = DbType.Guid;
+        storeIdParam.Value = storeId;
+        command.Parameters.Add(storeIdParam);
+
+        _ = await command.ExecuteScalarAsync(cancellationToken);
     }
 }

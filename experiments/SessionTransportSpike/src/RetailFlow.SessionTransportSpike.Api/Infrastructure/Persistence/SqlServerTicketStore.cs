@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Claims;
 using System.Security.Cryptography;
 
@@ -7,6 +8,7 @@ using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.WebUtilities;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Options;
 
 using RetailFlow.IdentitySpike.Api.Domain.Identity;
@@ -37,23 +39,34 @@ public sealed class SqlServerTicketStore : ITicketStore
 
     private readonly SessionLifetimeOptions _sessionLifetimeOptions;
 
+    private readonly string _securityStampClaimType;
+
+    private readonly IStoreCustomerSessionOperationHook _operationHook;
+
     public SqlServerTicketStore(
         IDbContextFactory<SessionTicketDbContext> dbContextFactory,
         IDataProtectionProvider dataProtectionProvider,
         ILogger<SqlServerTicketStore> logger,
         TimeProvider timeProvider,
-        IOptions<SessionLifetimeOptions> sessionLifetimeOptions)
+        IOptions<SessionLifetimeOptions> sessionLifetimeOptions,
+        IOptions<IdentityOptions> identityOptions,
+        IStoreCustomerSessionOperationHook? operationHook = null)
     {
         ArgumentNullException.ThrowIfNull(dbContextFactory);
         ArgumentNullException.ThrowIfNull(dataProtectionProvider);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(sessionLifetimeOptions);
+        ArgumentNullException.ThrowIfNull(identityOptions);
 
         _dbContextFactory = dbContextFactory;
         _logger = logger;
         _timeProvider = timeProvider;
         _sessionLifetimeOptions = sessionLifetimeOptions.Value;
+        _securityStampClaimType =
+            identityOptions.Value.ClaimsIdentity.SecurityStampClaimType;
+        _operationHook = operationHook
+            ?? NoOpStoreCustomerSessionOperationHook.Instance;
 
         _ticketProtector = dataProtectionProvider.CreateProtector(
             "RetailFlow",
@@ -139,15 +152,98 @@ public sealed class SqlServerTicketStore : ITicketStore
             AbsoluteExpiresUtc = absoluteExpiresUtc
         };
 
+        await _operationHook.OnBeforeTicketStoreTransactionAsync(
+            metadata.UserId,
+            cancellationToken);
+
         await using var dbContext =
             await _dbContextFactory.CreateDbContextAsync(
                 cancellationToken);
+
+        await using var transaction =
+            await dbContext.Database.BeginTransactionAsync(
+                cancellationToken);
+
+        var currentSecurityStamp =
+            await ReadAndLockCurrentSecurityStampAsync(
+                dbContext,
+                transaction,
+                metadata.UserId,
+                metadata.AccountKind,
+                metadata.StoreId,
+                cancellationToken);
+
+        if (string.IsNullOrWhiteSpace(currentSecurityStamp) ||
+            !string.Equals(
+                currentSecurityStamp,
+                metadata.SecurityStamp,
+                StringComparison.Ordinal))
+        {
+            await transaction.RollbackAsync(CancellationToken.None);
+
+            throw new StaleSecurityStampException(
+                "The user's security stamp changed before the session ticket could be persisted.");
+        }
+
+        await _operationHook.OnTicketStoreUserRowLockedAsync(
+            metadata.UserId,
+            cancellationToken);
 
         dbContext.AuthenticationTickets.Add(entity);
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        await transaction.CommitAsync(cancellationToken);
+
         return sessionKey;
+    }
+
+    private static async Task<string?> ReadAndLockCurrentSecurityStampAsync(
+        SessionTicketDbContext dbContext,
+        IDbContextTransaction transaction,
+        string userId,
+        AccountKind accountKind,
+        Guid storeId,
+        CancellationToken cancellationToken)
+    {
+        var connection = dbContext.Database.GetDbConnection();
+
+        if (connection.State != ConnectionState.Open)
+        {
+            await connection.OpenAsync(cancellationToken);
+        }
+
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction.GetDbTransaction();
+        command.CommandText = """
+            SELECT [SecurityStamp]
+            FROM [dbo].[AspNetUsers] WITH (UPDLOCK, ROWLOCK)
+            WHERE [Id] = @userId
+              AND [AccountKind] = @accountKind
+              AND [StoreId] = @storeId;
+            """;
+
+        var userIdParam = command.CreateParameter();
+        userIdParam.ParameterName = "@userId";
+        userIdParam.DbType = DbType.String;
+        userIdParam.Value = userId;
+        command.Parameters.Add(userIdParam);
+
+        var accountKindParam = command.CreateParameter();
+        accountKindParam.ParameterName = "@accountKind";
+        accountKindParam.DbType = DbType.Int32;
+        accountKindParam.Value = (int)accountKind;
+        command.Parameters.Add(accountKindParam);
+
+        var storeIdParam = command.CreateParameter();
+        storeIdParam.ParameterName = "@storeId";
+        storeIdParam.DbType = DbType.Guid;
+        storeIdParam.Value = storeId;
+        command.Parameters.Add(storeIdParam);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+
+        return result as string;
     }
 
     // -------------------------------------------------------------------------
@@ -261,7 +357,7 @@ public sealed class SqlServerTicketStore : ITicketStore
             return null;
         }
 
-        if (!TryExtractMetadata(ticket, out var metadata))
+        if (!TryExtractMetadata(ticket, _securityStampClaimType, out var metadata))
         {
             _logger.LogWarning(
                 "A stored authentication ticket did not contain a valid StoreCustomer identity.");
@@ -509,10 +605,13 @@ public sealed class SqlServerTicketStore : ITicketStore
     // StoreCustomer metadata validation
     // -------------------------------------------------------------------------
 
-    private static TicketMetadata ExtractRequiredMetadata(
+    private TicketMetadata ExtractRequiredMetadata(
         AuthenticationTicket ticket)
     {
-        if (!TryExtractMetadata(ticket, out var metadata))
+        if (!TryExtractMetadata(
+                ticket,
+                _securityStampClaimType,
+                out var metadata))
         {
             throw new InvalidOperationException(
                 "The ticket must contain one valid StoreCustomer identity.");
@@ -523,6 +622,7 @@ public sealed class SqlServerTicketStore : ITicketStore
 
     private static bool TryExtractMetadata(
         AuthenticationTicket ticket,
+        string securityStampClaimType,
         out TicketMetadata metadata)
     {
         metadata = default!;
@@ -552,6 +652,11 @@ public sealed class SqlServerTicketStore : ITicketStore
             .Select(claim => claim.Value)
             .ToArray();
 
+        var securityStampClaims = principal
+            .FindAll(securityStampClaimType)
+            .Select(claim => claim.Value)
+            .ToArray();
+
         if (userIdClaims.Length != 1 ||
             string.IsNullOrWhiteSpace(userIdClaims[0]))
         {
@@ -577,10 +682,17 @@ public sealed class SqlServerTicketStore : ITicketStore
             return false;
         }
 
+        if (securityStampClaims.Length != 1 ||
+            string.IsNullOrWhiteSpace(securityStampClaims[0]))
+        {
+            return false;
+        }
+
         metadata = new TicketMetadata(
             userIdClaims[0],
             AccountKind.StoreCustomer,
-            storeId);
+            storeId,
+            securityStampClaims[0]);
 
         return true;
     }
@@ -613,5 +725,6 @@ public sealed class SqlServerTicketStore : ITicketStore
     private sealed record TicketMetadata(
         string UserId,
         AccountKind AccountKind,
-        Guid StoreId);
+        Guid StoreId,
+        string SecurityStamp);
 }

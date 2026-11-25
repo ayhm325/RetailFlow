@@ -217,6 +217,9 @@ builder.Services
 builder.Services.AddSingleton<TimeProvider>(
     TimeProvider.System);
 
+builder.Services.AddSingleton<IStoreCustomerSessionOperationHook>(
+    NoOpStoreCustomerSessionOperationHook.Instance);
+
 builder.Services.AddSingleton<
     ITicketStore,
     SqlServerTicketStore>();
@@ -359,11 +362,22 @@ storeCustomerGroup.MapPost(
 
         // Use the overload that accepts the already scoped User.
         // Do not search again through the global username lookup.
-        var result = await signInManager.PasswordSignInAsync(
-            user,
-            request.Password,
-            isPersistent: false,
-            lockoutOnFailure: true);
+        SignInResult result;
+
+        try
+        {
+            result = await signInManager.PasswordSignInAsync(
+                user,
+                request.Password,
+                isPersistent: false,
+                lockoutOnFailure: true);
+        }
+        catch (StaleSecurityStampException)
+        {
+            return Results.Problem(
+                title: "Invalid credentials.",
+                statusCode: StatusCodes.Status401Unauthorized);
+        }
 
         if (!result.Succeeded)
         {
