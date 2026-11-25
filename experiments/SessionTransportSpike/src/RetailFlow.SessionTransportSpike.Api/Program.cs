@@ -1,8 +1,11 @@
+using System.Net;
+
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -272,6 +275,60 @@ builder.Services.AddScoped<
     StoreCustomerScopeAuthorizationHandler>();
 
 // -----------------------------------------------------------------------------
+// Reverse Proxy / Forwarded Headers
+// -----------------------------------------------------------------------------
+
+builder.Services
+    .AddOptions<ForwardedHeadersOptions>()
+    .Configure<IConfiguration>((options, configuration) =>
+    {
+        var reverseProxySection = configuration.GetSection("ReverseProxy");
+        var reverseProxyEnabled = reverseProxySection.GetValue<bool>("Enabled");
+        var configuredProxyAddresses = reverseProxySection
+            .GetSection("KnownProxies")
+            .Get<string[]>() ?? [];
+
+        var trustedProxyAddresses = new List<IPAddress>();
+
+        foreach (var value in configuredProxyAddresses)
+        {
+            if (!IPAddress.TryParse(value, out var address))
+            {
+                throw new InvalidOperationException(
+                    $"Invalid ReverseProxy:KnownProxies IP address: {value}");
+            }
+
+            trustedProxyAddresses.Add(address);
+        }
+
+        if (reverseProxyEnabled && trustedProxyAddresses.Count == 0)
+        {
+            throw new InvalidOperationException(
+                "ReverseProxy is enabled, but no trusted KnownProxies were configured.");
+        }
+
+        if (!reverseProxyEnabled)
+        {
+            return;
+        }
+
+        options.ForwardedHeaders =
+            ForwardedHeaders.XForwardedFor |
+            ForwardedHeaders.XForwardedProto;
+
+        // Current MVP topology assumes one trusted reverse proxy.
+        options.ForwardLimit = 1;
+
+        // Keep framework defaults and add the explicitly trusted proxies.
+        foreach (var address in trustedProxyAddresses)
+        {
+            options.KnownProxies.Add(address);
+        }
+    })
+    .Validate(_ => true)
+    .ValidateOnStart();
+
+// -----------------------------------------------------------------------------
 // Build Application
 // -----------------------------------------------------------------------------
 
@@ -281,17 +338,22 @@ var app = builder.Build();
 // HTTP Pipeline
 // -----------------------------------------------------------------------------
 
+// Must run before HTTPS redirection, routing, CSRF and Authentication.
+// It accepts forwarded headers only from configured trusted proxies.
+app.UseForwardedHeaders();
+
+// Reverse proxy owns public HTTP -> HTTPS redirection.
+// Kestrel receives the original HTTPS scheme through X-Forwarded-Proto.
 app.UseHttpsRedirection();
 
 app.UseRouting();
 
-// Normalize StoreCustomer URLs before CSRF and identity scope resolution.
+// Normalize StoreCustomer URLs.
 app.UseMiddleware<CanonicalStoreSlugMiddleware>();
 
-// Enforce browser CSRF protection on state-changing requests before identity scope/auth.
+// CSRF must run before Identity Scope and Authentication.
 app.UseMiddleware<BrowserCsrfProtectionMiddleware>();
 
-// This MUST execute before UseAuthentication.
 app.UseMiddleware<IdentityScopeMiddleware>();
 
 app.UseAuthentication();

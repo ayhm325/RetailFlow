@@ -2,8 +2,8 @@
 
 | الحقل | القيمة |
 |---|---|
-| **الحالة** | **Proposed — Session Transport Spike قيد التنفيذ (CSRF + Per-Session `ITicketStore` + `TimeProvider` + `ExpiredSessionTicketCleanupService` + `Shared Data Protection Key Ring` + `Idle 15m / Absolute 8h Expiration` + `403 Authorization Policy` + `Playwright E2E (4/4)` + `ST-14 Password Change / Security Stamp / Session Revocation` منفذة ومختبرة؛ متبقي قياس الأداء وحسم قرارات المنتج ومتطلبات Production Readiness)** |
-| **الإصدار** | 0.12 |
+| **الحالة** | **Proposed — Session Transport Spike قيد التنفيذ (قرار `Same-Origin Architecture` محسوم للـ MVP؛ CSRF + Per-Session `ITicketStore` + `TimeProvider` + `ExpiredSessionTicketCleanupService` + `Shared Data Protection Key Ring` + `Idle 15m / Absolute 8h Expiration` + `403 Authorization Policy` + `Playwright E2E (4/4)` + `ST-14` + `ForwardedHeaders / Reverse Proxy` منفذة ومختبرة؛ متبقي قياس الأداء وحسم تعدد المتاجر ومتطلبات Production Readiness)** |
+| **الإصدار** | 0.13 |
 | **التاريخ** | 25 نوفمبر 2026 |
 | **النطاق** | Browser Authentication · StoreCustomer · BackOffice boundary |
 | **المنصة** | .NET 10 · ASP.NET Core Identity · React + TypeScript · SQL Server |
@@ -54,7 +54,7 @@ GET  /api/stores/{slug}/customers/me
 
 - `IdentityScopeResolver` و`IdentityScopeMiddleware` و`ScopedUserStore` منفذة ومختبرة ضمن Identity Spike (مع إغلاق فجوات خصائص المستخدم في `ScopedUserStore` ونجاح Regression **`49 / 49`**).
 - Route Group الخاص بعملاء المتاجر وRoute Group الخاص بـ BackOffice مربوطان في `Program.cs`.
-- أُنشئت تجربة [`SessionTransportSpike`](../experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.slnx) المعزولة لإثبات نقل الجلسات بالـ Cookies لكل متجر وحماية CSRF، ونجحت اختبارات **`85 / 85`** (`63` Unit + `22` Integration على SQL Server و`WebApplicationFactory`)، إضافةً إلى **`4 / 4`** Playwright Browser Tests.
+- أُنشئت تجربة [`SessionTransportSpike`](../experiments/SessionTransportSpike/RetailFlow.SessionTransportSpike.slnx) المعزولة لإثبات نقل الجلسات بالـ Cookies لكل متجر وحماية CSRF، ونجحت اختبارات **`90 / 90`** (`63` Unit + `27` Integration على SQL Server و`WebApplicationFactory`)، إضافةً إلى **`4 / 4`** Playwright Browser Tests.
 - `AddAuthentication` و`UseAuthentication` و`UseAuthorization` وHTTP Authentication endpoints لم تُعتمد بعد في التطبيق الفعلي لـ `IdentitySpike` بانتظار استكمال بقية بوابات القبول في هذا ADR.
 - هذا القرار لا يغيّر Identity Schema أو UserStore أو Scope model.
 
@@ -117,22 +117,83 @@ https://retailflow.app/api/stores/store-b/customers/...
 
 **حالة القرار:** توجه موثق في Product Blueprint للـ MVP.
 
-### 5.2 قرار نشر ما زال يحتاج تثبيتاً
+### 5.2 قرار Origin/Host للـ MVP — محسوم
 
-وثيقة المنتج تثبت شكل رابط المتجر، لكنها لا تثبت بصورة قاطعة كيف سيُستضاف React وAPI بالنسبة إلى Origin واحد.
+**القرار: Same-Origin Architecture**
 
-**التوصية التشغيلية للـ MVP:** نشر React والـ API تحت Origin واحد، وتوجيه `/api/*` إلى ASP.NET Core عبر Reverse Proxy أو استضافة الـ SPA والـ API خلف نفس Host. في التطوير المحلي يستخدم Vite Proxy لمسار `/api`.
+يعتمد RetailFlow في MVP نشر React SPA وASP.NET Core API تحت Origin عام واحد، باستخدام Reverse Proxy أو Host واحد.
 
-أسباب التوصية:
+العقد الخارجي:
+- React SPA: `/`
+- ASP.NET Core API: `/api/*`
+- Public Origin: `https://{MVP_HOST}`
+- Store URLs: Path-Based URLs وفق Product Blueprint.
 
-- تجنب CORS في مسار المتصفح الأساسي.
-- تجنب اعتماد مصادقة المتصفح على Cross-Origin Credentials.
-- تبسيط Cookie وAntiforgery وعمليات Logout.
-- تقليل عدد نقاط الإعداد والتشغيل التي يمكن أن تتسبب في فشل الجلسة.
+يجب أن يرى المتصفح نفس Scheme وHost وPort عند الوصول إلى React والـ API، ولا يُسمح بفصل API إلى Subdomain مستقل ضمن نموذج MVP المعتمد.
 
-هذه **توصية معمارية** وليست حقيقة مثبتة من ملفات المشروع؛ ويجب مطابقتها مع قرار الاستضافة الفعلي قبل قبول ADR.
+يتولى Reverse Proxy:
+- إنهاء TLS وإجبار الاتصالات العامة على HTTPS.
+- تقديم React Static Assets.
+- تمرير `/api/*` إلى ASP.NET Core مع الحفاظ على المسار الأصلي.
+- تمرير Forwarded Headers الموثوقة.
+- منع الوصول العام المباشر إلى Kestrel.
+- الحفاظ على Cookies وخصائصها دون تعديل.
 
-إذا فُصل Frontend عن API على Origins مختلفة، يجب إعادة تقييم Cookie `SameSite` و`Secure` وCORS و`credentials` وقيود المتصفحات على Third-Party Cookies. يمنع استخدام `AllowAnyOrigin` مع `AllowCredentials`.
+لا يتم تفعيل CORS للاتصال الأساسي بين React وAPI. ويستخدم React `credentials: "same-origin"`.
+يجب أن تتطابق قيمة `Security:BrowserCsrf:BrowserOrigin` مع الـ Public Origin الفعلي، دون Path أو Wildcard.
+
+**حدود القرار:**
+- لا يعني Same-Origin أن Cookie Path يمثل حدًا أمنيًا بين المتاجر.
+- لا يغيّر هذا القرار سياسة Identity Scope أو Authorization.
+- لا يعتمد هذا القرار Reverse Proxy vendor محددًا.
+- يبقى اختيار Nginx/IIS/Apache أو Cloud Gateway قرار نشر لاحقًا بحسب بيئة الاستضافة.
+
+**الحالة:** Adopted for MVP.
+
+### 5.3 Reverse Proxy Security Requirements
+
+يجب أن يحقق أي Reverse Proxy مستخدم في MVP المتطلبات التالية:
+
+1. **Public HTTPS:**
+   - قبول HTTPS من المتصفح.
+   - إعادة توجيه HTTP إلى HTTPS عند الحافة.
+   - امتلاك شهادة TLS صالحة للنطاق العام.
+   - تحديد جهة واحدة مسؤولة عن HSTS.
+2. **Routing:**
+   - تمرير `/api/*` إلى ASP.NET Core.
+   - الحفاظ على `/api` وعدم حذف Prefix أو إعادة كتابته.
+   - عدم تطبيق SPA fallback على مسارات API.
+   - تقديم React Static Assets من نفس Host.
+3. **Forwarded Headers:**
+   - إرسال `X-Forwarded-Proto`.
+   - إرسال `X-Forwarded-For` عند الحاجة إلى عنوان العميل.
+   - استبدال أو تنظيف Forwarded Headers التي يرسلها العميل، وعدم الوثوق بقيم يحددها المستخدم.
+   - قبول Forwarded Headers فقط من Known Proxies/Networks محددة وموثوقة.
+   - تحديد `ForwardLimit` بحسب عدد Proxies الفعلي.
+4. **Host Validation:**
+   - تمرير Host المتوقع إلى التطبيق.
+   - تقييد `AllowedHosts` بالنطاقات المعتمدة.
+   - عدم قبول Arbitrary Forwarded Host أو Wildcard غير مبرر.
+5. **Backend Isolation:**
+   - عدم كشف Kestrel مباشرة للإنترنت.
+   - السماح بالاتصال إلى API من Reverse Proxy فقط عبر Loopback أو Private Network/Firewall.
+6. **Cookie Preservation:**
+   - الحفاظ على `Set-Cookie` دون تعديل `Domain` أو `Path` أو `Secure` أو `HttpOnly` أو `SameSite`.
+   - عدم حذف أو إعادة كتابة Cookie Headers.
+7. **Caching:**
+   - تعطيل Shared/Proxy Caching لمسارات `/api/*`.
+   - عدم تخزين Authentication أو Personalized Responses.
+   - عدم تخزين استجابات تحتوي `Set-Cookie`.
+8. **Origin/CSRF:**
+   - تثبيت `BrowserOrigin` على Public Origin الفعلي.
+   - الإبقاء على `BrowserCsrfProtectionMiddleware`.
+   - عدم إضافة CORS واسع أو `AllowAnyOrigin` مع Credentials.
+9. **Verification:**
+   - اختبار Forwarded Scheme.
+   - اختبار رفض Forwarded Headers من Proxy غير موثوق.
+   - اختبار Host Filtering.
+   - اختبار الحفاظ على API Path وCookie Attributes.
+   - اختبار عدم حدوث HTTPS Redirect Loop.
 
 ## 6. البدائل المدروسة
 
@@ -218,7 +279,7 @@ https://store-b.retailflow.app
 
 1. الإبقاء على Path-Based Store URLs في MVP كما هو موثق.
 2. تفضيل ASP.NET Core Cookie Authentication لتطبيق Browser SPA، باعتباره المرشح الأول للاختبار، لا قراراً إنتاجياً نهائياً.
-3. تفضيل نشر React وAPI على Same Origin في MVP عبر Reverse Proxy أو Host واحد.
+3. اعتماد Same-Origin إلزاميًا في MVP عبر Reverse Proxy أو Host واحد.
 4. عدم استخدام Identity proprietary Bearer Tokens على أنها JWT.
 5. عدم إصدار Standard JWT إلا إذا أثبتت المتطلبات وجود مستهلكين إضافيين أو سبب تشغيلي/أمني يبرر Token Server.
 6. إبقاء `StoreCustomer` و`BackOffice` ضمن حدود مصادقة منفصلة من حيث نوع الحساب والسياسات، وعدم استخدام جلسة Customer لإثبات صلاحية BackOffice.
@@ -237,7 +298,7 @@ https://store-b.retailflow.app
 يصبح ADR `Accepted` فقط عندما:
 
 - يُحسم معنى تعدد المتاجر في المتصفح: تبديل حساب، أم جلسات مستقلة متزامنة.
-- يُحسم Origin الخاص بواجهة React والـ API في بيئة MVP.
+- حُسم Origin الخاص بواجهة React والـ API في بيئة MVP (`Same-Origin Architecture`)، ويبقى التحقق من تنفيذ Reverse Proxy الفعلي في بيئة النشر المختارة.
 - ينجح Spike في إصدار الجلسة وتحققها وتجديدها وحذفها وإبطالها وفق السياسة.
 - لا توجد حالة Cross-Store Session Leakage.
 - تمر اختبارات CSRF وOrigin/CORS ذات الصلة.
@@ -471,7 +532,7 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
   - الاسم: `__Secure-RetailFlow.StoreCustomer.store.{storeId:N}` (مستقل لكل متجر).
   - المسار: `/api/stores/{canonicalSlug}/customers` (مستقل لكل متجر).
   - السمات: `Secure = true`، `HttpOnly = true`، `SameSite = Lax`.
-- **حدود الإثبات والقرارات المفتوحة:** تثبت هذه الاختبارات سلوك المتصفح الحقيقي (Cookie Jar، Fetch Metadata، Cross-Origin Form POST) **مباشرةً ضد API** (`API browser E2E`)، وليست `React SPA E2E` (لا يوجد تطبيق React في المستودع بعد). وما زالت قرارات `Origin`/URL النهائية وسياسة تعدد الجلسات مقابل تبديل الحساب على مستوى المنتج غير محسومة حتى إغلاق ADR.
+- **حدود الإثبات والقرارات المفتوحة:** تثبت هذه الاختبارات سلوك المتصفح الحقيقي (Cookie Jar، Fetch Metadata، Cross-Origin Form POST) **مباشرةً ضد API** (`API browser E2E`)، وليست `React SPA E2E` (لا يوجد تطبيق React في المستودع بعد). تم حسم Same-Origin Architecture للـ MVP. المتبقي هو التحقق من تنفيذ Reverse Proxy الفعلي في بيئة النشر المختارة، وقياس الأداء، وحسم سياسة تعدد الجلسات مقابل تبديل الحساب، واستكمال Production Readiness.
 
 ### 10.6 — Password Change / Security Stamp / Session Revocation (ST-14)
 
@@ -504,7 +565,7 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 لا يُغلق `AUTH-ADR-01` إلا بعد تحقق كل ما يلي:
 
 - [ ] حُسمت دلالة تعدد المتاجر في المتصفح (switching أم simultaneous sessions).
-- [ ] حُددت علاقة Origin/Host بين React وAPI في MVP.
+- [x] حُددت علاقة Origin/Host بين React وAPI في MVP (Same-Origin عبر Reverse Proxy أو Host واحد).
 - [ ] تم اختيار بديل واحد بناءً على نتائج Spike، لا التفضيل الشخصي.
 - [x] نجاح Cross-Store isolation لكل من Store A وStore B، بما في ذلك وجود جلستين مستقلتين في `BrowserContext` واحد وإثبات عزل `Logout` في Playwright.
 - [x] نجاح Login/renewal/logout/expiration، بما فيها اختبارات التزامن (تمت تغطية Login وSliding Renewal وStale Renewal وتزامن Renew/Remove وLogout وIdle Expiration `15m` وAbsolute Expiration `8h` في `SessionTransportSpike`).
@@ -603,3 +664,4 @@ Cookie `HttpOnly` تمنع قراءة قيمة Cookie عبر `document.cookie`،
 | 0.10 | 2026-11-25 | فصل `403 Authorization Policy` (`RetailFlow.StoreCustomerScope` و`StoreCustomerScopeAuthorizationHandler`) عن `401 Authentication`، وحماية `SecurityStampValidator` عند اختلاف `StoreId` مع Scope الطلب، وإضافة `6` اختبارات وحدة واختبار التكامل المتأخر بعد 6 دقائق (`StoreACookie_ReplayedAgainstStoreBAfterSecurityStampInterval_ReturnsForbidden_AndPreservesStoreASession`) مع نتيجة `78/78` في `SessionTransportSpike`. |
 | 0.11 | 2026-11-25 | إكمال Browser-Level Acceptance (`4/4` Playwright)، وإضافة Same-Site Cross-Origin Logout CSRF مع إرسال Cookie فعلية، وعزل مفاتيح `Testing` في File System مؤقت محمية بـ X.509، والتحقق من عدم تغيير `DataProtectionKeys`، وتحسين Credential Hygiene وBuild Configuration. بقي ADR `Proposed`. |
 | 0.12 | 2026-11-25 | تنفيذ `ST-14` (تغيير كلمة المرور وإبطال جميع جلسات المستخدم ذرّياً ضمن معاملة SQL مشتركة، ومزامنة `Login` مع تغيير كلمة المرور عبر `UPDLOCK, ROWLOCK` على `AspNetUsers` والتحقق من `SecurityStamp` قبل إدراج التذكرة، وتغطية إبطال `SecurityStampValidator` بعد `5m`، وتسجيل `IdentityConstants.TwoFactorRememberMeScheme` لنجاح `SignOutAsync`، وحماية `POST /password/change` بسياسة `403`، واختبارات التزامن وRollback) وتقوية `PlaywrightApiFixture.DisposeAsync()` (`85/85` في `SessionTransportSpike` + `4/4` Playwright). بقي ADR `Proposed`. |
+| 0.13 | 2026-11-25 | تثبيت قرار `Same-Origin Architecture` للـ MVP وإضافة عقد أمان Reverse Proxy (القسمان 5.2 و5.3)، وإضافة `UseForwardedHeaders()` مع `KnownProxies` الموثوقة و`ForwardLimit = 1` في `SessionTransportSpike/Program.cs` قبل `UseHttpsRedirection()` و`UseRouting()`، وتغطية `5` اختبارات تكامل لـ Reverse Proxy و`Host Filtering` (`90/90` في `SessionTransportSpike` + `4/4` Playwright). بقي ADR `Proposed`. |

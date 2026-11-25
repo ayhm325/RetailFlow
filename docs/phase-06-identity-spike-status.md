@@ -3,17 +3,18 @@
 - **المسار التجريبي:** `experiments/IdentitySpike/`
 - **المرجع المعماري:** دراسة إثبات المفهوم لتعدد هوية العملاء (`Phase 06 — v1.0 — 22 نوفمبر 2026`)
 - **تاريخ آخر تحديث للتقرير:** `2026-11-25`
-- **نقطة التوقف الحالية:** اكتمل سد فجوات `ScopedUserStore` واختبارات `IdentitySpike` السابقة (`49/49`)، واكتملت اختبارات `SessionTransportSpike` بالنتائج: `63/63 Unit` و`22/22 Integration` (`85/85`)، إضافة إلى `4/4 Playwright Browser Tests`، بما في ذلك إغلاق ملاحظات Playwright والتوثيق وتنفيذ وتشديد `ST-14 — Password Change / Security Stamp / Session Revocation`.
+- **نقطة التوقف الحالية:** اكتمل سد فجوات `ScopedUserStore` واختبارات `IdentitySpike` السابقة (`49/49`)، واكتملت اختبارات `SessionTransportSpike` بالنتائج: `63/63 Unit` و`27/27 Integration` (`90/90`)، إضافة إلى `4/4 Playwright Browser Tests`، بما في ذلك حسم قرار `Same-Origin Architecture` للـ MVP وإضافة `UseForwardedHeaders()` وعقد أمان Reverse Proxy، وإغلاق `ST-14 — Password Change / Security Stamp / Session Revocation`.
   أثبتت اختبارات `SessionTransportSpike` و`Playwright`:
   - Cross-Store isolation في متصفحين/تبويبين مستقلين.
   - Cross-Site Login وLogout CSRF rejection.
   - Same-Site Cross-Origin Logout rejection مع إرسال Cookie فعلية.
   - بقاء جلسات المتاجر الأخرى سليمة بعد Logout وتغيير كلمة المرور.
   - إبطال جميع جلسات المستخدم ذرّياً عند تغيير كلمة المرور، وإبطال الجلسات عند تغيير `SecurityStamp` بعد انقضاء `ValidationInterval = 5m`.
+  - التحقق من `ForwardedHeadersOptions` (`KnownProxies`, `ForwardLimit = 1`, `X-Forwarded-Proto`) و`Host Filtering` وحفظ خصائص Cookie دون Redirect Loop.
   - عدم تعديل سجلات `DataProtectionKeys` المشتركة أثناء تشغيل اختبارات Playwright.
   - تنظيف سجلات الاختبار إلى `0` جلسات متبقية في `AuthenticationSessionTickets`.
-  بقيت قياس الأداء، وحسم قرارات المنتج/الـ Origin في `AUTH-ADR-01`، وبوابات Production Readiness (`Certificate Rotation`، ونسخ PFX الاحتياطي، واختبار عمليتي OS مستقلتين، وCI).
-- **الخطوة التالية:** إجراء قياس الأداء وحسم قرارات `AUTH-ADR-01` المفتوحة واستكمال متطلبات Production Readiness قبل تفعيل Authentication في `IdentitySpike/Program.cs`. يجب إبقاء Authentication غير مفعّل في `IdentitySpike/Program.cs` حتى استكمال بوابات ADR واتخاذ القرار النهائي.
+  تم حسم Same-Origin Architecture للـ MVP. المتبقي هو التحقق من تنفيذ Reverse Proxy الفعلي في بيئة النشر المختارة، وقياس الأداء، وحسم سياسة تعدد الجلسات في المتصفح، وبوابات Production Readiness (`Certificate Rotation`، ونسخ PFX الاحتياطي، واختبار عمليتي OS مستقلتين، وCI).
+- **الخطوة التالية:** إجراء قياس الأداء وحسم دلالة تعدد المتاجر في المتصفح في `AUTH-ADR-01` واستكمال متطلبات Production Readiness قبل تفعيل Authentication في `IdentitySpike/Program.cs`. يجب إبقاء Authentication غير مفعّل في `IdentitySpike/Program.cs` حتى استكمال بوابات ADR واتخاذ القرار النهائي.
 
 ### ملخص حالة المراحل
 
@@ -25,7 +26,7 @@
 | **3 — Managers & APIs** | جزئية: Managers وRoute Groups النطاق (`StoreCustomer` و`BackOffice`) منفذة ومختبرة في التطبيق الفعلي؛ Minimal Auth APIs وSignInManager في التطبيق متبقية |
 | **4 — Lifecycle** | إثبات الخدمات منجز؛ HTTP endpoints والسياسات متبقية |
 | **5 — Security** | لم تبدأ كتنفيذ إنتاجي؛ اختبار ترتيب Authentication مع Scope منفذ في TestServer فقط |
-| **6 — SQL/CI** | جزئية: 35 اختبار تكامل ناجحاً في `IdentitySpike` + 22 اختبار تكامل و4 اختبارات متصفح Playwright في `SessionTransportSpike` (تشمل `Sliding Renewal` وتزامن `Renew/Remove` وتنظيف المنتهي و`Shared Data Protection Key Ring` و`Idle 15m / Absolute 8h Expiration` و`403 Authorization Policy` + `ST-14` ومزامنة `UPDLOCK` وRollback + Playwright E2E)؛ CI وتزامن التسجيل وبقية بوابات الإنتاج متبقية |
+| **6 — SQL/CI** | جزئية: 35 اختبار تكامل ناجحاً في `IdentitySpike` + 27 اختبار تكامل و4 اختبارات متصفح Playwright في `SessionTransportSpike` (تشمل `Sliding Renewal` وتزامن `Renew/Remove` وتنظيف المنتهي و`Shared Data Protection Key Ring` و`Idle 15m / Absolute 8h Expiration` و`403 Authorization Policy` + `ST-14` ومزامنة `UPDLOCK` وRollback + `Reverse Proxy / ForwardedHeaders` + Playwright E2E)؛ CI وتزامن التسجيل وبقية بوابات الإنتاج متبقية |
 
 ---
 
@@ -116,9 +117,9 @@
    - [`IdentityLookupScopeAccessorLifetimeTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/IdentityLookupScopeAccessorLifetimeTests.cs) و [`AccessorInstanceTracker.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/AccessorInstanceTracker.cs) (اختبار واحد): إثبات إنشاء مثيل مستقل من `IIdentityLookupScopeAccessor` لكل طلب HTTP (`Assert.NotSame`) واحتفاظ كل مثيل بحالة متجره عبر SQL Server الفعلي.
    - [`BackOfficeRouteGroupIntegrationTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/BackOfficeRouteGroupIntegrationTests.cs) (اختبار واحد باستخدام `WebApplicationFactory` مقابل `Program.cs` الفعلي): إثبات تطبيق Metadata وMiddleware وإنشاء `BackOffice` Identity Scope العالمي، مع استخدام `SpyIdentityScopeResolver` للتحقق من عدم حدوث أي استعلام متجر (لا يلزم استعلام SQL لنطاق `BackOffice`).
 
-3. **تجربة نقل الجلسات (`experiments/SessionTransportSpike/` — 85 اختباراً + 4 Playwright):**
+3. **تجربة نقل الجلسات (`experiments/SessionTransportSpike/` — 90 اختباراً + 4 Playwright):**
    - `RetailFlow.SessionTransportSpike.UnitTests` (63 اختباراً): `StoreCustomerCookieManagerTests.cs` (7 اختبارات)، `CanonicalStoreSlugMiddlewareTests.cs` (5 حالات)، `BrowserCsrfProtectionMiddlewareTests.cs` (37 حالة)، `BrowserCsrfProtectionOptionsValidatorTests.cs` (8 حالات للتحقق من `Development`/`Staging`/`Production`)، و`StoreCustomerScopeAuthorizationHandlerTests.cs` (6 حالات).
-   - `RetailFlow.SessionTransportSpike.IntegrationTests` (22 اختباراً على SQL Server و`WebApplicationFactory` و`FakeTimeProvider` عبر `Microsoft.Extensions.TimeProvider.Testing 10.0.0` دون أي تحذيرات بناء): الاختبارات الـ 15 السابقة إضافةً إلى 7 اختبارات `ST-14` وتشديد التزامن (إثبات حجب `UPDLOCK` عبر `sys.dm_exec_requests`) وRollback (حقن `THROW 51014` في SQL Server عبر `DbCommandInterceptor`).
+   - `RetailFlow.SessionTransportSpike.IntegrationTests` (27 اختباراً على SQL Server و`WebApplicationFactory` و`FakeTimeProvider` عبر `Microsoft.Extensions.TimeProvider.Testing 10.0.0` دون أي تحذيرات بناء): الاختبارات الـ 22 السابقة إضافةً إلى 5 اختبارات `ReverseProxyForwardedHeadersIntegrationTests` (`KnownProxies` الموثوقة، تجاهل Proxy غير الموثوق، `Host Filtering`، وحفظ خصائص Cookie دون Redirect Loop).
    - **تخزين الجلسات والإبطال الخادمي وShared Key Ring و403 Policy:** تنفيذ `PersistedAuthenticationTicket` و`SessionTicketDbContext` (`AuthenticationSessionTickets` و`DataProtectionKeys` عبر `IDataProtectionKeyContext` وحزمة `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore 10.0.15`) و`SessionTicketDbContextFactory` (`__EFMigrationsHistory_SessionTickets`) و`SessionLifetimeOptions` (`IdleTimeout = 15m`, `AbsoluteLifetime = 8h`) و`SqlServerTicketStore` (بحماية `IDataProtector` ومفتاح عشوائي `32 bytes`، وحقن `TimeProvider` وتمريره إلى `CookieAuthenticationOptions.TimeProvider`، وحساب `AbsoluteExpiresUtc` مرة واحدة وتقييد `Sliding Renewal` به دون تغييره، ومنع `Stale Renewal` وإحياء جلسة محذوفة)، وإضافة `ExpiredSessionTicketCleanupService` (`BackgroundService` بفاصل 5 دقائق لإزالة الجلسات المنتهية وفق كلا الحدين عبر `ExecuteDeleteAsync`)، وإعداد `ApplicationName = "RetailFlow.Auth"` وحماية X.509 عبر `DataProtectionCertificateLoader` (`EphemeralKeySet` + `ProtectKeysWithCertificate` + `UnprotectKeysWithAnyCertificate`)، وفصل `403 Authorization Policy` (`RetailFlowAuthorizationPolicies.StoreCustomerScope` + `StoreCustomerScopeRequirement` + `StoreCustomerScopeAuthorizationHandler` بعمر `Scoped` على `/me` و`/logout`) مع حارس `SecurityStampValidator` في `StoreCustomerCookieAuthenticationEvents` عند اختلاف `StoreId` عن Scope الطلب، وتطبيق Migrations `20261124225416_CreateAuthenticationSessionTickets` و`20261125063008_AddDataProtectionKeys` و`20261125072108_AddAbsoluteSessionExpiration` محلياً على `RetailFlowIdentitySpike`، وإضافة حارس `409 Conflict` لتبديل الحساب في `POST /login`، مع تنظيف `AuthenticationSessionTickets` في `RemoveTestDataAsync`.
    - **تحسينات مطابقة التوثيق الرسمي المطبقة:** `RedirectToLogin` -> `401` و `RedirectToAccessDenied` -> `403` لـ SPA/API، حماية CSRF عبر `BrowserCsrfProtectionMiddleware` (`X-RetailFlow-Request: 1` + Strict `Origin/Referer` مقابل `Security:BrowserCsrf:BrowserOrigin` + `Sec-Fetch-Site` دون CORS، مع قصر `http://` على Loopback في `Development` فقط و`Cache-Control: no-store` عند الرفض، بعد إزالة Synchronizer Antiforgery Token)، ضبط `SecurityStampValidatorOptions.ValidationInterval = 5m` (< عمر الكوكي `15m`)، وموازنة زمن `POST /login` عبر Dummy Hash عند غياب المستخدم.
 
@@ -126,7 +127,7 @@
 > - **`IdentityScopeUnitTests`: `14 / 14` Passed، `0 Failed · 0 Skipped`.**
 > - **`IdentitySqlServerIntegrationTests`: `35 / 35` Passed، `0 Failed · 0 Skipped`.** وتشمل اختبارات SQL Server الفعلية واختبارات HTTP باستخدام `TestServer` و `WebApplicationFactory`.
 > - **Full Solution Regression (`RetailFlow.IdentitySpike.slnx`): `49 / 49` Passed (`0 Failed · 0 Skipped`).**
-> - **Full Solution (`RetailFlow.SessionTransportSpike.slnx` بتاريخ `2026-11-25`): `85 / 85` Passed (`63` Unit + `22` Integration، `0 Failed · 0 Skipped`).**
+> - **Full Solution (`RetailFlow.SessionTransportSpike.slnx` بتاريخ `2026-11-25`): `90 / 90` Passed (`63` Unit + `27` Integration، `0 Failed · 0 Skipped`).**
 > - **Playwright Browser Acceptance (`RetailFlow.SessionTransportSpike.Playwright.slnx`): `4 / 4` Passed (`0 Failed · 0 Skipped`).**
 > - اختبار API Factory نفذ `SELECT 1` على قاعدة SQL Server.
 > - تحذير `Failed to determine the https port for redirect` ظهر في `TestServer` لأن الاختبار لا يهيئ منفذ HTTPS؛ لم يمنع اختبار الاتصال أو نجاح الاختبارات، لكنه لا يثبت سلوك HTTPS Redirection.
@@ -187,8 +188,8 @@
 - `IdentityScopeMiddleware`: Tested.
 - `IdentityLookupScopeAccessor lifecycle`: Verified.
 - آخر Regression كامل ناجح لحل `IdentitySpike` (`RetailFlow.IdentitySpike.slnx`): **`49 / 49` Passed** (`IdentityScopeUnitTests` = `14 / 14`، و `IdentitySqlServerIntegrationTests` = `35 / 35`، `0 Failed · 0 Skipped`).
-- آخر تشغيل ناجح لحل `SessionTransportSpike` (`RetailFlow.SessionTransportSpike.slnx`): **`85 / 85` Passed** (`UnitTests` = `63 / 63`، و `IntegrationTests` = `22 / 22`، `0 Failed · 0 Skipped`)، إضافةً إلى **`4 / 4` Passed** في Playwright (`RetailFlow.SessionTransportSpike.Playwright.slnx`).
-- **Next:** استكمال بوابات `AUTH-ADR-01` المتبقية (اختبارات الأداء، وحسم قرارات المنتج/الـ Origin، ومتطلبات Production Readiness لـ Data Protection).
+- آخر تشغيل ناجح لحل `SessionTransportSpike` (`RetailFlow.SessionTransportSpike.slnx`): **`90 / 90` Passed** (`UnitTests` = `63 / 63`، و `IntegrationTests` = `27 / 27`، `0 Failed · 0 Skipped`)، إضافةً إلى **`4 / 4` Passed** في Playwright (`RetailFlow.SessionTransportSpike.Playwright.slnx`).
+- **Next:** استكمال بوابات `AUTH-ADR-01` المتبقية (التحقق من تنفيذ Reverse Proxy الفعلي في بيئة النشر المختارة، واختبارات الأداء، وحسم تعدد المتاجر في المتصفح، ومتطلبات Production Readiness لـ Data Protection).
 - لا يُعد Identity Scope أو Authentication/Authorization مكتملًا إنتاجيًا حتى تنجح اختبارات التكامل السابقة وتُنفذ اختبارات الصلاحيات المطلوبة في المراحل اللاحقة.
 
 ### ز. بوابة القبول قبل Phase 07
