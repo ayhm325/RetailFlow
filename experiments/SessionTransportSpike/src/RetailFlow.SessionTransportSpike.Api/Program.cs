@@ -104,6 +104,10 @@ dataProtectionBuilder
 
 builder.Services.AddScoped<ScopedUserStore>();
 
+builder.Services.AddScoped<
+    IStoreCustomerPasswordChangeService,
+    StoreCustomerPasswordChangeService>();
+
 var identityBuilder = builder.Services.AddIdentityCore<ApplicationUser>(
     options =>
     {
@@ -203,7 +207,8 @@ builder.Services
                 typeof(StoreCustomerCookieAuthenticationEvents);
 
             options.SlidingExpiration = true;
-        });
+        })
+    .AddCookie(IdentityConstants.TwoFactorRememberMeScheme);
 
 // -----------------------------------------------------------------------------
 // Server-side Authentication Ticket Store
@@ -401,6 +406,115 @@ storeCustomerGroup.MapPost(
     "/logout",
     async (SignInManager<ApplicationUser> signInManager) =>
     {
+        await signInManager.SignOutAsync();
+
+        return Results.NoContent();
+    })
+    .RequireAuthorization(
+        RetailFlowAuthorizationPolicies.StoreCustomerScope);
+
+// -----------------------------------------------------------------------------
+// Change Password & Revoke Sessions
+// -----------------------------------------------------------------------------
+
+storeCustomerGroup.MapPost(
+    "/password/change",
+    async (
+        CustomerChangePasswordRequest request,
+        HttpContext httpContext,
+        UserManager<ApplicationUser> userManager,
+        IStoreCustomerPasswordChangeService passwordChangeService,
+        SignInManager<ApplicationUser> signInManager,
+        CancellationToken cancellationToken) =>
+    {
+        // ---------------------------------------------------------
+        // 1. Validate request.
+        // ---------------------------------------------------------
+
+        var validationErrors =
+            new Dictionary<string, string[]>();
+
+        if (string.IsNullOrEmpty(request.CurrentPassword))
+        {
+            validationErrors[nameof(request.CurrentPassword)] =
+            [
+                "Current password is required."
+            ];
+        }
+
+        if (string.IsNullOrEmpty(request.NewPassword))
+        {
+            validationErrors[nameof(request.NewPassword)] =
+            [
+                "New password is required."
+            ];
+        }
+
+        if (validationErrors.Count > 0)
+        {
+            return Results.ValidationProblem(
+                validationErrors,
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Invalid password change request.");
+        }
+
+        // ---------------------------------------------------------
+        // 2. Resolve the authenticated user from the Principal.
+        // ---------------------------------------------------------
+
+        var userId = userManager.GetUserId(httpContext.User);
+
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return Results.Unauthorized();
+        }
+
+        var user = await userManager.FindByIdAsync(userId);
+
+        if (user is null)
+        {
+            return Results.Unauthorized();
+        }
+
+        // ---------------------------------------------------------
+        // 3. Change password and revoke all user sessions atomically.
+        // ---------------------------------------------------------
+
+        var result =
+            await passwordChangeService.ChangePasswordAndRevokeSessionsAsync(
+                user,
+                request.CurrentPassword,
+                request.NewPassword,
+                cancellationToken);
+
+        if (!result.Succeeded)
+        {
+            var errors = result.Errors
+                .GroupBy(
+                    error => error.Code == "PasswordMismatch"
+                        ? "CurrentPassword"
+                        : "NewPassword",
+                    StringComparer.Ordinal)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group
+                        .Select(error => error.Description)
+                        .ToArray(),
+                    StringComparer.Ordinal);
+
+            return Results.ValidationProblem(
+                errors,
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Password change failed.");
+        }
+
+        // ---------------------------------------------------------
+        // 4. Clear the current browser authentication cookie.
+        //
+        // All SQL tickets were already revoked by the service.
+        // This call also emits the browser cookie deletion header.
+        // ---------------------------------------------------------
+
         await signInManager.SignOutAsync();
 
         return Results.NoContent();

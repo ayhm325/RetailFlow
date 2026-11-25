@@ -293,44 +293,49 @@ public sealed class PlaywrightApiFixture : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
-        if (_browser is not null)
+        try
         {
-            await _browser.CloseAsync();
-            await _browser.DisposeAsync();
-        }
-
-        _playwright?.Dispose();
-
-        // Stop the API child process before verifying SQL state and deleting temporary files.
-        if (_apiProcess is not null)
-        {
-            try
+            if (_browser is not null)
             {
-                if (!_apiProcess.HasExited)
-                {
-                    _apiProcess.Kill(entireProcessTree: true);
-                    await _apiProcess.WaitForExitAsync(
-                        new CancellationTokenSource(
-                            TimeSpan.FromSeconds(10)).Token);
-                }
+                await _browser.CloseAsync();
+                await _browser.DisposeAsync();
+            }
+        }
+        finally
+        {
+            _playwright?.Dispose();
 
-                if (!_apiProcess.HasExited)
+            // Stop the API child process before verifying SQL state and deleting temporary files.
+            if (_apiProcess is not null)
+            {
+                try
+                {
+                    if (!_apiProcess.HasExited)
+                    {
+                        _apiProcess.Kill(entireProcessTree: true);
+                        await _apiProcess.WaitForExitAsync(
+                            new CancellationTokenSource(
+                                TimeSpan.FromSeconds(10)).Token);
+                    }
+
+                    if (!_apiProcess.HasExited)
+                    {
+                        throw new InvalidOperationException(
+                            "SessionTransportSpike API process did not exit within the 10-second shutdown timeout. " +
+                            "Temporary Data Protection keys and certificates were not deleted.");
+                    }
+                }
+                catch (Exception exception)
                 {
                     throw new InvalidOperationException(
-                        "SessionTransportSpike API process did not exit within the 10-second shutdown timeout. " +
-                        "Temporary Data Protection keys and certificates were not deleted.");
+                        "Failed to stop the SessionTransportSpike API child process cleanly. " +
+                        "Temporary Data Protection keys and certificates were not deleted.",
+                        exception);
                 }
-            }
-            catch (Exception exception)
-            {
-                throw new InvalidOperationException(
-                    "Failed to stop the SessionTransportSpike API child process cleanly. " +
-                    "Temporary Data Protection keys and certificates were not deleted.",
-                    exception);
-            }
-            finally
-            {
-                _apiProcess.Dispose();
+                finally
+                {
+                    _apiProcess.Dispose();
+                }
             }
         }
 

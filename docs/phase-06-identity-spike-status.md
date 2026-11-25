@@ -3,16 +3,17 @@
 - **المسار التجريبي:** `experiments/IdentitySpike/`
 - **المرجع المعماري:** دراسة إثبات المفهوم لتعدد هوية العملاء (`Phase 06 — v1.0 — 22 نوفمبر 2026`)
 - **تاريخ آخر تحديث للتقرير:** `2026-11-25`
-- **نقطة التوقف الحالية:** اكتمل سد فجوات `ScopedUserStore` واختبارات `IdentitySpike` السابقة (`49/49`)، واكتملت اختبارات `SessionTransportSpike` بالنتائج: `63/63 Unit` و`15/15 Integration`، إضافة إلى `4/4 Playwright Browser Tests`.
-  أثبتت اختبارات Playwright:
+- **نقطة التوقف الحالية:** اكتمل سد فجوات `ScopedUserStore` واختبارات `IdentitySpike` السابقة (`49/49`)، واكتملت اختبارات `SessionTransportSpike` بالنتائج: `63/63 Unit` و`19/19 Integration` (`82/82`)، إضافة إلى `4/4 Playwright Browser Tests`، بما في ذلك إغلاق ملاحظات Playwright والتوثيق وتنفيذ `ST-14 — Password Change / Security Stamp / Session Revocation`.
+  أثبتت اختبارات `SessionTransportSpike` و`Playwright`:
   - Cross-Store isolation في متصفحين/تبويبين مستقلين.
   - Cross-Site Login وLogout CSRF rejection.
   - Same-Site Cross-Origin Logout rejection مع إرسال Cookie فعلية.
-  - بقاء جلسات المتاجر الأخرى سليمة بعد Logout.
-  - عدم تعديل سجلات `DataProtectionKeys` المشتركة أثناء تشغيل الاختبارات (`48 -> 48`).
-  - تنظيف سجلات الاختبار إلى `0` جلسات متبقية.
-  بقيت مراجعة Security Stamp وتغيير كلمة المرور والإبطال، وقياس الأداء، وبوابات Production Readiness.
-- **الخطوة التالية:** إغلاق ملاحظات Playwright والتوثيق، ثم تنفيذ `ST-14 — Password Change / Security Stamp / Session Revocation` داخل `SessionTransportSpike` فقط. يجب إبقاء Authentication غير مفعّل في `IdentitySpike/Program.cs` حتى استكمال بوابات ADR واتخاذ القرار النهائي.
+  - بقاء جلسات المتاجر الأخرى سليمة بعد Logout وتغيير كلمة المرور.
+  - إبطال جميع جلسات المستخدم ذرّياً عند تغيير كلمة المرور، وإبطال الجلسات عند تغيير `SecurityStamp` بعد انقضاء `ValidationInterval = 5m`.
+  - عدم تعديل سجلات `DataProtectionKeys` المشتركة أثناء تشغيل اختبارات Playwright.
+  - تنظيف سجلات الاختبار إلى `0` جلسات متبقية في `AuthenticationSessionTickets`.
+  بقيت قياس الأداء، وحسم قرارات المنتج/الـ Origin في `AUTH-ADR-01`، وبوابات Production Readiness (`Certificate Rotation`، ونسخ PFX الاحتياطي، واختبار عمليتي OS مستقلتين، وCI).
+- **الخطوة التالية:** إجراء قياس الأداء وحسم قرارات `AUTH-ADR-01` المفتوحة واستكمال متطلبات Production Readiness قبل تفعيل Authentication في `IdentitySpike/Program.cs`. يجب إبقاء Authentication غير مفعّل في `IdentitySpike/Program.cs` حتى استكمال بوابات ADR واتخاذ القرار النهائي.
 
 ### ملخص حالة المراحل
 
@@ -24,7 +25,7 @@
 | **3 — Managers & APIs** | جزئية: Managers وRoute Groups النطاق (`StoreCustomer` و`BackOffice`) منفذة ومختبرة في التطبيق الفعلي؛ Minimal Auth APIs وSignInManager في التطبيق متبقية |
 | **4 — Lifecycle** | إثبات الخدمات منجز؛ HTTP endpoints والسياسات متبقية |
 | **5 — Security** | لم تبدأ كتنفيذ إنتاجي؛ اختبار ترتيب Authentication مع Scope منفذ في TestServer فقط |
-| **6 — SQL/CI** | جزئية: 35 اختبار تكامل ناجحاً في `IdentitySpike` + 15 اختبار تكامل و4 اختبارات متصفح Playwright في `SessionTransportSpike` (تشمل `Sliding Renewal` وتزامن `Renew/Remove` وتنظيف المنتهي و`Shared Data Protection Key Ring` و`Idle 15m / Absolute 8h Expiration` و`403 Authorization Policy` + `SecurityStamp` بعد 6 دقائق وPlaywright E2E)؛ CI وتزامن التسجيل وبقية بوابات الإنتاج متبقية |
+| **6 — SQL/CI** | جزئية: 35 اختبار تكامل ناجحاً في `IdentitySpike` + 19 اختبار تكامل و4 اختبارات متصفح Playwright في `SessionTransportSpike` (تشمل `Sliding Renewal` وتزامن `Renew/Remove` وتنظيف المنتهي و`Shared Data Protection Key Ring` و`Idle 15m / Absolute 8h Expiration` و`403 Authorization Policy` + `ST-14 Password Change / Security Stamp / Session Revocation` + Playwright E2E)؛ CI وتزامن التسجيل وبقية بوابات الإنتاج متبقية |
 
 ---
 
@@ -115,9 +116,9 @@
    - [`IdentityLookupScopeAccessorLifetimeTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/IdentityLookupScopeAccessorLifetimeTests.cs) و [`AccessorInstanceTracker.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/AccessorInstanceTracker.cs) (اختبار واحد): إثبات إنشاء مثيل مستقل من `IIdentityLookupScopeAccessor` لكل طلب HTTP (`Assert.NotSame`) واحتفاظ كل مثيل بحالة متجره عبر SQL Server الفعلي.
    - [`BackOfficeRouteGroupIntegrationTests.cs`](../experiments/IdentitySpike/tests/RetailFlow.IdentitySpike.IdentitySqlServerIntegrationTests/Infrastructure/Identity/BackOfficeRouteGroupIntegrationTests.cs) (اختبار واحد باستخدام `WebApplicationFactory` مقابل `Program.cs` الفعلي): إثبات تطبيق Metadata وMiddleware وإنشاء `BackOffice` Identity Scope العالمي، مع استخدام `SpyIdentityScopeResolver` للتحقق من عدم حدوث أي استعلام متجر (لا يلزم استعلام SQL لنطاق `BackOffice`).
 
-3. **تجربة نقل الجلسات (`experiments/SessionTransportSpike/` — 78 اختباراً):**
+3. **تجربة نقل الجلسات (`experiments/SessionTransportSpike/` — 82 اختباراً + 4 Playwright):**
    - `RetailFlow.SessionTransportSpike.UnitTests` (63 اختباراً): `StoreCustomerCookieManagerTests.cs` (7 اختبارات)، `CanonicalStoreSlugMiddlewareTests.cs` (5 حالات)، `BrowserCsrfProtectionMiddlewareTests.cs` (37 حالة)، `BrowserCsrfProtectionOptionsValidatorTests.cs` (8 حالات للتحقق من `Development`/`Staging`/`Production`)، و`StoreCustomerScopeAuthorizationHandlerTests.cs` (6 حالات).
-   - `RetailFlow.SessionTransportSpike.IntegrationTests` (15 اختباراً على SQL Server و`WebApplicationFactory` و`FakeTimeProvider` عبر `Microsoft.Extensions.TimeProvider.Testing 10.0.0` دون أي تحذيرات بناء): `Login_Me_Logout_RemovesBrowserSessionCookie`، و`StoreACookie_CannotAccessStoreB`، و`StoreACookie_ReplayedAgainstStoreBAfterSecurityStampInterval_ReturnsForbidden_AndPreservesStoreASession`، و`CsrfProtection_EnforcesCustomHeader_OriginReferer_AndFetchMetadata`، و`SlidingRenewal_UpdatesExistingSessionWithoutCreatingAnother`، و`Session_ExpiresAfterFifteenMinutesOfInactivity_ReturnsUnauthorizedAndRemovesTicket`، و`Session_ExpiresAtAbsoluteLifetime_EvenWhileContinuouslyActive`، و`RenewAsync_WhenStaleRenewalArrivesLater_DoesNotOverwriteNewerSession`، و`RenewAndRemove_WhenExecutedConcurrently_KeepSessionRevoked`، و`Login_WhenAnotherSessionIsAlreadyAuthenticated_ReturnsConflict`، و`CleanupExpiredTickets_RemovesOnlyExpiredSessions`، و`CleanupExpiredTickets_WhenAllSessionsAreActive_DeletesNothing`، و`InstanceA_CookieAndTicket_AreReadableByInstanceB_AndAfterRestart`، و`DifferentApplicationName_CannotUnprotectCookieOrTicket`، و`WrongCertificate_CannotUnprotectCookieOrTicket`.
+   - `RetailFlow.SessionTransportSpike.IntegrationTests` (19 اختباراً على SQL Server و`WebApplicationFactory` و`FakeTimeProvider` عبر `Microsoft.Extensions.TimeProvider.Testing 10.0.0` دون أي تحذيرات بناء): الاختبارات الـ 15 السابقة إضافةً إلى 4 اختبارات `ST-14` (`ChangePassword_RevokesAllUserSessions_AndRequiresNewPassword`، و`ChangePassword_FailedValidation_DoesNotRevokeSessions`، و`SecurityStampChange_InvalidatesSessionsAtNextValidationInterval`، و`ChangePassword_WithCrossStoreCookie_ReturnsForbidden_AndPreservesStoreASession`).
    - **تخزين الجلسات والإبطال الخادمي وShared Key Ring و403 Policy:** تنفيذ `PersistedAuthenticationTicket` و`SessionTicketDbContext` (`AuthenticationSessionTickets` و`DataProtectionKeys` عبر `IDataProtectionKeyContext` وحزمة `Microsoft.AspNetCore.DataProtection.EntityFrameworkCore 10.0.15`) و`SessionTicketDbContextFactory` (`__EFMigrationsHistory_SessionTickets`) و`SessionLifetimeOptions` (`IdleTimeout = 15m`, `AbsoluteLifetime = 8h`) و`SqlServerTicketStore` (بحماية `IDataProtector` ومفتاح عشوائي `32 bytes`، وحقن `TimeProvider` وتمريره إلى `CookieAuthenticationOptions.TimeProvider`، وحساب `AbsoluteExpiresUtc` مرة واحدة وتقييد `Sliding Renewal` به دون تغييره، ومنع `Stale Renewal` وإحياء جلسة محذوفة)، وإضافة `ExpiredSessionTicketCleanupService` (`BackgroundService` بفاصل 5 دقائق لإزالة الجلسات المنتهية وفق كلا الحدين عبر `ExecuteDeleteAsync`)، وإعداد `ApplicationName = "RetailFlow.Auth"` وحماية X.509 عبر `DataProtectionCertificateLoader` (`EphemeralKeySet` + `ProtectKeysWithCertificate` + `UnprotectKeysWithAnyCertificate`)، وفصل `403 Authorization Policy` (`RetailFlowAuthorizationPolicies.StoreCustomerScope` + `StoreCustomerScopeRequirement` + `StoreCustomerScopeAuthorizationHandler` بعمر `Scoped` على `/me` و`/logout`) مع حارس `SecurityStampValidator` في `StoreCustomerCookieAuthenticationEvents` عند اختلاف `StoreId` عن Scope الطلب، وتطبيق Migrations `20261124225416_CreateAuthenticationSessionTickets` و`20261125063008_AddDataProtectionKeys` و`20261125072108_AddAbsoluteSessionExpiration` محلياً على `RetailFlowIdentitySpike`، وإضافة حارس `409 Conflict` لتبديل الحساب في `POST /login`، مع تنظيف `AuthenticationSessionTickets` في `RemoveTestDataAsync`.
    - **تحسينات مطابقة التوثيق الرسمي المطبقة:** `RedirectToLogin` -> `401` و `RedirectToAccessDenied` -> `403` لـ SPA/API، حماية CSRF عبر `BrowserCsrfProtectionMiddleware` (`X-RetailFlow-Request: 1` + Strict `Origin/Referer` مقابل `Security:BrowserCsrf:BrowserOrigin` + `Sec-Fetch-Site` دون CORS، مع قصر `http://` على Loopback في `Development` فقط و`Cache-Control: no-store` عند الرفض، بعد إزالة Synchronizer Antiforgery Token)، ضبط `SecurityStampValidatorOptions.ValidationInterval = 5m` (< عمر الكوكي `15m`)، وموازنة زمن `POST /login` عبر Dummy Hash عند غياب المستخدم.
 
@@ -125,7 +126,8 @@
 > - **`IdentityScopeUnitTests`: `14 / 14` Passed، `0 Failed · 0 Skipped`.**
 > - **`IdentitySqlServerIntegrationTests`: `35 / 35` Passed، `0 Failed · 0 Skipped`.** وتشمل اختبارات SQL Server الفعلية واختبارات HTTP باستخدام `TestServer` و `WebApplicationFactory`.
 > - **Full Solution Regression (`RetailFlow.IdentitySpike.slnx`): `49 / 49` Passed (`0 Failed · 0 Skipped`).**
-> - **Full Solution (`RetailFlow.SessionTransportSpike.slnx` بتاريخ `2026-11-25`): `78 / 78` Passed (`63` Unit + `15` Integration، `0 Failed · 0 Skipped`).**
+> - **Full Solution (`RetailFlow.SessionTransportSpike.slnx` بتاريخ `2026-11-25`): `82 / 82` Passed (`63` Unit + `19` Integration، `0 Failed · 0 Skipped`).**
+> - **Playwright Browser Acceptance (`RetailFlow.SessionTransportSpike.Playwright.slnx`): `4 / 4` Passed (`0 Failed · 0 Skipped`).**
 > - اختبار API Factory نفذ `SELECT 1` على قاعدة SQL Server.
 > - تحذير `Failed to determine the https port for redirect` ظهر في `TestServer` لأن الاختبار لا يهيئ منفذ HTTPS؛ لم يمنع اختبار الاتصال أو نجاح الاختبارات، لكنه لا يثبت سلوك HTTPS Redirection.
 

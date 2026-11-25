@@ -29,6 +29,9 @@ public sealed class StoreCustomerSessionIntegrationTests
     private const string TestPassword =
         "RetailFlow-Integration-2026!";
 
+    private const string ChangedPassword =
+        "RetailFlow-Changed-2026!Strong";
+
     private readonly SessionTransportApiFactory _factory;
 
     public StoreCustomerSessionIntegrationTests(
@@ -1639,6 +1642,381 @@ public sealed class StoreCustomerSessionIntegrationTests
         return keys.Count;
     }
 
+    [Fact]
+    public async Task ChangePassword_RevokesAllUserSessions_AndRequiresNewPassword()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            using var clientA = CreateStatelessClient();
+            using var clientB = CreateStatelessClient();
+            using var otherStoreClient = CreateStatelessClient();
+            using var oldPasswordClient = CreateStatelessClient();
+            using var newPasswordClient = CreateStatelessClient();
+
+            var tenant = await CreateTenantAsync("password-change");
+            tenants.Add(tenant);
+
+            var otherTenant =
+                await CreateTenantAsync("password-change-other-store");
+            tenants.Add(otherTenant);
+
+            var cookieA = await LoginCustomerAsync(clientA, tenant);
+            var cookieB = await LoginCustomerAsync(clientB, tenant);
+
+            var otherCookie =
+                await LoginCustomerAsync(otherStoreClient, otherTenant);
+
+            Assert.Equal(2, await CountSessionsAsync(tenant.StoreId));
+            Assert.Equal(1, await CountSessionsAsync(otherTenant.StoreId));
+
+            var before = await ReadUserCredentialStateAsync(tenant.UserId);
+
+            var basePath =
+                $"/api/stores/{tenant.Slug}/customers";
+
+            using var changeResponse = await SendBrowserPostAsync(
+                clientA,
+                $"{basePath}/password/change",
+                new
+                {
+                    CurrentPassword = TestPassword,
+                    NewPassword = ChangedPassword
+                },
+                cookieA.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.NoContent,
+                changeResponse.StatusCode);
+
+            // The current browser must receive cookie deletion.
+            var deletionHeaders =
+                GetSetCookieHeaders(changeResponse);
+
+            var deletionCookie = Assert.Single(
+                deletionHeaders,
+                header => header.StartsWith(
+                    $"{cookieA.Name}=",
+                    StringComparison.Ordinal));
+
+            Assert.True(
+                deletionCookie.Contains(
+                    "expires=",
+                    StringComparison.OrdinalIgnoreCase) ||
+                deletionCookie.Contains(
+                    "max-age=0",
+                    StringComparison.OrdinalIgnoreCase));
+
+            var after = await ReadUserCredentialStateAsync(tenant.UserId);
+
+            Assert.NotEqual(before.PasswordHash, after.PasswordHash);
+            Assert.NotEqual(before.SecurityStamp, after.SecurityStamp);
+
+            // Every session for StoreCustomer A must be deleted.
+            Assert.Equal(0, await CountSessionsAsync(tenant.StoreId));
+
+            // Store B sessions must remain untouched.
+            Assert.Equal(1, await CountSessionsAsync(otherTenant.StoreId));
+
+            // Replay both old browser cookies.
+            using var replayA = await SendAuthenticatedGetAsync(
+                clientA,
+                $"{basePath}/me",
+                cookieA.CookieHeader);
+
+            using var replayB = await SendAuthenticatedGetAsync(
+                clientB,
+                $"{basePath}/me",
+                cookieB.CookieHeader);
+
+            Assert.Equal(HttpStatusCode.Unauthorized, replayA.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, replayB.StatusCode);
+
+            // Store B remains authenticated.
+            using var otherMe = await SendAuthenticatedGetAsync(
+                otherStoreClient,
+                $"/api/stores/{otherTenant.Slug}/customers/me",
+                otherCookie.CookieHeader);
+
+            Assert.Equal(HttpStatusCode.OK, otherMe.StatusCode);
+
+            // Old password must no longer work.
+            using var oldLogin = await SendBrowserPostAsync(
+                oldPasswordClient,
+                $"{basePath}/login",
+                new
+                {
+                    Email = tenant.Email,
+                    Password = TestPassword
+                });
+
+            Assert.Equal(HttpStatusCode.Unauthorized, oldLogin.StatusCode);
+
+            // New password must work.
+            using var newLogin = await SendBrowserPostAsync(
+                newPasswordClient,
+                $"{basePath}/login",
+                new
+                {
+                    Email = tenant.Email,
+                    Password = ChangedPassword
+                });
+
+            Assert.Equal(HttpStatusCode.NoContent, newLogin.StatusCode);
+
+            var newCookie = ReadIssuedCookie(
+                newLogin,
+                tenant.StoreId,
+                tenant.Slug);
+
+            using var newMe = await SendAuthenticatedGetAsync(
+                newPasswordClient,
+                $"{basePath}/me",
+                newCookie.CookieHeader);
+
+            Assert.Equal(HttpStatusCode.OK, newMe.StatusCode);
+
+            Assert.Equal(1, await CountSessionsAsync(tenant.StoreId));
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task ChangePassword_FailedValidation_DoesNotRevokeSessions()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            using var client = CreateStatelessClient();
+
+            var tenant = await CreateTenantAsync("password-change-failure");
+            tenants.Add(tenant);
+
+            var cookie = await LoginCustomerAsync(client, tenant);
+
+            var basePath =
+                $"/api/stores/{tenant.Slug}/customers";
+
+            var before =
+                await ReadUserCredentialStateAsync(tenant.UserId);
+
+            // 1. Wrong current password.
+            using var wrongCurrentResponse = await SendBrowserPostAsync(
+                client,
+                $"{basePath}/password/change",
+                new
+                {
+                    CurrentPassword = "Wrong-Current-Password!2026",
+                    NewPassword = ChangedPassword
+                },
+                cookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.BadRequest,
+                wrongCurrentResponse.StatusCode);
+
+            Assert.Empty(GetSetCookieHeaders(wrongCurrentResponse));
+
+            Assert.Equal(1, await CountSessionsAsync(tenant.StoreId));
+
+            // 2. Weak new password.
+            using var weakPasswordResponse = await SendBrowserPostAsync(
+                client,
+                $"{basePath}/password/change",
+                new
+                {
+                    CurrentPassword = TestPassword,
+                    NewPassword = "short"
+                },
+                cookie.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.BadRequest,
+                weakPasswordResponse.StatusCode);
+
+            Assert.Empty(GetSetCookieHeaders(weakPasswordResponse));
+
+            // The password and stamp must remain unchanged.
+            var after =
+                await ReadUserCredentialStateAsync(tenant.UserId);
+
+            Assert.Equal(before.PasswordHash, after.PasswordHash);
+            Assert.Equal(before.SecurityStamp, after.SecurityStamp);
+
+            // Existing session remains active.
+            Assert.Equal(1, await CountSessionsAsync(tenant.StoreId));
+
+            using var me = await SendAuthenticatedGetAsync(
+                client,
+                $"{basePath}/me",
+                cookie.CookieHeader);
+
+            Assert.Equal(HttpStatusCode.OK, me.StatusCode);
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task SecurityStampChange_InvalidatesSessionsAtNextValidationInterval()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            var fakeTimeProvider = new FakeTimeProvider(
+                DateTimeOffset.UtcNow);
+
+            using var stampFactory = SessionTransportApiFactory.Create(
+                RetailFlowDataProtectionDefaults.ApplicationName,
+                TestDataProtectionCertificates.Shared.Path,
+                TestDataProtectionCertificates.Shared.Password,
+                fakeTimeProvider);
+
+            using var clientA = CreateStatelessClient(stampFactory);
+            using var clientB = CreateStatelessClient(stampFactory);
+
+            var tenant = await CreateTenantAsync("security-stamp-revocation");
+            tenants.Add(tenant);
+
+            var cookieA = await LoginCustomerAsync(clientA, tenant);
+            var cookieB = await LoginCustomerAsync(clientB, tenant);
+
+            Assert.Equal(2, await CountSessionsAsync(tenant.StoreId));
+
+            var before =
+                await ReadUserCredentialStateAsync(tenant.UserId);
+
+            // Update the stamp through the scoped UserManager.
+            await using (var identityScope =
+                         stampFactory.Services.CreateAsyncScope())
+            {
+                var services = identityScope.ServiceProvider;
+
+                var accessor = services
+                    .GetRequiredService<IIdentityLookupScopeAccessor>();
+
+                accessor.SetCurrent(
+                    IdentityLookupScope.ForStoreCustomer(tenant.StoreId));
+
+                var userManager = services
+                    .GetRequiredService<UserManager<ApplicationUser>>();
+
+                var user = await userManager.FindByIdAsync(tenant.UserId);
+
+                Assert.NotNull(user);
+
+                var result =
+                    await userManager.UpdateSecurityStampAsync(user);
+
+                Assert.True(result.Succeeded);
+            }
+
+            var after =
+                await ReadUserCredentialStateAsync(tenant.UserId);
+
+            Assert.NotEqual(before.SecurityStamp, after.SecurityStamp);
+
+            // Existing SecurityStampValidator interval is five minutes.
+            fakeTimeProvider.Advance(TimeSpan.FromMinutes(6));
+
+            var basePath =
+                $"/api/stores/{tenant.Slug}/customers";
+
+            using var responseA = await SendAuthenticatedGetAsync(
+                clientA,
+                $"{basePath}/me",
+                cookieA.CookieHeader);
+
+            using var responseB = await SendAuthenticatedGetAsync(
+                clientB,
+                $"{basePath}/me",
+                cookieB.CookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                responseA.StatusCode);
+
+            Assert.Equal(
+                HttpStatusCode.Unauthorized,
+                responseB.StatusCode);
+
+            // Each rejected cookie must remove its own server-side ticket.
+            Assert.Equal(0, await CountSessionsAsync(tenant.StoreId));
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
+    [Fact]
+    public async Task ChangePassword_WithCrossStoreCookie_ReturnsForbidden_AndPreservesStoreASession()
+    {
+        var tenants = new List<TestTenant>();
+
+        try
+        {
+            using var client = CreateStatelessClient();
+
+            var storeA = await CreateTenantAsync("pw-change-store-a");
+            tenants.Add(storeA);
+
+            var storeB = await CreateTenantAsync("pw-change-store-b");
+            tenants.Add(storeB);
+
+            var cookieA = await LoginCustomerAsync(client, storeA);
+
+            var before =
+                await ReadUserCredentialStateAsync(storeA.UserId);
+
+            var forgedCookieHeader = RemapCookieName(
+                cookieA.CookieHeader,
+                cookieA.Name,
+                BuildCookieName(storeB.StoreId));
+
+            using var forgedResponse = await SendBrowserPostAsync(
+                client,
+                $"/api/stores/{storeB.Slug}/customers/password/change",
+                new
+                {
+                    CurrentPassword = TestPassword,
+                    NewPassword = ChangedPassword
+                },
+                forgedCookieHeader);
+
+            Assert.Equal(
+                HttpStatusCode.Forbidden,
+                forgedResponse.StatusCode);
+
+            Assert.Empty(GetSetCookieHeaders(forgedResponse));
+
+            var after =
+                await ReadUserCredentialStateAsync(storeA.UserId);
+
+            Assert.Equal(before.PasswordHash, after.PasswordHash);
+            Assert.Equal(before.SecurityStamp, after.SecurityStamp);
+
+            using var storeAMe = await SendAuthenticatedGetAsync(
+                client,
+                $"/api/stores/{storeA.Slug}/customers/me",
+                cookieA.CookieHeader);
+
+            Assert.Equal(HttpStatusCode.OK, storeAMe.StatusCode);
+        }
+        finally
+        {
+            await RemoveTestDataAsync(tenants);
+        }
+    }
+
     private HttpClient CreateClient()
     {
         return _factory.CreateClient(
@@ -1699,7 +2077,8 @@ public sealed class StoreCustomerSessionIntegrationTests
 
     private async Task<IssuedCookie> LoginCustomerAsync(
         HttpClient client,
-        TestTenant tenant)
+        TestTenant tenant,
+        string password = TestPassword)
     {
         var basePath =
             $"/api/stores/{tenant.Slug}/customers";
@@ -1710,7 +2089,7 @@ public sealed class StoreCustomerSessionIntegrationTests
             new
             {
                 Email = tenant.Email,
-                Password = TestPassword
+                Password = password
             });
 
         Assert.Equal(
@@ -1722,6 +2101,28 @@ public sealed class StoreCustomerSessionIntegrationTests
             tenant.StoreId,
             tenant.Slug);
     }
+
+    private async Task<UserCredentialState> ReadUserCredentialStateAsync(
+        string userId)
+    {
+        await using var scope =
+            _factory.Services.CreateAsyncScope();
+
+        var db = scope.ServiceProvider
+            .GetRequiredService<IdentitySpikeDbContext>();
+
+        var user = await db.Users
+            .AsNoTracking()
+            .SingleAsync(user => user.Id == userId);
+
+        return new UserCredentialState(
+            user.PasswordHash,
+            user.SecurityStamp);
+    }
+
+    private sealed record UserCredentialState(
+        string? PasswordHash,
+        string? SecurityStamp);
 
     private async Task<TestTenant> CreateCustomerForExistingStoreAsync(
         TestTenant existingTenant,
