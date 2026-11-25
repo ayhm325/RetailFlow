@@ -24,3 +24,7 @@
 ## 2026-11-26 — Documentation Synchronization & Consistency Pass
 - Type: Documentation alignment across `docs/` and `docs/engineering/`.
 - Updated: `docs/engineering/control/*`, `docs/engineering/registers/*`, `Acceptance-Criteria-Reconciliation.md`, `Change-Log-and-Open-Decisions.md`, `Gate-1-Closure-Report.md`, `docs/README.md`, `README.md`.
+
+## 2026-11-26 — Repository Structure & Root Hygiene Organization
+- Type: Repository and documentation structure cleanup on `feature/public-store-catalog-read`.
+- Actions: Removed obsolete `RetailFlow-Catalog-Hardening.patch` (`AUD-04` resolved), moved `INSTALLATION-GUIDE-AR.md`, `PACKAGE-MANIFEST.json`, and `SHA256SUMS.txt` into `docs/engineering/package-meta/`, and updated `README.md` and `docs/README.md` with a unified repository and documentation structure map.

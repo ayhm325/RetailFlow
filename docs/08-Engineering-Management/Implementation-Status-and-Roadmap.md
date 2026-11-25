@@ -16,7 +16,7 @@
 | Azure Deployment Workflow | **Planned** | Hosting stack approved (`App Service Linux` + `.NET 10` + `OIDC`); workflow not created |
 
 ## 2. Known Technical Debt & Operational Issues
-1. **Uncommitted/Tracked Patch Artifact in Root:** `RetailFlow-Catalog-Hardening.patch` exists in the repository root (`04392c875c275e99f4b5ee378f63b3a8b8fc541d`) and should be removed in a dedicated cleanup commit.
+1. **Tracked Patch Artifact in Root (`AUD-04` — Resolved):** `RetailFlow-Catalog-Hardening.patch` was removed from the repository root during the repository structure cleanup pass.
 2. **Search Collation Dependence:** `PublicCatalogQueryService` relies on SQL Server default `CI` collation for case-insensitive `.Contains(search)`; not explicitly enforced in schema/query.
 3. **MARS Enabled in Connection Strings:** `MultipleActiveResultSets=True` disables EF Core savepoints (no current Product Host defect since catalog is read-only).
 4. **Partial Currency Seed List:** Only 8 ISO 4217 currencies are seeded (`JOD`, `KWD`, `SAR`, `AED`, `USD`, `EUR`, `GBP`, `JPY`); full ISO 4217 list import needed before global store onboarding.
