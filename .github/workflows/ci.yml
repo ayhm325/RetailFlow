@@ -38,6 +38,8 @@ jobs:
     env:
       DOTNET_NOLOGO: "true"
       DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+      RETAILFLOW_CONNECTION: "Server=localhost,1433;Database=RetailFlowProduct;User Id=sa;Password=RetailFlow_Ci_Sql_2026!#9a;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
+      ConnectionStrings__RetailFlow: "Server=localhost,1433;Database=RetailFlowProduct;User Id=sa;Password=RetailFlow_Ci_Sql_2026!#9a;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
       RETAILFLOW_IDENTITY_SPIKE_CONNECTION: "Server=localhost,1433;Database=RetailFlowIdentitySpike;User Id=sa;Password=RetailFlow_Ci_Sql_2026!#9a;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
 
     steps:
@@ -91,6 +93,14 @@ jobs:
             --no-build \
             --context SessionTicketDbContext \
             --connection "$RETAILFLOW_IDENTITY_SPIKE_CONNECTION"
+
+          dotnet tool run dotnet-ef database update \
+            --project ../../src/RetailFlow.Infrastructure \
+            --startup-project ../../src/RetailFlow.Api \
+            --configuration Release \
+            --no-build \
+            --context RetailFlowDbContext \
+            --connection "$RETAILFLOW_CONNECTION"
 
       - name: Install Playwright Chromium and OS dependencies
         run: pwsh experiments/SessionTransportSpike/tests/RetailFlow.SessionTransportSpike.PlaywrightTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium

@@ -1,6 +1,9 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/RetailFlow.Api/RetailFlow.Api.csproj" />
+    <Project Path="src/RetailFlow.Application/RetailFlow.Application.csproj" />
+    <Project Path="src/RetailFlow.Domain/RetailFlow.Domain.csproj" />
+    <Project Path="src/RetailFlow.Infrastructure/RetailFlow.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/RetailFlow.Api.IntegrationTests/RetailFlow.Api.IntegrationTests.csproj" />
