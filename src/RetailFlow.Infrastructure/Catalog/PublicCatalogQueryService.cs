@@ -53,26 +53,21 @@ public sealed class PublicCatalogQueryService : IPublicCatalogQueryService
             .AsNoTracking()
             .Where(p =>
                 p.StoreId == store.StoreId &&
-                p.Status == ProductStatus.Published);
+                p.Status == ProductStatus.Published &&
+                p.Category != null &&
+                p.Category.StoreId == store.StoreId &&
+                p.Category.IsActive);
 
         if (query.CategoryId.HasValue)
         {
             var categoryId = query.CategoryId.Value;
-            productsQuery = productsQuery.Where(p =>
-                p.CategoryId == categoryId &&
-                p.Category != null &&
-                p.Category.StoreId == store.StoreId &&
-                p.Category.IsActive);
+            productsQuery = productsQuery.Where(p => p.CategoryId == categoryId);
         }
 
         if (!string.IsNullOrWhiteSpace(query.CategorySlug))
         {
             var normalizedCategorySlug = query.CategorySlug.Trim().ToLowerInvariant();
-            productsQuery = productsQuery.Where(p =>
-                p.Category != null &&
-                p.Category.StoreId == store.StoreId &&
-                p.Category.IsActive &&
-                p.Category.Slug == normalizedCategorySlug);
+            productsQuery = productsQuery.Where(p => p.Category!.Slug == normalizedCategorySlug);
         }
 
         if (!string.IsNullOrWhiteSpace(query.Search))
@@ -168,7 +163,10 @@ public sealed class PublicCatalogQueryService : IPublicCatalogQueryService
             .Where(p =>
                 p.StoreId == store.StoreId &&
                 p.Id == productId &&
-                p.Status == ProductStatus.Published)
+                p.Status == ProductStatus.Published &&
+                p.Category != null &&
+                p.Category.StoreId == store.StoreId &&
+                p.Category.IsActive)
             .Select(p => new CatalogProductDetailsDto(
                 p.Id,
                 p.CategoryId,

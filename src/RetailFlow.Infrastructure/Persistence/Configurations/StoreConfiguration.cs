@@ -38,12 +38,6 @@ internal sealed class StoreConfiguration : IEntityTypeConfiguration<Store>
             .HasConversion<short>()
             .IsRequired();
 
-        builder.Property(x => x.CurrencyCode)
-            .HasMaxLength(3)
-            .IsFixedLength()
-            .IsUnicode(false)
-            .IsRequired();
-
         builder.Property(x => x.CreatedAtUtc)
             .HasPrecision(3)
             .IsRequired();

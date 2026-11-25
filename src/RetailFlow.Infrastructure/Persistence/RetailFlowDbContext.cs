@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 
 using RetailFlow.Domain.Catalog;
+using RetailFlow.Domain.Currencies;
 using RetailFlow.Domain.Inventory;
 using RetailFlow.Domain.Stores;
 
@@ -13,7 +14,11 @@ public sealed class RetailFlowDbContext : DbContext
     {
     }
 
+    public DbSet<Currency> Currencies => Set<Currency>();
+
     public DbSet<Store> Stores => Set<Store>();
+
+    public DbSet<StoreSettings> StoreSettings => Set<StoreSettings>();
 
     public DbSet<Category> Categories => Set<Category>();
 

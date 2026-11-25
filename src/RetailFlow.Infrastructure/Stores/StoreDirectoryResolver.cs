@@ -28,13 +28,17 @@ public sealed class StoreDirectoryResolver : IStoreDirectoryResolver
 
         return await _dbContext.Stores
             .AsNoTracking()
-            .Where(s => s.Slug == normalizedSlug && s.Status == StoreStatus.Active)
+            .Where(s =>
+                s.Slug == normalizedSlug &&
+                s.Status == StoreStatus.Active &&
+                s.Settings != null &&
+                s.Settings.Currency != null)
             .Select(s => new StoreRequestContext(
                 s.Id,
                 s.Name,
                 s.Slug,
                 s.StoreType,
-                s.CurrencyCode))
+                s.Settings!.CurrencyCode))
             .SingleOrDefaultAsync(cancellationToken);
     }
 }

@@ -160,6 +160,97 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("ProductImages", (string)null);
                 });
 
+            modelBuilder.Entity("RetailFlow.Domain.Currencies.Currency", b =>
+                {
+                    b.Property<string>("Code")
+                        .HasMaxLength(3)
+                        .IsUnicode(false)
+                        .HasColumnType("char(3)")
+                        .IsFixedLength();
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<byte>("MinorUnit")
+                        .HasColumnType("tinyint");
+
+                    b.Property<string>("NumericCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .IsUnicode(false)
+                        .HasColumnType("char(3)")
+                        .IsFixedLength();
+
+                    b.HasKey("Code");
+
+                    b.ToTable("Currencies", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Currencies_Code_Format", "LEN([Code]) = 3 AND [Code] NOT LIKE '%[^A-Z]%'");
+
+                            t.HasCheckConstraint("CK_Currencies_MinorUnit_Range", "[MinorUnit] >= 0 AND [MinorUnit] <= 4");
+
+                            t.HasCheckConstraint("CK_Currencies_NumericCode_Format", "LEN([NumericCode]) = 3 AND [NumericCode] NOT LIKE '%[^0-9]%'");
+                        });
+
+                    b.HasData(
+                        new
+                        {
+                            Code = "JOD",
+                            IsActive = true,
+                            MinorUnit = (byte)3,
+                            NumericCode = "400"
+                        },
+                        new
+                        {
+                            Code = "KWD",
+                            IsActive = true,
+                            MinorUnit = (byte)3,
+                            NumericCode = "414"
+                        },
+                        new
+                        {
+                            Code = "SAR",
+                            IsActive = true,
+                            MinorUnit = (byte)2,
+                            NumericCode = "682"
+                        },
+                        new
+                        {
+                            Code = "AED",
+                            IsActive = true,
+                            MinorUnit = (byte)2,
+                            NumericCode = "784"
+                        },
+                        new
+                        {
+                            Code = "USD",
+                            IsActive = true,
+                            MinorUnit = (byte)2,
+                            NumericCode = "840"
+                        },
+                        new
+                        {
+                            Code = "EUR",
+                            IsActive = true,
+                            MinorUnit = (byte)2,
+                            NumericCode = "978"
+                        },
+                        new
+                        {
+                            Code = "GBP",
+                            IsActive = true,
+                            MinorUnit = (byte)2,
+                            NumericCode = "826"
+                        },
+                        new
+                        {
+                            Code = "JPY",
+                            IsActive = true,
+                            MinorUnit = (byte)0,
+                            NumericCode = "392"
+                        });
+                });
+
             modelBuilder.Entity("RetailFlow.Domain.Inventory.InventoryItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -210,13 +301,6 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         .HasPrecision(3)
                         .HasColumnType("datetimeoffset(3)");
 
-                    b.Property<string>("CurrencyCode")
-                        .IsRequired()
-                        .HasMaxLength(3)
-                        .IsUnicode(false)
-                        .HasColumnType("char(3)")
-                        .IsFixedLength();
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -245,6 +329,44 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
 
                             t.HasCheckConstraint("CK_Stores_StoreType", "[StoreType] IN (1, 2)");
                         });
+                });
+
+            modelBuilder.Entity("RetailFlow.Domain.Stores.StoreSettings", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .IsUnicode(false)
+                        .HasColumnType("char(3)")
+                        .IsFixedLength();
+
+                    b.Property<bool>("DeliveryEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("PickupEnabled")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("StoreId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TimeZoneId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CurrencyCode");
+
+                    b.HasIndex("StoreId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_StoreSettings_StoreId");
+
+                    b.ToTable("StoreSettings", (string)null);
                 });
 
             modelBuilder.Entity("RetailFlow.Domain.Catalog.Category", b =>
@@ -299,11 +421,35 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_InventoryItems_Products_StoreId_ProductId");
                 });
 
+            modelBuilder.Entity("RetailFlow.Domain.Stores.StoreSettings", b =>
+                {
+                    b.HasOne("RetailFlow.Domain.Currencies.Currency", "Currency")
+                        .WithMany()
+                        .HasForeignKey("CurrencyCode")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_StoreSettings_Currencies_CurrencyCode");
+
+                    b.HasOne("RetailFlow.Domain.Stores.Store", null)
+                        .WithOne("Settings")
+                        .HasForeignKey("RetailFlow.Domain.Stores.StoreSettings", "StoreId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("FK_StoreSettings_Stores_StoreId");
+
+                    b.Navigation("Currency");
+                });
+
             modelBuilder.Entity("RetailFlow.Domain.Catalog.Product", b =>
                 {
                     b.Navigation("Images");
 
                     b.Navigation("InventoryItem");
+                });
+
+            modelBuilder.Entity("RetailFlow.Domain.Stores.Store", b =>
+                {
+                    b.Navigation("Settings");
                 });
 #pragma warning restore 612, 618
         }

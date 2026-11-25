@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
+#pragma warning disable CA1814 // Prefer jagged arrays over multidimensional
+
 namespace RetailFlow.Infrastructure.Persistence.Migrations
 {
     /// <inheritdoc />
@@ -12,6 +14,23 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.CreateTable(
+                name: "Currencies",
+                columns: table => new
+                {
+                    Code = table.Column<string>(type: "char(3)", unicode: false, fixedLength: true, maxLength: 3, nullable: false),
+                    NumericCode = table.Column<string>(type: "char(3)", unicode: false, fixedLength: true, maxLength: 3, nullable: false),
+                    MinorUnit = table.Column<byte>(type: "tinyint", nullable: false),
+                    IsActive = table.Column<bool>(type: "bit", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_Currencies", x => x.Code);
+                    table.CheckConstraint("CK_Currencies_Code_Format", "LEN([Code]) = 3 AND [Code] NOT LIKE '%[^A-Z]%'");
+                    table.CheckConstraint("CK_Currencies_MinorUnit_Range", "[MinorUnit] >= 0 AND [MinorUnit] <= 4");
+                    table.CheckConstraint("CK_Currencies_NumericCode_Format", "LEN([NumericCode]) = 3 AND [NumericCode] NOT LIKE '%[^0-9]%'");
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Stores",
                 columns: table => new
                 {
@@ -20,7 +39,6 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                     Slug = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
                     StoreType = table.Column<short>(type: "smallint", nullable: false),
                     Status = table.Column<short>(type: "smallint", nullable: false),
-                    CurrencyCode = table.Column<string>(type: "char(3)", unicode: false, fixedLength: true, maxLength: 3, nullable: false),
                     CreatedAtUtc = table.Column<DateTimeOffset>(type: "datetimeoffset(3)", precision: 3, nullable: false)
                 },
                 constraints: table =>
@@ -47,6 +65,34 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                     table.UniqueConstraint("AK_Categories_StoreId_Id", x => new { x.StoreId, x.Id });
                     table.ForeignKey(
                         name: "FK_Categories_Stores_StoreId",
+                        column: x => x.StoreId,
+                        principalTable: "Stores",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "StoreSettings",
+                columns: table => new
+                {
+                    Id = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    StoreId = table.Column<Guid>(type: "uniqueidentifier", nullable: false),
+                    CurrencyCode = table.Column<string>(type: "char(3)", unicode: false, fixedLength: true, maxLength: 3, nullable: false),
+                    TimeZoneId = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: false),
+                    DeliveryEnabled = table.Column<bool>(type: "bit", nullable: false),
+                    PickupEnabled = table.Column<bool>(type: "bit", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_StoreSettings", x => x.Id);
+                    table.ForeignKey(
+                        name: "FK_StoreSettings_Currencies_CurrencyCode",
+                        column: x => x.CurrencyCode,
+                        principalTable: "Currencies",
+                        principalColumn: "Code",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_StoreSettings_Stores_StoreId",
                         column: x => x.StoreId,
                         principalTable: "Stores",
                         principalColumn: "Id",
@@ -134,6 +180,21 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         onDelete: ReferentialAction.Restrict);
                 });
 
+            migrationBuilder.InsertData(
+                table: "Currencies",
+                columns: new[] { "Code", "IsActive", "MinorUnit", "NumericCode" },
+                values: new object[,]
+                {
+                    { "AED", true, (byte)2, "784" },
+                    { "EUR", true, (byte)2, "978" },
+                    { "GBP", true, (byte)2, "826" },
+                    { "JOD", true, (byte)3, "400" },
+                    { "JPY", true, (byte)0, "392" },
+                    { "KWD", true, (byte)3, "414" },
+                    { "SAR", true, (byte)2, "682" },
+                    { "USD", true, (byte)2, "840" }
+                });
+
             migrationBuilder.CreateIndex(
                 name: "IX_Categories_StoreId_IsActive_SortOrder_Id",
                 table: "Categories",
@@ -189,6 +250,17 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                 table: "Stores",
                 column: "Slug",
                 unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_StoreSettings_CurrencyCode",
+                table: "StoreSettings",
+                column: "CurrencyCode");
+
+            migrationBuilder.CreateIndex(
+                name: "UX_StoreSettings_StoreId",
+                table: "StoreSettings",
+                column: "StoreId",
+                unique: true);
         }
 
         /// <inheritdoc />
@@ -201,7 +273,13 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                 name: "ProductImages");
 
             migrationBuilder.DropTable(
+                name: "StoreSettings");
+
+            migrationBuilder.DropTable(
                 name: "Products");
+
+            migrationBuilder.DropTable(
+                name: "Currencies");
 
             migrationBuilder.DropTable(
                 name: "Categories");

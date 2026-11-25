@@ -1,3 +1,4 @@
+using RetailFlow.Domain.Currencies;
 using RetailFlow.Domain.Inventory;
 
 namespace RetailFlow.Domain.Catalog;
@@ -41,11 +42,14 @@ public sealed class Product
         Guid categoryId,
         string name,
         decimal price,
+        Currency currency,
         ProductStatus status,
         DateTimeOffset createdAtUtc,
         string? description = null,
         string? sku = null)
     {
+        ArgumentNullException.ThrowIfNull(currency);
+        MoneyPrecision.EnsureValidAmount(price, currency.MinorUnit, nameof(price));
         if (id == Guid.Empty)
         {
             throw new ArgumentException("Product id cannot be empty.", nameof(id));

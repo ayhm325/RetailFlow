@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 
 using RetailFlow.Application.Catalog;
 using RetailFlow.Application.Stores;
@@ -14,26 +15,55 @@ public static class DependencyInjection
 {
     public static IServiceCollection AddRetailFlowInfrastructure(
         this IServiceCollection services,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        bool isDevelopment)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        var envConnection = Environment.GetEnvironmentVariable("RETAILFLOW_CONNECTION");
-        var configConnection = configuration.GetConnectionString("RetailFlow");
-        var connectionString = !string.IsNullOrWhiteSpace(envConnection)
-            ? envConnection
-            : !string.IsNullOrWhiteSpace(configConnection)
-                ? configConnection
-                : RetailFlowDbContextFactory.DefaultLocalConnectionString;
+        services.AddSingleton<IValidateOptions<RetailFlowDatabaseOptions>>(sp =>
+            new RetailFlowDatabaseOptionsValidator(
+                sp.GetRequiredService<IConfiguration>(),
+                isDevelopment));
 
-        services.AddDbContext<RetailFlowDbContext>(options =>
-            options.UseSqlServer(connectionString));
+        services
+            .AddOptions<RetailFlowDatabaseOptions>()
+            .ValidateOnStart();
+
+        services.AddDbContext<RetailFlowDbContext>((sp, options) =>
+        {
+            var resolvedConfig = sp.GetRequiredService<IConfiguration>();
+            var connectionString = ConnectionStringResolver.ResolveRuntime(
+                resolvedConfig,
+                isDevelopment);
+
+            options.UseSqlServer(connectionString);
+        });
 
         services.AddScoped<IStoreRequestContextAccessor, StoreRequestContextAccessor>();
         services.AddScoped<IStoreDirectoryResolver, StoreDirectoryResolver>();
         services.AddScoped<IPublicCatalogQueryService, PublicCatalogQueryService>();
 
         return services;
+    }
+
+    private sealed class RetailFlowDatabaseOptions;
+
+    private sealed class RetailFlowDatabaseOptionsValidator(
+        IConfiguration configuration,
+        bool isDevelopment) : IValidateOptions<RetailFlowDatabaseOptions>
+    {
+        public ValidateOptionsResult Validate(string? name, RetailFlowDatabaseOptions options)
+        {
+            try
+            {
+                _ = ConnectionStringResolver.ResolveRuntime(configuration, isDevelopment);
+                return ValidateOptionsResult.Success;
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ValidateOptionsResult.Fail(ex.Message);
+            }
+        }
     }
 }
