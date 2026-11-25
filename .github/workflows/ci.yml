@@ -60,6 +60,9 @@ jobs:
       - name: Restore .NET local tools
         run: dotnet tool restore --tool-manifest experiments/IdentitySpike/dotnet-tools.json
 
+      - name: Build RetailFlow Product Host (Release)
+        run: dotnet build RetailFlow.slnx --configuration Release
+
       - name: Build IdentitySpike (Release)
         run: dotnet build experiments/IdentitySpike/RetailFlow.IdentitySpike.slnx --configuration Release
 
@@ -91,6 +94,15 @@ jobs:
 
       - name: Install Playwright Chromium and OS dependencies
         run: pwsh experiments/SessionTransportSpike/tests/RetailFlow.SessionTransportSpike.PlaywrightTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
+
+      - name: Run RetailFlow Product Host Integration Tests (Release)
+        run: |
+          dotnet test RetailFlow.slnx \
+            --configuration Release \
+            --no-build \
+            --results-directory TestResults/ProductHost \
+            --logger "trx" \
+            --logger "console;verbosity=normal"
 
       - name: Run IdentitySpike Unit & SQL Integration Tests (Release)
         run: |
