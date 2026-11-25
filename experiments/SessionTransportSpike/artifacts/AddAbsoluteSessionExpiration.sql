@@ -12,9 +12,11 @@ IF NOT EXISTS (
     WHERE [MigrationId] = N'20261125072108_AddAbsoluteSessionExpiration'
 )
 BEGIN
-    UPDATE [AuthenticationSessionTickets]
-    SET [AbsoluteExpiresUtc] = DATEADD(HOUR, 8, [CreatedUtc])
-    WHERE [AbsoluteExpiresUtc] IS NULL;
+    EXEC(N'
+        UPDATE [AuthenticationSessionTickets]
+        SET [AbsoluteExpiresUtc] = DATEADD(HOUR, 8, [CreatedUtc])
+        WHERE [AbsoluteExpiresUtc] IS NULL;
+    ');
 END;
 
 IF NOT EXISTS (

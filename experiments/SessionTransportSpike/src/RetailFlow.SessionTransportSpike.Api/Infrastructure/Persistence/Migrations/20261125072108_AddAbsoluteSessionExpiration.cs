@@ -19,9 +19,11 @@ namespace RetailFlow.SessionTransportSpike.Api.Infrastructure.Persistence.Migrat
 
             migrationBuilder.Sql(
                 """
-                UPDATE [AuthenticationSessionTickets]
-                SET [AbsoluteExpiresUtc] = DATEADD(HOUR, 8, [CreatedUtc])
-                WHERE [AbsoluteExpiresUtc] IS NULL;
+                EXEC(N'
+                    UPDATE [AuthenticationSessionTickets]
+                    SET [AbsoluteExpiresUtc] = DATEADD(HOUR, 8, [CreatedUtc])
+                    WHERE [AbsoluteExpiresUtc] IS NULL;
+                ');
                 """);
 
             migrationBuilder.AlterColumn<DateTimeOffset>(
