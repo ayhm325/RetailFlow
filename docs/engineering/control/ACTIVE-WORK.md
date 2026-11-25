@@ -11,9 +11,9 @@ Close remaining Engineering Baseline gates (Gate 2–4) before expanding into th
 - [x] `AUD-003` Mapped `BR-001`–`BR-012` to invariants, aggregates, SQL constraints, and tests without conflating `BR-003`/`ST-02` or `BR-009`/`AC-05`.
 - [x] `AUD-007` Restored complete Use Case specifications (`UC-01`–`UC-10`) with Gherkin examples and explicit open decisions in `docs/01-Requirements/Use-Case-Specifications.md`.
 
-## Gate 2 — Commerce correctness contracts (Next)
-- [ ] `AUD-004` Separate `OrderStatus`, `FulfillmentStatus`, and `PaymentStatus` state models; define cross-state policies and tests.
-- [ ] `AUD-005` Redesign Checkout idempotency with atomic key claim, unique constraint, concurrent duplicate handling, and replay behavior. Do not implement Checkout before owner-approved contract.
+## Gate 2 — Commerce correctness contracts (Proposed ADRs Prepared — Pending Owner Approval)
+- [x] `AUD-004` Drafted `ADR-0005-Order-Fulfillment-Payment-State-Models.md` (`Proposed`) separating `OrderStatus`, `FulfillmentStatus`, and `PaymentStatus` with cross-state invariants (awaiting Owner approval & `OD-001`–`OD-003`, `OD-005`).
+- [x] `AUD-005` Drafted `ADR-0006-Checkout-Idempotency-Atomic-Claim.md` (`Proposed`) specifying atomic `CheckoutRequests` key claim, unique constraint, `RequestHash` mismatch (`422`), concurrent `InProgress` (`409`), and replay behavior (awaiting Owner approval & `OD-008`). Do not implement Checkout before owner-approved contract.
 
 ## Gate 3 — Baseline completeness and quality
 - [ ] `AUD-006` Produce separate Current and Target ERDs plus column-level Data Dictionary.
@@ -26,7 +26,7 @@ Close remaining Engineering Baseline gates (Gate 2–4) before expanding into th
 - [ ] `AUD-012` Refresh CI evidence from actual workflow run and exact SHA in Rev2.0 `baseline-evidence.md`.
 - [ ] `AUD-013` Resolve duplicate source-of-truth drift between handbook Chapter 21 and standalone chapter.
 - [ ] `AUD-014` Validate OpenAPI version/tooling compatibility and ensure error responses are represented; confirm against current official spec before changing version.
-- [ ] `AUD-015` Remove hard-coded CI SQL credential and adopt ephemeral/secret-based handling; rotate if reused.
+- [x] `AUD-015` Removed hard-coded CI SQL credential in `.github/workflows/ci.yml` and adopted per-run masked ephemeral password generation via `prepare` job output.
 
 ## Next recommended task
 1. Obtain Product Owner confirmation on `CR-G1-001` and `OD-001`–`OD-005` in `docs/08-Engineering-Management/Change-Log-and-Open-Decisions.md`.

@@ -50,7 +50,7 @@
 
 ## 6. CI and security observation
 - `.github/workflows/ci.yml` builds Product Host and both PoC solutions, applies EF migrations to SQL Server service containers, runs integration suites and Playwright tests, and uploads test diagnostics.
-- **Open CI Hygiene Finding (`AUD-015`):** `.github/workflows/ci.yml` still contains a literal SQL Server SA test password in workflow environment configuration. Keep out of docs/logs and replace with a per-run generated value in the CI hygiene gate.
+- **CI Hygiene (`AUD-015` — Remediated on branch):** `.github/workflows/ci.yml` now generates a masked per-run ephemeral SQL Server SA password in a `prepare` job instead of a literal password.
 
 ## 7. Required refresh
 At the beginning of every substantial session, compare `e204c9e6f0d570be24fbdb2750889dd464d1e077` / `2c020de` to actual `HEAD`. If it differs, inspect the intervening changes and refresh this file only from evidence.

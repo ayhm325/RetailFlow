@@ -47,3 +47,9 @@
 - Implemented: `GET /api/stores/{slug}/delivery-zones` (`PublicDeliveryZonesResponse`, `PublicDeliveryZoneDto`, `GetEnabledDeliveryZonesAsync`), returning enabled zones ordered by `Name` when `DeliveryEnabled == true` and an empty list when disabled.
 - Updated Docs: `Database-Design-and-Migrations.md`, `Public-Catalog-API.md`, `Testing-and-Verification.md`, `Reference-Register.csv` (`REF-09`, `REF-10`), `CURRENT-STATE.md`, `IMPLEMENTATION-EXECUTION-LOG.md`, `FINAL-IMPLEMENTATION-REPORT.md`.
 - Verified: `dotnet build RetailFlow.slnx --configuration Release --no-restore` (`0` warnings, `0` errors), `dotnet test RetailFlow.slnx --configuration Release --no-build` (`6/6` unit + `57/57` integration pass), `validate-gate1-baseline.ps1` (`923` checks, `0` failures), `validate_operating_memory.py` (`VALIDATION PASSED`).
+
+## 2026-11-26 — Gate 2 Proposed ADRs & CI Hygiene Remediation (`AUD-004`, `AUD-005`, `AUD-015`)
+- Type: Architecture Design (`Proposed`) & CI Security Hygiene on `feature/public-store-catalog-read`.
+- Added: `docs/engineering/decisions/ADR-0005-Order-Fulfillment-Payment-State-Models.md` (`Proposed`, `AUD-004`) and `docs/engineering/decisions/ADR-0006-Checkout-Idempotency-Atomic-Claim.md` (`Proposed`, `AUD-005`/`OD-008`).
+- Fixed (`AUD-015`): Replaced hard-coded `MSSQL_SA_PASSWORD` in `.github/workflows/ci.yml` with a masked per-run ephemeral password generated in a `prepare` job.
+- Updated Control Docs: `ACTIVE-WORK.md`, `CURRENT-STATE.md`, `WORK-LOG.md`.

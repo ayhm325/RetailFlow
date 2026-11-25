@@ -18,8 +18,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare:
+    name: Generate Ephemeral CI Credentials
+    runs-on: ubuntu-24.04
+    outputs:
+      sql_password: ${{ steps.sql_pw.outputs.sql_password }}
+    steps:
+      - id: sql_pw
+        run: |
+          PW="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 20)Aa1!"
+          echo "::add-mask::$PW"
+          echo "sql_password=$PW" >> "$GITHUB_OUTPUT"
+
   build-and-test:
     name: Build, SQL Integration & Playwright E2E
+    needs: prepare
     runs-on: ubuntu-24.04
 
     services:
@@ -27,11 +40,11 @@ jobs:
         image: mcr.microsoft.com/mssql/server:2022-latest
         env:
           ACCEPT_EULA: "Y"
-          MSSQL_SA_PASSWORD: "RetailFlow_Ci_Sql_2026!#9a"
+          MSSQL_SA_PASSWORD: ${{ needs.prepare.outputs.sql_password }}
         ports:
           - 1433:1433
         options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'RetailFlow_Ci_Sql_2026!#9a' -C -Q 'SELECT 1' || exit 1"
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P '${{ needs.prepare.outputs.sql_password }}' -C -Q 'SELECT 1' || exit 1"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 12
@@ -39,9 +52,9 @@ jobs:
     env:
       DOTNET_NOLOGO: "true"
       DOTNET_CLI_TELEMETRY_OPTOUT: "true"
-      RETAILFLOW_CONNECTION: "Server=localhost,1433;Database=RetailFlowProduct;User Id=sa;Password=RetailFlow_Ci_Sql_2026!#9a;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
-      ConnectionStrings__RetailFlow: "Server=localhost,1433;Database=RetailFlowProduct;User Id=sa;Password=RetailFlow_Ci_Sql_2026!#9a;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
-      RETAILFLOW_IDENTITY_SPIKE_CONNECTION: "Server=localhost,1433;Database=RetailFlowIdentitySpike;User Id=sa;Password=RetailFlow_Ci_Sql_2026!#9a;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
+      RETAILFLOW_CONNECTION: "Server=localhost,1433;Database=RetailFlowProduct;User Id=sa;Password=${{ needs.prepare.outputs.sql_password }};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
+      ConnectionStrings__RetailFlow: "Server=localhost,1433;Database=RetailFlowProduct;User Id=sa;Password=${{ needs.prepare.outputs.sql_password }};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
+      RETAILFLOW_IDENTITY_SPIKE_CONNECTION: "Server=localhost,1433;Database=RetailFlowIdentitySpike;User Id=sa;Password=${{ needs.prepare.outputs.sql_password }};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
 
     steps:
       - name: Checkout repository
@@ -106,7 +119,7 @@ jobs:
       - name: Install Playwright Chromium and OS dependencies
         run: pwsh experiments/SessionTransportSpike/tests/RetailFlow.SessionTransportSpike.PlaywrightTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
-      - name: Run RetailFlow Product Host Integration Tests (Release)
+      - name: Run RetailFlow Product Host Unit & Integration Tests (Release)
         run: |
           dotnet test RetailFlow.slnx \
             --configuration Release \
