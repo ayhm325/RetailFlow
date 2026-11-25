@@ -32,3 +32,7 @@
 ## 2026-11-26 — Gate 1 Corrective Review & Defect Remediation (Local)
 - Type: Corrective documentation & traceability pass on `feature/public-store-catalog-read` (local only, no push/PR/merge).
 - Fixes: Restored original Phase 02 `AC-07` reconciliation in `CR-G1-001` and full `AC-01`–`AC-10` crosswalk; added `NFR-010`/`NFR-011` (`NFR-OPS-01`, `NFR-REC-01`) and `Rev2_NFR_ID` crosswalk; separated `Passed` vs `Partially Verified`/`Not Verified` across `AC`, `NFR`, and `FR` matrices; fixed `BR-003` (`ST-02` decouple), `BR-009` (`AC-05` decouple), `BR-011`, and `BR-006`; corrected `UC-03`/`04`/`06`/`08`/`10` AC references; added `OD-*`/`ADR-*` crosswalk; enhanced `validate-gate1-baseline.ps1` with C# test method verification (`796/796` mechanical checks pass); set Gate 1 status to `READY FOR INDEPENDENT REVIEW`.
+
+## 2026-11-26 — Gate 1 Semantic FR-UC-NFR Pass 2 & Governance Sync
+- Type: Second corrective pass focusing on bidirectional `FR <-> UC` semantic accuracy, `NFR-012` (`NFR-SEC-02`) separation, manual semantic review documentation, and governance inventory sync.
+- Actions: Corrected `UC-01`–`UC-10` FR/BR/AC links to match `Requirements-Traceability-Matrix.csv` 100% bidirectionally; added bidirectional `FR <-> UC` enforcement to `scripts/validate-gate1-baseline.ps1`; split `NFR-012` (`NFR-SEC-02`); recorded Manual Semantic Review Record in `Gate-1-Closure-Report.md`; updated `Documentation-Inventory.csv` and `Gate-1-Validation-Report.md`.

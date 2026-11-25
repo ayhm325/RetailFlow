@@ -73,9 +73,9 @@
   - *Outcome:* Blocked by `ST-02` / `BR-003`; store remains inaccessible in public catalog and checkout until `UC-02` approves it.
 
 #### 8. Linked Rules, Requirements & Acceptance Criteria
-- **Functional Requirements:** `FR-001`, `FR-002`, `FR-003`, `FR-004`, `FR-005`
+- **Functional Requirements:** `FR-001`, `FR-003`, `FR-005`
 - **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-007`
-- **Business Rules & Invariants:** `BR-001`, `BR-003`, `ST-01`, `ST-02`
+- **Business Rules & Invariants:** `BR-001`, `ST-01`, `ST-02`
 - **Acceptance Criteria:** `AC-01`
 - **Cross-Cutting Rules:** `UC-C01`, `UC-C06`, `UC-C07`
 
@@ -159,9 +159,9 @@ Feature: UC-01 Submit Store Application
   - *Outcome:* Platform Admin suspends an `Active` store with a recorded administrative reason; public catalog immediately stops serving it (`ST-02`).
 
 #### 8. Linked Rules, Requirements & Acceptance Criteria
-- **Functional Requirements:** `FR-006`, `FR-007`
+- **Functional Requirements:** `FR-002`, `FR-007`
 - **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-008`
-- **Business Rules & Invariants:** `BR-003`, `ST-02`
+- **Business Rules & Invariants:** `BR-002`, `ST-02`
 - **Acceptance Criteria:** `AC-01`
 - **Cross-Cutting Rules:** `UC-C01`, `UC-C06`, `UC-C07`
 
@@ -248,9 +248,9 @@ Feature: UC-02 Review Store Application
   - *Outcome:* `FulfillmentAddress` is never returned in public store responses (`UC-06` / `ST-04`).
 
 #### 8. Linked Rules, Requirements & Acceptance Criteria
-- **Functional Requirements:** `FR-008`, `FR-009`, `FR-038`, `FR-039`, `FR-040`, `FR-041`
+- **Functional Requirements:** `FR-003`, `FR-004`, `FR-005`, `FR-006`, `FR-038`, `FR-039`, `FR-041`
 - **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-007`
-- **Business Rules & Invariants:** `BR-002`, `ST-03`, `ST-04`, `REL-01`
+- **Business Rules & Invariants:** `BR-001`, `BR-002`, `BR-010`, `BR-011`, `ST-03`, `ST-04`, `REL-01`
 - **Acceptance Criteria:** `AC-01`, `AC-02` (FulfillmentAddress privacy via `FR-006`/`ST-04`; Pickup rule via `FR-041`/`BR-010`/`ST-03`)
 - **Cross-Cutting Rules:** `UC-C01`, `UC-C02`, `UC-C04`
 
@@ -334,10 +334,10 @@ Feature: UC-03 Configure Store Identity & Settings
   - *Outcome:* Out of scope for MVP (`Simple Products` only per Phase 03 §4).
 
 #### 8. Linked Rules, Requirements & Acceptance Criteria
-- **Functional Requirements:** `FR-010`, `FR-011`, `FR-012`, `FR-013`, `FR-014`, `FR-015`
+- **Functional Requirements:** `FR-008`, `FR-009`, `FR-010`, `FR-011`, `FR-013`, `FR-015`
 - **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-004`, `NFR-006`
-- **Business Rules & Invariants:** `BR-002`, `BR-004`, `BR-005`, `BR-006`, `PR-01`, `PR-02`, `PR-03`, `IN-01`, `IN-02`, `MNY-01`, `REL-01`
-- **Acceptance Criteria:** `AC-01`, `AC-02`, `AC-03`
+- **Business Rules & Invariants:** `BR-002`, `BR-003`, `BR-004`, `BR-005`, `PR-01`, `PR-02`, `PR-03`, `IN-01`, `IN-02`, `MNY-01`, `REL-01`
+- **Acceptance Criteria:** `AC-02`, `AC-05`
 - **Cross-Cutting Rules:** `UC-C01`, `UC-C02`, `UC-C04`
 
 #### 9. Data Ownership, Tenant Scope & Authorization Condition
@@ -421,10 +421,10 @@ Feature: UC-04 Manage Products & Inventory
   - *Outcome:* Rejected; Store A credentials/session cannot access Store B customer data (`AC-01`, `AC-02`).
 
 #### 8. Linked Rules, Requirements & Acceptance Criteria
-- **Functional Requirements:** `FR-016`, `FR-017`, `FR-018`
-- **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-007`, `NFR-008`
+- **Functional Requirements:** `FR-016`, `FR-017`, `FR-018`, `FR-022`
+- **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-007`, `NFR-008`, `NFR-012`
 - **Business Rules & Invariants:** `BR-002`, `ST-02`, `ID-01`, `ID-02`, `ID-03`, `REL-01`
-- **Acceptance Criteria:** `AC-01`, `AC-02`
+- **Acceptance Criteria:** `AC-03`
 - **Cross-Cutting Rules:** `UC-C01`, `UC-C02`, `UC-C04`
 
 #### 9. Data Ownership, Tenant Scope & Authorization Condition
@@ -505,10 +505,10 @@ Feature: UC-05 Customer Registration & Sign-In
   - *Outcome:* Displayed with `availableQuantity = 0` / `isInStock = false`; cannot be purchased in `UC-08`.
 
 #### 8. Linked Rules, Requirements & Acceptance Criteria
-- **Functional Requirements:** `FR-012`, `FR-019`, `FR-020`, `FR-021`, `FR-022`
-- **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-003`, `NFR-005`, `NFR-007`, `NFR-009`
-- **Business Rules & Invariants:** `BR-001`, `BR-002`, `BR-003`, `BR-004`, `BR-005`, `ST-01`, `ST-02`, `ST-04`, `PR-02`, `IN-03`, `REL-01`
-- **Acceptance Criteria:** `AC-01`, `AC-02`, `AC-03`
+- **Functional Requirements:** `FR-003`, `FR-007`, `FR-010`, `FR-011`, `FR-012`, `FR-015`, `FR-019`, `FR-020`, `FR-021`
+- **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-005`, `NFR-007`, `NFR-009`
+- **Business Rules & Invariants:** `BR-001`, `BR-002`, `BR-004`, `BR-011`, `ST-01`, `ST-02`, `ST-04`, `PR-02`, `IN-03`, `REL-01`
+- **Acceptance Criteria:** `AC-01`, `AC-03`, `AC-07`
 - **Cross-Cutting Rules:** `UC-C02`, `UC-C04`
 
 #### 9. Data Ownership, Tenant Scope & Authorization Condition
@@ -590,10 +590,10 @@ Feature: UC-06 Browse Store & Public Catalog
   - *Outcome:* Cart price is treated as provisional only; `UC-08` re-reads authoritative price at checkout (`UC-C03`).
 
 #### 8. Linked Rules, Requirements & Acceptance Criteria
-- **Functional Requirements:** `FR-023`, `FR-024`, `FR-025`
+- **Functional Requirements:** `FR-023`, `FR-024`
 - **Non-Functional Requirements:** `NFR-002`, `NFR-007`
-- **Business Rules & Invariants:** `BR-002`, `BR-005`, `BR-006`, `BR-007`, `PR-02`, `IN-03`, `REL-01`
-- **Acceptance Criteria:** `AC-01`, `AC-03`, `AC-04`, `AC-05`
+- **Business Rules & Invariants:** `BR-002`, `BR-004`, `BR-005`, `PR-02`, `IN-03`, `REL-01`
+- **Acceptance Criteria:** `AC-03`
 - **Cross-Cutting Rules:** `UC-C02`, `UC-C03`, `UC-C04`
 
 #### 9. Data Ownership, Tenant Scope & Authorization Condition
@@ -682,10 +682,10 @@ Feature: UC-07 Manage Shopping Cart
   - *Outcome:* Handled via `Idempotency-Key` (or equivalent idempotency mechanism) to prevent duplicate orders and double reservations.
 
 #### 8. Linked Rules, Requirements & Acceptance Criteria
-- **Functional Requirements:** `FR-026`, `FR-027`, `FR-028`, `FR-029`, `FR-030`, `FR-031`
+- **Functional Requirements:** `FR-007`, `FR-014`, `FR-018`, `FR-025`, `FR-026`, `FR-027`, `FR-028`, `FR-029`, `FR-030`, `FR-031`, `FR-039`, `FR-040`, `FR-041`, `FR-042`
 - **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`, `NFR-005`, `NFR-008`
-- **Business Rules & Invariants:** `BR-002`, `BR-006`, `BR-007`, `BR-008`, `BR-009`, `ST-03`, `PR-02`, `IN-01`, `IN-02`, `IN-04`, `OR-01`, `OR-02`, `OR-03`, `MNY-01`, `TX-01`, `INV-01`, `REL-01`
-- **Acceptance Criteria:** `AC-01`, `AC-04`, `AC-05`
+- **Business Rules & Invariants:** `BR-002`, `BR-004`, `BR-005`, `BR-006`, `BR-007`, `BR-010`, `ST-02`, `ST-03`, `PR-02`, `IN-01`, `IN-02`, `MNY-01`, `TX-01`, `INV-01`, `REL-01`
+- **Acceptance Criteria:** `AC-04`, `AC-05`
 - **Cross-Cutting Rules:** `UC-C01`..`UC-C07`
 
 #### 9. Data Ownership, Tenant Scope & Authorization Condition
@@ -773,10 +773,10 @@ Feature: UC-08 Checkout & Create COD Order
   - *Outcome:* Recorded independently in `PaymentStatus` (`OR-06`) rather than conflated with `FulfillmentStatus`.
 
 #### 8. Linked Rules, Requirements & Acceptance Criteria
-- **Functional Requirements:** `FR-032`, `FR-033`, `FR-034`, `FR-035`, `FR-037`
-- **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-008`
-- **Business Rules & Invariants:** `BR-002`, `BR-010`, `OR-04`, `OR-05`, `OR-06`, `OR-07`, `REL-01`
-- **Acceptance Criteria:** `AC-01`
+- **Functional Requirements:** `FR-022`, `FR-032`, `FR-033`, `FR-034`, `FR-035`, `FR-036`, `FR-042`
+- **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-005`, `NFR-008`
+- **Business Rules & Invariants:** `BR-002`, `BR-003`, `BR-012`, `OR-04`, `OR-05`, `OR-06`, `OR-09`, `REL-01`
+- **Acceptance Criteria:** `AC-02`, `AC-06`
 - **Cross-Cutting Rules:** `UC-C01`, `UC-C02`, `UC-C06`, `UC-C07`
 
 #### 9. Data Ownership, Tenant Scope & Authorization Condition
@@ -855,9 +855,9 @@ Feature: UC-09 Manage Order Fulfillment & Delivery/Pickup
   - *Outcome:* Governed by `OD-002` (Customer cancellation cutoff policy pending Product Owner decision).
 
 #### 8. Linked Rules, Requirements & Acceptance Criteria
-- **Functional Requirements:** `FR-036`
+- **Functional Requirements:** `FR-033`, `FR-036`, `FR-037`
 - **Non-Functional Requirements:** `NFR-001`, `NFR-002`, `NFR-003`, `NFR-004`, `NFR-008`
-- **Business Rules & Invariants:** `BR-002`, `BR-011`, `BR-012`, `IN-01`, `IN-02`, `IN-04`, `OR-08`, `OR-09`, `TX-01`, `INV-01`, `REL-01`
+- **Business Rules & Invariants:** `BR-002`, `BR-003`, `BR-008`, `BR-009`, `BR-012`, `IN-01`, `IN-02`, `IN-04`, `OR-05`, `OR-06`, `OR-08`, `TX-01`, `INV-01`, `REL-01`
 - **Acceptance Criteria:** `AC-02`, `AC-06` (Reservation release contract traced via `FR-037`, `BR-009`, `IN-04`, `OR-08`)
 - **Cross-Cutting Rules:** `UC-C01`, `UC-C02`, `UC-C05`, `UC-C06`, `UC-C07`
 
