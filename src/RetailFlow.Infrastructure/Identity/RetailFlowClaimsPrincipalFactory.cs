@@ -42,6 +42,12 @@ public sealed class RetailFlowClaimsPrincipalFactory
             identity.AddClaim(new Claim("store_id", user.StoreId.Value.ToString()));
         }
 
+        identity.AddClaim(new Claim("mfa_enrolled", user.TwoFactorEnabled ? "true" : "false"));
+        if (user.TwoFactorEnabled)
+        {
+            identity.AddClaim(new Claim("amr", "mfa"));
+        }
+
         return identity;
     }
 }

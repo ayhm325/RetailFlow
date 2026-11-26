@@ -18,6 +18,12 @@ internal sealed class RetailFlowIdentityUserConfiguration : IEntityTypeConfigura
         builder.Property(x => x.DisplayName).HasMaxLength(150).IsRequired();
         builder.Property(x => x.IsActive).IsRequired();
         builder.Property(x => x.CreatedAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
+        builder.Property(x => x.MfaEnrollmentStatus).HasConversion<int>().IsRequired();
+        builder.Property(x => x.MfaPendingExpiresAtUtc).HasColumnType("datetimeoffset(3)");
+        builder.Property(x => x.ProtectedPendingAuthenticatorKey).HasMaxLength(1024);
+        builder.Property(x => x.MfaFailedAttempts).IsRequired();
+        builder.Property(x => x.MfaLockoutEndUtc).HasColumnType("datetimeoffset(3)");
+        builder.Property(x => x.LastUsedTotpTimeStep);
 
         // Tenant-aware email uniqueness: same email is allowed across different stores,
         // but must be unique within a store and globally unique for StoreId IS NULL (PlatformAdmin).

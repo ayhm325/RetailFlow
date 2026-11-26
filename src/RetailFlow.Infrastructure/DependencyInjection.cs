@@ -45,6 +45,17 @@ public static class DependencyInjection
             options.UseSqlServer(connectionString);
         });
 
+        services.Configure<EmailSettings>(configuration.GetSection("Email"));
+        services.AddSingleton<IValidateOptions<EmailSettings>>(_ =>
+            new EmailSettingsValidator(isDevelopment));
+        services.AddOptions<EmailSettings>().ValidateOnStart();
+        services.AddScoped<IRetailFlowEmailSender, SmtpEmailSender>();
+
+        services.Configure<DataProtectionTokenProviderOptions>(options =>
+        {
+            options.TokenLifespan = TimeSpan.FromMinutes(30);
+        });
+
         services.AddScoped<IIdentityLookupScopeAccessor, IdentityLookupScopeAccessor>();
         services.AddScoped<IPasswordHasher<RetailFlowIdentityUser>, RetailFlowPasswordHasher>();
         services.AddScoped<IUserValidator<RetailFlowIdentityUser>, RetailFlowUserValidator>();

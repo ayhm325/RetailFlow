@@ -13,6 +13,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 using RetailFlow.Api.Auth;
 using RetailFlow.Domain.Identity;
+using RetailFlow.Infrastructure.Identity;
 using RetailFlow.Infrastructure.Persistence;
 
 namespace RetailFlow.Api.Hosting;
@@ -40,11 +41,19 @@ public static class ProductHostExtensions
 
         var certPath = configuration["DataProtection:CertificatePath"];
         var certPassword = configuration["DataProtection:CertificatePassword"];
+        var requireCertInProd = configuration.GetValue<bool>("DataProtection:RequireCertificateInProduction");
         if (!string.IsNullOrWhiteSpace(certPath))
         {
             var certificate = X509CertificateLoader.LoadPkcs12FromFile(certPath, certPassword);
             dataProtection.ProtectKeysWithCertificate(certificate);
         }
+        else if (environment.IsProduction() && requireCertInProd)
+        {
+            throw new InvalidOperationException(
+                "DataProtection:CertificatePath must be configured in Production when RequireCertificateInProduction is enabled.");
+        }
+
+        services.Configure<PlatformSecurityOptions>(configuration.GetSection("PlatformSecurity"));
 
         services.AddSingleton<ITicketStore, SqlSessionTicketStore>();
         services.AddScoped<RetailFlowCookieEvents>();
@@ -75,7 +84,21 @@ public static class ProductHostExtensions
         services.AddAuthorizationBuilder()
             .AddPolicy("Customer", policy => policy.RequireRole(nameof(AppRole.Customer)))
             .AddPolicy("MerchantOwner", policy => policy.RequireRole(nameof(AppRole.MerchantOwner)))
-            .AddPolicy("PlatformAdmin", policy => policy.RequireRole(nameof(AppRole.PlatformAdmin)));
+            .AddPolicy("PlatformAdminEnrollment", policy => policy.RequireRole(nameof(AppRole.PlatformAdmin)));
+
+        services.AddOptions<Microsoft.AspNetCore.Authorization.AuthorizationOptions>()
+            .Configure<IOptions<PlatformSecurityOptions>>((options, platformSecurity) =>
+            {
+                options.AddPolicy("PlatformAdmin", policy =>
+                {
+                    policy.RequireRole(nameof(AppRole.PlatformAdmin));
+                    if (platformSecurity.Value.RequireAdminMfa)
+                    {
+                        policy.RequireClaim("mfa_enrolled", "true");
+                        policy.RequireClaim("amr", "mfa");
+                    }
+                });
+            });
 
         services.Configure<RateLimitingOptions>(configuration.GetSection("RateLimiting"));
         services.AddRateLimiter();
@@ -117,12 +140,20 @@ public static class ProductHostExtensions
                     }
 
                     var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-                    var partitionKey = BuildRateLimitPartitionKey(httpContext.Request.Path, ip);
+                    var isSensitiveAuth = IsSensitiveAuthPath(httpContext.Request.Path);
+                    var partitionKey = isSensitiveAuth
+                        ? $"auth:{BuildRateLimitPartitionKey(httpContext.Request.Path, ip)}"
+                        : BuildRateLimitPartitionKey(httpContext.Request.Path, ip);
+
+                    var limit = isSensitiveAuth
+                        ? Math.Min(Math.Max(1, settings.AuthPermitLimit), Math.Max(1, settings.PermitLimit))
+                        : Math.Max(1, settings.PermitLimit);
+
                     return RateLimitPartition.GetFixedWindowLimiter(
                         partitionKey,
                         _ => new FixedWindowRateLimiterOptions
                         {
-                            PermitLimit = Math.Max(1, settings.PermitLimit),
+                            PermitLimit = limit,
                             Window = TimeSpan.FromSeconds(Math.Max(1, settings.WindowSeconds)),
                             QueueLimit = 0,
                             AutoReplenishment = true
@@ -458,9 +489,19 @@ public static class ProductHostExtensions
         return $"global:ip:{ip}";
     }
 
+    private static bool IsSensitiveAuthPath(PathString path)
+    {
+        var value = path.Value ?? string.Empty;
+        return value.Contains("/auth/login", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("/auth/forgot-password", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("/auth/reset-password", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("/auth/2fa/", StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class RateLimitingOptions
     {
         public int PermitLimit { get; set; } = 120;
+        public int AuthPermitLimit { get; set; } = 20;
         public int WindowSeconds { get; set; } = 60;
     }
 }

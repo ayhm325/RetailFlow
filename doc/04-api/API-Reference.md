@@ -23,9 +23,19 @@
 | Method | Path | الغرض | الحماية |
 |---|---|---|---|
 | POST | `/api/stores/{slug}/auth/register` | تسجيل Customer جديد بالمتجر | Store resolution |
-| POST | `/api/stores/{slug}/auth/login` | دخول مستخدم المتجر | Store resolution |
+| POST | `/api/stores/{slug}/auth/login` | دخول مستخدم المتجر (يدعم `TwoFactorCode` / `RecoveryCode`) | Store resolution + Auth rate limit |
 | POST | `/api/stores/{slug}/auth/logout` | إنهاء الجلسة | Authenticated |
 | GET | `/api/stores/{slug}/auth/me` | بيانات المستخدم الحالي | Authenticated + tenant claim check داخل handler |
+| POST | `/api/stores/{slug}/auth/forgot-password` | طلب رابط استعادة كلمة المرور (استجابة عامة `202`) | Store resolution + Auth rate limit |
+| POST | `/api/stores/{slug}/auth/reset-password` | إتمام استعادة كلمة المرور وإبطال الجلسات | Store resolution + Auth rate limit |
+| POST | `/api/stores/{slug}/auth/confirm-email` | توثيق البريد الإلكتروني بالتوكن | Store resolution |
+| POST | `/api/stores/{slug}/auth/resend-confirmation` | إعادة إرسال توثيق البريد (`202`) | Store resolution |
+| POST | `/api/stores/{slug}/auth/2fa/setup` | بدء تسجيل TOTP (يتطلب `CurrentPassword`؛ مرفوض إذا كان مفعّلاً) | Authenticated |
+| POST | `/api/stores/{slug}/auth/2fa/enable` | تفعيل TOTP وإصدار 10 رموز استرداد | Authenticated |
+| POST | `/api/stores/{slug}/auth/2fa/replace/setup` | بدء استبدال Authenticator (يتطلب Step-up) | Authenticated |
+| POST | `/api/stores/{slug}/auth/2fa/replace/confirm` | تأكيد الاستبدال وإبطال الجلسات القديمة | Authenticated |
+| POST | `/api/stores/{slug}/auth/2fa/disable` | تعطيل TOTP (يتطلب Step-up) وإبطال الجلسات | Authenticated |
+| POST | `/api/stores/{slug}/auth/2fa/recovery-codes` | إعادة توليد رموز الاسترداد (يتطلب TOTP حالي) | Authenticated |
 
 ## 3. Platform API
 

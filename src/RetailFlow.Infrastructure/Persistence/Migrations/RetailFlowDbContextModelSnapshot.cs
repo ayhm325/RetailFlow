@@ -958,11 +958,26 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
+                    b.Property<long?>("LastUsedTotpTimeStep")
+                        .HasColumnType("bigint");
+
                     b.Property<bool>("LockoutEnabled")
                         .HasColumnType("bit");
 
                     b.Property<DateTimeOffset?>("LockoutEnd")
                         .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("MfaEnrollmentStatus")
+                        .HasColumnType("int");
+
+                    b.Property<int>("MfaFailedAttempts")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("MfaLockoutEndUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<DateTimeOffset?>("MfaPendingExpiresAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
 
                     b.Property<string>("NormalizedEmail")
                         .IsRequired()
@@ -981,6 +996,10 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
 
                     b.Property<bool>("PhoneNumberConfirmed")
                         .HasColumnType("bit");
+
+                    b.Property<string>("ProtectedPendingAuthenticatorKey")
+                        .HasMaxLength(1024)
+                        .HasColumnType("nvarchar(1024)");
 
                     b.Property<string>("SecurityStamp")
                         .HasColumnType("nvarchar(max)");

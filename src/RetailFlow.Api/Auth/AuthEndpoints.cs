@@ -31,19 +31,33 @@ public static class AuthEndpoints
             .RequireAuthorization()
             .WithName("GetCurrentStoreUser");
 
-        storeAuth.MapPost("/forgot-password", RequestPasswordResetAsync)
+        storeAuth.MapPost("/forgot-password", RequestStorePasswordResetAsync)
             .WithName("ForgotStorePassword");
 
         storeAuth.MapPost("/reset-password", ResetPasswordAsync)
             .WithName("ResetStorePassword");
 
-        storeAuth.MapPost("/2fa/setup", BeginTwoFactorSetupAsync)
+        storeAuth.MapPost("/confirm-email", ConfirmEmailAsync)
+            .WithName("ConfirmStoreEmail");
+
+        storeAuth.MapPost("/resend-confirmation", ResendStoreConfirmationAsync)
+            .WithName("ResendStoreConfirmation");
+
+        storeAuth.MapPost("/2fa/setup", BeginStoreTwoFactorSetupAsync)
             .RequireAuthorization()
             .WithName("SetupStoreTwoFactor");
 
         storeAuth.MapPost("/2fa/enable", EnableTwoFactorAsync)
             .RequireAuthorization()
             .WithName("EnableStoreTwoFactor");
+
+        storeAuth.MapPost("/2fa/replace/setup", BeginStoreTwoFactorReplacementAsync)
+            .RequireAuthorization()
+            .WithName("BeginReplaceStoreTwoFactor");
+
+        storeAuth.MapPost("/2fa/replace/confirm", ConfirmTwoFactorReplacementAsync)
+            .RequireAuthorization()
+            .WithName("ConfirmReplaceStoreTwoFactor");
 
         storeAuth.MapPost("/2fa/disable", DisableTwoFactorAsync)
             .RequireAuthorization()
@@ -60,16 +74,30 @@ public static class AuthEndpoints
             .WithName("LoginPlatformAdmin");
 
         platformAuth.MapPost("/logout", (Delegate)LogoutAsync)
-            .RequireAuthorization("PlatformAdmin")
+            .RequireAuthorization("PlatformAdminEnrollment")
             .WithName("LogoutPlatformAdmin");
 
+        platformAuth.MapPost("/forgot-password", RequestPlatformPasswordResetAsync)
+            .WithName("ForgotPlatformPassword");
+
+        platformAuth.MapPost("/reset-password", ResetPasswordAsync)
+            .WithName("ResetPlatformPassword");
+
         platformAuth.MapPost("/2fa/setup", BeginPlatformTwoFactorSetupAsync)
-            .RequireAuthorization("PlatformAdmin")
+            .RequireAuthorization("PlatformAdminEnrollment")
             .WithName("SetupPlatformTwoFactor");
 
         platformAuth.MapPost("/2fa/enable", EnableTwoFactorAsync)
-            .RequireAuthorization("PlatformAdmin")
+            .RequireAuthorization("PlatformAdminEnrollment")
             .WithName("EnablePlatformTwoFactor");
+
+        platformAuth.MapPost("/2fa/replace/setup", BeginPlatformTwoFactorReplacementAsync)
+            .RequireAuthorization("PlatformAdmin")
+            .WithName("BeginReplacePlatformTwoFactor");
+
+        platformAuth.MapPost("/2fa/replace/confirm", ConfirmTwoFactorReplacementAsync)
+            .RequireAuthorization("PlatformAdmin")
+            .WithName("ConfirmReplacePlatformTwoFactor");
 
         platformAuth.MapPost("/2fa/disable", DisableTwoFactorAsync)
             .RequireAuthorization("PlatformAdmin")
@@ -132,6 +160,13 @@ public static class AuthEndpoints
     {
         var logger = loggerFactory.CreateLogger("RetailFlow.Audit.Auth");
         var result = await authService.SignInPlatformAdminAsync(command, cancellationToken);
+
+        if (result.Outcome == AuthSignInOutcome.MfaEnrollmentRequired && result.User is not null)
+        {
+            logger.LogInformation("Audit: PlatformAdminMfaEnrollmentRequired UserId={UserId}", result.User.UserId);
+            return TypedResults.Ok(result.User);
+        }
+
         if (result.Outcome != AuthSignInOutcome.Succeeded || result.User is null)
         {
             logger.LogWarning("Audit: PlatformAdminLoginFailed Outcome={Outcome}", result.Outcome);
@@ -173,13 +208,26 @@ public static class AuthEndpoints
         });
     }
 
-    private static async Task<IResult> RequestPasswordResetAsync(
+    private static async Task<IResult> RequestStorePasswordResetAsync(
+        ForgotPasswordCommand command,
+        IStoreRequestContextAccessor storeContextAccessor,
+        IAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        var store = storeContextAccessor.Current
+            ?? throw new InvalidOperationException("Store context was not resolved.");
+
+        await authService.RequestPasswordResetAsync(command.Email, store.StoreSlug, cancellationToken);
+        return TypedResults.Accepted((string?)null, new { message = "If the account exists, a password reset instruction has been sent." });
+    }
+
+    private static async Task<IResult> RequestPlatformPasswordResetAsync(
         ForgotPasswordCommand command,
         IAuthService authService,
         CancellationToken cancellationToken)
     {
-        await authService.RequestPasswordResetAsync(command.Email, cancellationToken);
-        return TypedResults.Accepted((string?)null, new { message = "If the account exists, a password reset instruction has been queued." });
+        await authService.RequestPasswordResetAsync(command.Email, null, cancellationToken);
+        return TypedResults.Accepted((string?)null, new { message = "If the account exists, a password reset instruction has been sent." });
     }
 
     private static async Task<IResult> ResetPasswordAsync(
@@ -196,7 +244,35 @@ public static class AuthEndpoints
                 detail: "The password reset request could not be completed.");
     }
 
-    private static async Task<IResult> BeginTwoFactorSetupAsync(
+    private static async Task<IResult> ConfirmEmailAsync(
+        ConfirmEmailCommand command,
+        IAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        var confirmed = await authService.ConfirmEmailAsync(command, cancellationToken);
+        return confirmed
+            ? TypedResults.NoContent()
+            : TypedResults.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Email confirmation failed",
+                detail: "The email confirmation token is invalid or expired.");
+    }
+
+    private static async Task<IResult> ResendStoreConfirmationAsync(
+        ResendConfirmationCommand command,
+        IStoreRequestContextAccessor storeContextAccessor,
+        IAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        var store = storeContextAccessor.Current
+            ?? throw new InvalidOperationException("Store context was not resolved.");
+
+        await authService.RequestEmailConfirmationAsync(command.Email, store.StoreSlug, cancellationToken);
+        return TypedResults.Accepted((string?)null, new { message = "If the account is eligible, a confirmation email has been sent." });
+    }
+
+    private static async Task<IResult> BeginStoreTwoFactorSetupAsync(
+        BeginTwoFactorSetupCommand command,
         IStoreRequestContextAccessor storeContextAccessor,
         ClaimsPrincipal principal,
         IAuthService authService,
@@ -209,11 +285,17 @@ public static class AuthEndpoints
 
         var store = storeContextAccessor.Current;
         var issuer = store is not null ? $"RetailFlow ({store.StoreSlug})" : "RetailFlow";
-        var setup = await authService.BeginTwoFactorSetupAsync(userId, issuer, cancellationToken);
-        return TypedResults.Ok(setup);
+        var setup = await authService.BeginTwoFactorSetupAsync(userId, issuer, command, cancellationToken);
+        return setup is not null
+            ? TypedResults.Ok(setup)
+            : TypedResults.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Two-factor setup rejected",
+                detail: "Two-factor setup could not be initiated. Ensure your password is correct and MFA is not already enrolled.");
     }
 
     private static async Task<IResult> BeginPlatformTwoFactorSetupAsync(
+        BeginTwoFactorSetupCommand command,
         ClaimsPrincipal principal,
         IAuthService authService,
         CancellationToken cancellationToken)
@@ -223,12 +305,17 @@ public static class AuthEndpoints
             return TypedResults.Unauthorized();
         }
 
-        var setup = await authService.BeginTwoFactorSetupAsync(userId, "RetailFlow Platform", cancellationToken);
-        return TypedResults.Ok(setup);
+        var setup = await authService.BeginTwoFactorSetupAsync(userId, "RetailFlow Platform", command, cancellationToken);
+        return setup is not null
+            ? TypedResults.Ok(setup)
+            : TypedResults.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Two-factor setup rejected",
+                detail: "Two-factor setup could not be initiated. Ensure your password is correct and MFA is not already enrolled.");
     }
 
     private static async Task<IResult> EnableTwoFactorAsync(
-        TwoFactorVerifyCommand command,
+        EnableTwoFactorCommand command,
         ClaimsPrincipal principal,
         IAuthService authService,
         CancellationToken cancellationToken)
@@ -238,16 +325,80 @@ public static class AuthEndpoints
             return TypedResults.Unauthorized();
         }
 
-        var recovery = await authService.EnableTwoFactorAsync(userId, command.Code, cancellationToken);
+        var recovery = await authService.EnableTwoFactorAsync(userId, command, cancellationToken);
         return recovery is not null
             ? TypedResults.Ok(recovery)
             : TypedResults.Problem(
                 statusCode: StatusCodes.Status400BadRequest,
                 title: "Invalid verification code",
-                detail: "The two-factor verification code is invalid.");
+                detail: "The two-factor verification code is invalid, expired, or setup is not pending.");
+    }
+
+    private static async Task<IResult> BeginStoreTwoFactorReplacementAsync(
+        BeginTwoFactorReplacementCommand command,
+        IStoreRequestContextAccessor storeContextAccessor,
+        ClaimsPrincipal principal,
+        IAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        var store = storeContextAccessor.Current;
+        var issuer = store is not null ? $"RetailFlow ({store.StoreSlug})" : "RetailFlow";
+        var setup = await authService.BeginTwoFactorReplacementAsync(userId, issuer, command, cancellationToken);
+        return setup is not null
+            ? TypedResults.Ok(setup)
+            : TypedResults.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Authenticator replacement rejected",
+                detail: "Step-up verification failed or MFA is not currently enabled.");
+    }
+
+    private static async Task<IResult> BeginPlatformTwoFactorReplacementAsync(
+        BeginTwoFactorReplacementCommand command,
+        ClaimsPrincipal principal,
+        IAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        var setup = await authService.BeginTwoFactorReplacementAsync(userId, "RetailFlow Platform", command, cancellationToken);
+        return setup is not null
+            ? TypedResults.Ok(setup)
+            : TypedResults.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Authenticator replacement rejected",
+                detail: "Step-up verification failed or MFA is not currently enabled.");
+    }
+
+    private static async Task<IResult> ConfirmTwoFactorReplacementAsync(
+        ConfirmTwoFactorReplacementCommand command,
+        ClaimsPrincipal principal,
+        IAuthService authService,
+        CancellationToken cancellationToken)
+    {
+        if (!Guid.TryParse(principal.FindFirstValue(ClaimTypes.NameIdentifier), out var userId))
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        var recovery = await authService.ConfirmTwoFactorReplacementAsync(userId, command, cancellationToken);
+        return recovery is not null
+            ? TypedResults.Ok(recovery)
+            : TypedResults.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Authenticator replacement failed",
+                detail: "The verification code is invalid, expired, or replacement is not pending.");
     }
 
     private static async Task<IResult> DisableTwoFactorAsync(
+        DisableTwoFactorCommand command,
         ClaimsPrincipal principal,
         IAuthService authService,
         CancellationToken cancellationToken)
@@ -257,11 +408,17 @@ public static class AuthEndpoints
             return TypedResults.Unauthorized();
         }
 
-        var disabled = await authService.DisableTwoFactorAsync(userId, cancellationToken);
-        return disabled ? TypedResults.NoContent() : TypedResults.NotFound();
+        var disabled = await authService.DisableTwoFactorAsync(userId, command, cancellationToken);
+        return disabled
+            ? TypedResults.NoContent()
+            : TypedResults.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Disable two-factor failed",
+                detail: "Step-up verification failed or MFA is not enabled.");
     }
 
     private static async Task<IResult> RegenerateRecoveryCodesAsync(
+        RegenerateRecoveryCodesCommand command,
         ClaimsPrincipal principal,
         IAuthService authService,
         CancellationToken cancellationToken)
@@ -271,8 +428,13 @@ public static class AuthEndpoints
             return TypedResults.Unauthorized();
         }
 
-        var recovery = await authService.RegenerateRecoveryCodesAsync(userId, cancellationToken);
-        return recovery is not null ? TypedResults.Ok(recovery) : TypedResults.BadRequest();
+        var recovery = await authService.RegenerateRecoveryCodesAsync(userId, command, cancellationToken);
+        return recovery is not null
+            ? TypedResults.Ok(recovery)
+            : TypedResults.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Recovery code regeneration failed",
+                detail: "Step-up TOTP verification failed or MFA is not enabled.");
     }
 
     private static IResult MapFailedSignIn(AuthSignInOutcome outcome) => outcome switch

@@ -201,7 +201,9 @@ public sealed class IdentityAdoptionIntegrationTests : IClassFixture<CatalogSqlT
                 new LoginCommand(email, "NewStr0ngPass!2"));
             Assert.Equal(HttpStatusCode.OK, loginOk.StatusCode);
 
-            using var setup2fa = await lockoutClient.PostAsync($"/api/stores/{store.Slug}/auth/2fa/setup", null);
+            using var setup2fa = await lockoutClient.PostAsJsonAsync(
+                $"/api/stores/{store.Slug}/auth/2fa/setup",
+                new BeginTwoFactorSetupCommand("NewStr0ngPass!2"));
             Assert.Equal(HttpStatusCode.OK, setup2fa.StatusCode);
             var setupDto = await setup2fa.Content.ReadFromJsonAsync<TwoFactorSetupDto>();
             Assert.NotNull(setupDto);

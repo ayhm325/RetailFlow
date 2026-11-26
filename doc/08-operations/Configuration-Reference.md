@@ -22,9 +22,20 @@
 
 ## 3. Rate limiting
 
-`RateLimiting:PermitLimit` الافتراضي 120، و`RateLimiting:WindowSeconds` الافتراضي 60. يجب أن تكون القيم موجبة؛ الكود يطبق `Math.Max(1, ...)`.
+`RateLimiting:PermitLimit` الافتراضي 120، و`RateLimiting:AuthPermitLimit` للمسارات الحساسة (`/auth/login`, `/auth/forgot-password`, `/auth/reset-password`, `/auth/2fa/`) الافتراضي 20، و`RateLimiting:WindowSeconds` الافتراضي 60. يجب أن تكون القيم موجبة؛ الكود يطبق `Math.Max(1, ...)`.
 
-## 4. Cookie/session
+## 4. Email, Platform MFA & Data Protection
+
+| المفتاح | المعنى |
+|---|---|
+| `Email:PublicBaseUrl` | الأصل الموثوق لبناء روابط استعادة كلمة المرور وتوثيق البريد |
+| `Email:SmtpHost` / `SmtpPort` / `EnableSsl` / `Username` / `Password` / `FromAddress` | إعدادات SMTP للإرسال الفعلي في الإنتاج |
+| `Email:RequireConfiguredInProduction` | يفشل عند startup خارج Development إذا غابت إعدادات SMTP أو `PublicBaseUrl` |
+| `PlatformSecurity:RequireAdminMfa` | عند `true`، يمنع `PlatformAdmin` غير المسجّل في MFA من `/api/platform/stores/*` حتى إكمال التسجيل والدخول بـ TOTP |
+| `DataProtection:CertificatePath` / `CertificatePassword` | شهادة X.509 لحماية مفاتيح Data Protection في SQL Server |
+| `DataProtection:RequireCertificateInProduction` | يفشل عند startup في Production إذا غابت شهادة Data Protection |
+
+## 5. Cookie/session
 
 قيمة 12 ساعة وSlidingExpiration محددة في `ProductHostExtensions.cs` وليست مفتاحاً مقروءاً من config الحالي. أي تحويل لها إلى configuration يجب أن يرافقه validation واختبارات.
 

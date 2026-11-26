@@ -14,6 +14,7 @@
 | `20261126085623_AddDataProtectionKeys` | DataProtectionKeys (`IDataProtectionKeyContext`) |
 | `20261126092137_AddCheckoutRequestLeaseAndRecoveryFields` | CheckoutRequests (`ClaimToken`, `LeaseExpiresAtUtc`, `LastAttemptAtUtc`, `CompletedAtUtc`) |
 | `20261126094533_AdoptAspNetCoreIdentity` | تحويل `AppUsers` إلى `AspNetUsers` مع الحفاظ على `Guid` وبيانات المستخدمين، وإضافة `AspNetRoles`, `AspNetUserRoles`, `AspNetUserClaims`, `AspNetUserLogins`, `AspNetUserTokens`, `AspNetRoleClaims` وتحويل الأدوار (`1/2/3`) |
+| `20261126101145_AddIdentityMfaHardeningFields` | حقول حالة MFA في `AspNetUsers` (`MfaEnrollmentStatus`, `MfaPendingExpiresAtUtc`, `ProtectedPendingAuthenticatorKey`, `MfaFailedAttempts`, `MfaLockoutEndUtc`, `LastUsedTotpTimeStep`) |
 
 كل migration لها Designer file، ويوجد `RetailFlowDbContextModelSnapshot.cs`.
 

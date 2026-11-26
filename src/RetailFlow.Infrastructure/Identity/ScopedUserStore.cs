@@ -1,5 +1,6 @@
 using System.Security.Claims;
 
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -11,21 +12,29 @@ namespace RetailFlow.Infrastructure.Identity;
 
 /// <summary>
 /// Fail-closed, tenant-aware ASP.NET Core Identity UserStore.
-/// Restricts all user queries, lookups, mutations, and role assignments to the active IdentityLookupScope.
+/// Restricts all user queries, lookups, mutations, external logins, tokens, and role assignments to the active IdentityLookupScope.
+/// Also encrypts/decrypts TOTP AuthenticatorKey at rest in AspNetUserTokens via Data Protection.
 /// </summary>
 public sealed class ScopedUserStore
     : UserStore<RetailFlowIdentityUser, RetailFlowIdentityRole, RetailFlowDbContext, Guid>
 {
+    private const string InternalLoginProvider = "[AspNetUserStore]";
+    private const string AuthenticatorKeyTokenName = "AuthenticatorKey";
+
     private readonly IIdentityLookupScopeAccessor _scopeAccessor;
+    private readonly IDataProtectionProvider _dataProtectionProvider;
 
     public ScopedUserStore(
         RetailFlowDbContext context,
         IIdentityLookupScopeAccessor scopeAccessor,
+        IDataProtectionProvider dataProtectionProvider,
         IdentityErrorDescriber? describer = null)
         : base(context, describer)
     {
         _scopeAccessor = scopeAccessor
             ?? throw new ArgumentNullException(nameof(scopeAccessor));
+        _dataProtectionProvider = dataProtectionProvider
+            ?? throw new ArgumentNullException(nameof(dataProtectionProvider));
     }
 
     public override IQueryable<RetailFlowIdentityUser> Users => CreateScopedUsers();
@@ -218,6 +227,22 @@ public sealed class ScopedUserStore
         return base.RemoveLoginAsync(user, loginProvider, providerKey, cancellationToken);
     }
 
+    public override Task<RetailFlowIdentityUser?> FindByLoginAsync(
+        string loginProvider,
+        string providerKey,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ThrowIfDisposed();
+
+        return (
+            from login in Context.UserLogins
+            join user in CreateScopedUsers() on login.UserId equals user.Id
+            where login.LoginProvider == loginProvider && login.ProviderKey == providerKey
+            select user)
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
     public override Task SetTokenAsync(
         RetailFlowIdentityUser user,
         string loginProvider,
@@ -227,7 +252,36 @@ public sealed class ScopedUserStore
     {
         ArgumentNullException.ThrowIfNull(user);
         EnsureUserMatchesCurrentScope(user);
-        return base.SetTokenAsync(user, loginProvider, name, value, cancellationToken);
+
+        var valueToStore = value;
+        if (loginProvider == InternalLoginProvider &&
+            name == AuthenticatorKeyTokenName &&
+            !string.IsNullOrWhiteSpace(value))
+        {
+            valueToStore = TotpCryptoHelper.ProtectSecret(_dataProtectionProvider, value);
+        }
+
+        return base.SetTokenAsync(user, loginProvider, name, valueToStore, cancellationToken);
+    }
+
+    public override async Task<string?> GetTokenAsync(
+        RetailFlowIdentityUser user,
+        string loginProvider,
+        string name,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(user);
+        EnsureUserMatchesCurrentScope(user);
+
+        var stored = await base.GetTokenAsync(user, loginProvider, name, cancellationToken);
+        if (loginProvider == InternalLoginProvider &&
+            name == AuthenticatorKeyTokenName &&
+            !string.IsNullOrWhiteSpace(stored))
+        {
+            return TotpCryptoHelper.UnprotectSecret(_dataProtectionProvider, stored);
+        }
+
+        return stored;
     }
 
     public override Task RemoveTokenAsync(
