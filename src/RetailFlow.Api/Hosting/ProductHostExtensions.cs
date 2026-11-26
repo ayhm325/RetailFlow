@@ -1,8 +1,11 @@
 using System.Security.Claims;
 using System.Threading.RateLimiting;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HostFiltering;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -10,6 +13,8 @@ using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 using RetailFlow.Api.Auth;
 using RetailFlow.Domain.Identity;
+using RetailFlow.Infrastructure.Identity;
+using RetailFlow.Infrastructure.Persistence;
 
 namespace RetailFlow.Api.Hosting;
 
@@ -30,10 +35,33 @@ public static class ProductHostExtensions
         services.AddProblemDetails();
         services.AddOpenApi();
 
+        var dataProtection = services.AddDataProtection()
+            .SetApplicationName("RetailFlow")
+            .PersistKeysToDbContext<RetailFlowDbContext>();
+
+        var certPath = configuration["DataProtection:CertificatePath"];
+        var certPassword = configuration["DataProtection:CertificatePassword"];
+        var requireCertInProd = configuration.GetValue<bool>("DataProtection:RequireCertificateInProduction");
+        if (!string.IsNullOrWhiteSpace(certPath))
+        {
+            var certificate = X509CertificateLoader.LoadPkcs12FromFile(certPath, certPassword);
+            dataProtection.ProtectKeysWithCertificate(certificate);
+        }
+        else if (environment.IsProduction() && requireCertInProd)
+        {
+            throw new InvalidOperationException(
+                "DataProtection:CertificatePath must be configured in Production when RequireCertificateInProduction is enabled.");
+        }
+
+        services.Configure<PlatformSecurityOptions>(configuration.GetSection("PlatformSecurity"));
+
         services.AddSingleton<ITicketStore, SqlSessionTicketStore>();
+        services.AddScoped<RetailFlowCookieEvents>();
+        services.AddHostedService<MaintenanceBackgroundService>();
+        services.AddHostedService<PlatformBootstrapHostedService>();
         services
-            .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-            .AddCookie(options =>
+            .AddAuthentication(IdentityConstants.ApplicationScheme)
+            .AddCookie(IdentityConstants.ApplicationScheme, options =>
             {
                 options.Cookie.Name = "__Host-RetailFlow.Session";
                 options.Cookie.HttpOnly = true;
@@ -42,28 +70,35 @@ public static class ProductHostExtensions
                 options.Cookie.Path = "/";
                 options.SlidingExpiration = true;
                 options.ExpireTimeSpan = TimeSpan.FromHours(12);
-                options.Events = new CookieAuthenticationEvents
-                {
-                    OnRedirectToLogin = ctx =>
-                    {
-                        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                        return Task.CompletedTask;
-                    },
-                    OnRedirectToAccessDenied = ctx =>
-                    {
-                        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        return Task.CompletedTask;
-                    }
-                };
+                options.EventsType = typeof(RetailFlowCookieEvents);
             });
 
-        services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
+        services.AddOptions<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme)
             .Configure<ITicketStore>((options, ticketStore) => options.SessionStore = ticketStore);
+
+        services.Configure<SecurityStampValidatorOptions>(options =>
+        {
+            options.ValidationInterval = TimeSpan.FromMinutes(1);
+        });
 
         services.AddAuthorizationBuilder()
             .AddPolicy("Customer", policy => policy.RequireRole(nameof(AppRole.Customer)))
             .AddPolicy("MerchantOwner", policy => policy.RequireRole(nameof(AppRole.MerchantOwner)))
-            .AddPolicy("PlatformAdmin", policy => policy.RequireRole(nameof(AppRole.PlatformAdmin)));
+            .AddPolicy("PlatformAdminEnrollment", policy => policy.RequireRole(nameof(AppRole.PlatformAdmin)));
+
+        services.AddOptions<Microsoft.AspNetCore.Authorization.AuthorizationOptions>()
+            .Configure<IOptions<PlatformSecurityOptions>>((options, platformSecurity) =>
+            {
+                options.AddPolicy("PlatformAdmin", policy =>
+                {
+                    policy.RequireRole(nameof(AppRole.PlatformAdmin));
+                    if (platformSecurity.Value.RequireAdminMfa)
+                    {
+                        policy.RequireClaim("mfa_enrolled", "true");
+                        policy.RequireClaim("amr", "mfa");
+                    }
+                });
+            });
 
         services.Configure<RateLimitingOptions>(configuration.GetSection("RateLimiting"));
         services.AddRateLimiter();
@@ -105,12 +140,20 @@ public static class ProductHostExtensions
                     }
 
                     var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-                    var partitionKey = BuildRateLimitPartitionKey(httpContext.Request.Path, ip);
+                    var isSensitiveAuth = IsSensitiveAuthPath(httpContext.Request.Path);
+                    var partitionKey = isSensitiveAuth
+                        ? $"auth:{BuildRateLimitPartitionKey(httpContext.Request.Path, ip)}"
+                        : BuildRateLimitPartitionKey(httpContext.Request.Path, ip);
+
+                    var limit = isSensitiveAuth
+                        ? Math.Min(Math.Max(1, settings.AuthPermitLimit), Math.Max(1, settings.PermitLimit))
+                        : Math.Max(1, settings.PermitLimit);
+
                     return RateLimitPartition.GetFixedWindowLimiter(
                         partitionKey,
                         _ => new FixedWindowRateLimiterOptions
                         {
-                            PermitLimit = Math.Max(1, settings.PermitLimit),
+                            PermitLimit = limit,
                             Window = TimeSpan.FromSeconds(Math.Max(1, settings.WindowSeconds)),
                             QueueLimit = 0,
                             AutoReplenishment = true
@@ -167,8 +210,10 @@ public static class ProductHostExtensions
             await next();
         });
 
-        // 6. Rate Limiting (OWASP API4:2023).
+        // 6. Routing & Rate Limiting (OWASP API4:2023) before Tenant Identity Scope & Authentication.
+        app.UseRouting();
         app.UseRateLimiter();
+        app.UseMiddleware<RetailFlowIdentityScopeMiddleware>();
 
         // 7. Authentication, CSRF Protection (OWASP REF-06), & Authorization (AUTH-ADR-01).
         app.UseAuthentication();
@@ -179,27 +224,37 @@ public static class ProductHostExtensions
                 !HttpMethods.IsHead(context.Request.Method) &&
                 !HttpMethods.IsOptions(context.Request.Method);
 
-            if (isUnsafeMethod &&
-                context.User.Identity?.IsAuthenticated == true &&
-                !string.Equals(context.Request.Headers["X-CSRF"].FirstOrDefault(), "1", StringComparison.Ordinal))
+            if (isUnsafeMethod && context.User.Identity?.IsAuthenticated == true)
             {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                var problemDetailsService = context.RequestServices.GetService<IProblemDetailsService>();
-                if (problemDetailsService is not null)
-                {
-                    await problemDetailsService.WriteAsync(new ProblemDetailsContext
-                    {
-                        HttpContext = context,
-                        ProblemDetails = new ProblemDetails
-                        {
-                            Status = StatusCodes.Status403Forbidden,
-                            Title = "CSRF Validation Failed",
-                            Detail = "Missing or invalid X-CSRF header for authenticated state-changing request."
-                        }
-                    });
-                }
+                var hasCsrfMarker = string.Equals(
+                    context.Request.Headers["X-CSRF"].FirstOrDefault(),
+                    "1",
+                    StringComparison.Ordinal);
 
-                return;
+                var originValid = IsSameOriginIfPresent(context.Request);
+
+                if (!hasCsrfMarker || !originValid)
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    var problemDetailsService = context.RequestServices.GetService<IProblemDetailsService>();
+                    if (problemDetailsService is not null)
+                    {
+                        await problemDetailsService.WriteAsync(new ProblemDetailsContext
+                        {
+                            HttpContext = context,
+                            ProblemDetails = new ProblemDetails
+                            {
+                                Status = StatusCodes.Status403Forbidden,
+                                Title = "CSRF Validation Failed",
+                                Detail = !hasCsrfMarker
+                                    ? "Missing or invalid X-CSRF header for authenticated state-changing request."
+                                    : "Origin/Referer header does not match request host."
+                            }
+                        });
+                    }
+
+                    return;
+                }
             }
 
             await next();
@@ -387,6 +442,38 @@ public static class ProductHostExtensions
         }
     }
 
+    private static bool IsSameOriginIfPresent(HttpRequest request)
+    {
+        var secFetchSite = request.Headers["Sec-Fetch-Site"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(secFetchSite) &&
+            !string.Equals(secFetchSite, "same-origin", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(secFetchSite, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var headerValue = request.Headers.Origin.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(headerValue))
+        {
+            headerValue = request.Headers.Referer.FirstOrDefault();
+        }
+
+        if (string.IsNullOrWhiteSpace(headerValue))
+        {
+            return true;
+        }
+
+        if (!Uri.TryCreate(headerValue, UriKind.Absolute, out var sourceUri))
+        {
+            return false;
+        }
+
+        var expectedPort = request.Host.Port ?? (string.Equals(request.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? 443 : 80);
+        return string.Equals(sourceUri.Scheme, request.Scheme, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(sourceUri.Host, request.Host.Host, StringComparison.OrdinalIgnoreCase) &&
+               sourceUri.Port == expectedPort;
+    }
+
     private static string BuildRateLimitPartitionKey(PathString path, string ip)
     {
         if (path.StartsWithSegments("/api/stores", StringComparison.OrdinalIgnoreCase))
@@ -402,9 +489,19 @@ public static class ProductHostExtensions
         return $"global:ip:{ip}";
     }
 
+    private static bool IsSensitiveAuthPath(PathString path)
+    {
+        var value = path.Value ?? string.Empty;
+        return value.Contains("/auth/login", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("/auth/forgot-password", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("/auth/reset-password", StringComparison.OrdinalIgnoreCase) ||
+               value.Contains("/auth/2fa/", StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class RateLimitingOptions
     {
         public int PermitLimit { get; set; } = 120;
+        public int AuthPermitLimit { get; set; } = 20;
         public int WindowSeconds { get; set; } = 60;
     }
 }

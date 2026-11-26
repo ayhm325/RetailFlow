@@ -2,35 +2,40 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
 using RetailFlow.Domain.Identity;
+using RetailFlow.Infrastructure.Identity;
 
 namespace RetailFlow.Infrastructure.Persistence.Configurations;
 
-internal sealed class AppUserConfiguration : IEntityTypeConfiguration<AppUser>
+internal sealed class RetailFlowIdentityUserConfiguration : IEntityTypeConfiguration<RetailFlowIdentityUser>
 {
-    public void Configure(EntityTypeBuilder<AppUser> builder)
+    public void Configure(EntityTypeBuilder<RetailFlowIdentityUser> builder)
     {
-        builder.ToTable("AppUsers", t =>
-            t.HasCheckConstraint("CK_AppUsers_Role", "[Role] IN (1, 2, 3)"));
+        builder.ToTable("AspNetUsers");
 
-        builder.HasKey(x => x.Id);
         builder.Property(x => x.StoreId);
         builder.Property(x => x.Email).HasMaxLength(256).IsRequired();
         builder.Property(x => x.NormalizedEmail).HasMaxLength(256).IsRequired();
         builder.Property(x => x.DisplayName).HasMaxLength(150).IsRequired();
-        builder.Property(x => x.PasswordHash).HasMaxLength(512).IsRequired();
-        builder.Property(x => x.Role).HasConversion<int>().IsRequired();
         builder.Property(x => x.IsActive).IsRequired();
         builder.Property(x => x.CreatedAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
+        builder.Property(x => x.MfaEnrollmentStatus).HasConversion<int>().IsRequired();
+        builder.Property(x => x.MfaPendingExpiresAtUtc).HasColumnType("datetimeoffset(3)");
+        builder.Property(x => x.ProtectedPendingAuthenticatorKey).HasMaxLength(1024);
+        builder.Property(x => x.MfaFailedAttempts).IsRequired();
+        builder.Property(x => x.MfaLockoutEndUtc).HasColumnType("datetimeoffset(3)");
+        builder.Property(x => x.LastUsedTotpTimeStep);
 
+        // Tenant-aware email uniqueness: same email is allowed across different stores,
+        // but must be unique within a store and globally unique for StoreId IS NULL (PlatformAdmin).
         builder.HasIndex(x => new { x.StoreId, x.NormalizedEmail })
             .IsUnique()
             .HasFilter("[StoreId] IS NOT NULL")
-            .HasDatabaseName("UX_AppUsers_StoreId_NormalizedEmail");
+            .HasDatabaseName("UX_AspNetUsers_StoreId_NormalizedEmail");
 
         builder.HasIndex(x => x.NormalizedEmail)
             .IsUnique()
             .HasFilter("[StoreId] IS NULL")
-            .HasDatabaseName("UX_AppUsers_Platform_NormalizedEmail");
+            .HasDatabaseName("UX_AspNetUsers_Platform_NormalizedEmail");
     }
 }
 

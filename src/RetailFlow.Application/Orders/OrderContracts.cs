@@ -86,13 +86,20 @@ public interface ICheckoutService
         CancellationToken cancellationToken);
 }
 
+public sealed record PagedOrdersResponse(
+    int Page,
+    int PageSize,
+    int TotalCount,
+    int TotalPages,
+    IReadOnlyList<OrderDto> Items);
+
 public interface IOrderService
 {
-    Task<IReadOnlyList<OrderDto>> GetCustomerOrdersAsync(Guid storeId, Guid customerId, CancellationToken cancellationToken);
+    Task<PagedOrdersResponse> GetCustomerOrdersAsync(Guid storeId, Guid customerId, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default);
     Task<OrderDto?> GetCustomerOrderByIdAsync(Guid storeId, Guid customerId, Guid orderId, CancellationToken cancellationToken);
     Task<OrderDto?> CancelByCustomerAsync(Guid storeId, Guid customerId, Guid orderId, string? reason, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<OrderDto>> GetMerchantOrdersAsync(Guid storeId, CancellationToken cancellationToken);
+    Task<PagedOrdersResponse> GetMerchantOrdersAsync(Guid storeId, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default);
     Task<OrderDto?> ConfirmOrderAsync(Guid storeId, Guid actorUserId, Guid orderId, CancellationToken cancellationToken);
     Task<OrderDto?> RejectOrderAsync(Guid storeId, Guid actorUserId, Guid orderId, string reason, CancellationToken cancellationToken);
     Task<OrderDto?> AdvanceFulfillmentAsync(Guid storeId, Guid actorUserId, Guid orderId, FulfillmentStatus nextStatus, CancellationToken cancellationToken);

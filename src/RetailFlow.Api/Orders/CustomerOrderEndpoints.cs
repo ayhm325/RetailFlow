@@ -95,13 +95,20 @@ public static class CustomerOrderEndpoints
         });
 
         group.MapGet("/orders", async Task<IResult> (
+            int? page,
+            int? pageSize,
             ClaimsPrincipal user,
             IStoreRequestContextAccessor accessor,
             IOrderService orderService,
             CancellationToken ct) =>
         {
             var customerId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var orders = await orderService.GetCustomerOrdersAsync(accessor.Current!.StoreId, customerId, ct);
+            var orders = await orderService.GetCustomerOrdersAsync(
+                accessor.Current!.StoreId,
+                customerId,
+                page ?? 1,
+                pageSize ?? 20,
+                ct);
             return TypedResults.Ok(orders);
         });
 

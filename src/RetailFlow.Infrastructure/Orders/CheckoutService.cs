@@ -3,6 +3,8 @@ using System.Text;
 
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 using RetailFlow.Application.Orders;
 using RetailFlow.Domain.Catalog;
@@ -12,15 +14,26 @@ using RetailFlow.Infrastructure.Persistence;
 namespace RetailFlow.Infrastructure.Orders;
 
 /// <summary>
-/// Implements atomic Checkout Idempotency per ADR-0006 (Accepted) and 15-minute reservation per OD-001.
+/// Implements atomic Checkout Idempotency per ADR-0006 (Accepted) with Processing Lease recovery,
+/// Read-After-Error verification, and 15-minute inventory reservation per OD-001.
 /// </summary>
 public sealed class CheckoutService : ICheckoutService
 {
     private readonly RetailFlowDbContext _dbContext;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly TimeProvider _timeProvider;
+    private readonly ILogger<CheckoutService> _logger;
 
-    public CheckoutService(RetailFlowDbContext dbContext)
+    public CheckoutService(
+        RetailFlowDbContext dbContext,
+        IServiceScopeFactory scopeFactory,
+        ILogger<CheckoutService> logger,
+        TimeProvider? timeProvider = null)
     {
         _dbContext = dbContext;
+        _scopeFactory = scopeFactory;
+        _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<CheckoutResult> CheckoutAsync(
@@ -41,16 +54,21 @@ public sealed class CheckoutService : ICheckoutService
         }
 
         var normalizedKey = idempotencyKey.Trim();
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
 
         var cart = await _dbContext.Carts
             .Include(c => c.Items)
             .SingleOrDefaultAsync(c => c.StoreId == storeId && c.CustomerId == customerId, cancellationToken);
 
-        var requestHash = ComputeRequestHash(storeId, customerId, command);
+        var cartSignature = cart is null || cart.Items.Count == 0
+            ? string.Empty
+            : string.Join(",", cart.Items.OrderBy(i => i.ProductId).Select(i => $"{i.ProductId}:{i.Quantity}"));
 
-        // Step 1: Atomic key claim in CheckoutRequests
-        var claim = CheckoutRequest.Claim(Guid.NewGuid(), storeId, customerId, normalizedKey, requestHash, now);
+        var requestHash = ComputeRequestHash(storeId, customerId, command, cartSignature);
+        var claimToken = Guid.NewGuid();
+
+        // Step 1: Atomic key claim or lease reclaim in CheckoutRequests
+        var claim = CheckoutRequest.Claim(Guid.NewGuid(), storeId, customerId, normalizedKey, requestHash, now, claimToken);
         _dbContext.CheckoutRequests.Add(claim);
 
         try
@@ -72,7 +90,31 @@ public sealed class CheckoutService : ICheckoutService
                 return new CheckoutResult(CheckoutOutcomeStatus.ConcurrentInFlight, null, "Duplicate checkout in flight.");
             }
 
-            if (!string.Equals(existing.RequestHash, requestHash, StringComparison.Ordinal))
+            if (existing.ExpiresAtUtc <= now)
+            {
+                await _dbContext.CheckoutRequests
+                    .Where(r => r.Id == existing.Id && r.ExpiresAtUtc <= now)
+                    .ExecuteDeleteAsync(cancellationToken);
+
+                return new CheckoutResult(
+                    CheckoutOutcomeStatus.ValidationFailed,
+                    null,
+                    "Expired idempotency key was cleared; please retry.");
+            }
+
+            var effectiveHash = requestHash;
+            OrderDto? completedOrder = null;
+            if (string.IsNullOrEmpty(cartSignature) && existing.Status == CheckoutRequestStatus.Completed && existing.OrderId.HasValue)
+            {
+                completedOrder = await LoadOrderDtoAsync(_dbContext, storeId, existing.OrderId.Value, cancellationToken);
+                if (completedOrder is not null)
+                {
+                    var orderCartSignature = string.Join(",", completedOrder.Items.OrderBy(i => i.ProductId).Select(i => $"{i.ProductId}:{i.Quantity}"));
+                    effectiveHash = ComputeRequestHash(storeId, customerId, command, orderCartSignature);
+                }
+            }
+
+            if (!string.Equals(existing.RequestHash, effectiveHash, StringComparison.Ordinal))
             {
                 return new CheckoutResult(
                     CheckoutOutcomeStatus.PayloadMismatch,
@@ -80,7 +122,16 @@ public sealed class CheckoutService : ICheckoutService
                     "Idempotency-Key was already used with a different checkout payload.");
             }
 
-            if (existing.Status == CheckoutRequestStatus.InProgress)
+            if (existing.Status == CheckoutRequestStatus.Completed && existing.OrderId.HasValue)
+            {
+                var replayedOrder = completedOrder ?? await LoadOrderDtoAsync(_dbContext, storeId, existing.OrderId.Value, cancellationToken);
+                if (replayedOrder is not null)
+                {
+                    return new CheckoutResult(CheckoutOutcomeStatus.Replayed, replayedOrder);
+                }
+            }
+
+            if (existing.Status == CheckoutRequestStatus.InProgress && existing.LeaseExpiresAtUtc > now)
             {
                 return new CheckoutResult(
                     CheckoutOutcomeStatus.ConcurrentInFlight,
@@ -88,28 +139,39 @@ public sealed class CheckoutService : ICheckoutService
                     "A checkout request with this Idempotency-Key is currently in progress.");
             }
 
-            if (existing.Status == CheckoutRequestStatus.Completed && existing.OrderId.HasValue)
+            // Stale InProgress lease expired OR previous Failed attempt: attempt atomic lease reclaim
+            var reclaimedRows = await _dbContext.CheckoutRequests
+                .Where(r =>
+                    r.Id == existing.Id &&
+                    r.ClaimToken == existing.ClaimToken &&
+                    ((r.Status == CheckoutRequestStatus.InProgress && r.LeaseExpiresAtUtc <= now) ||
+                     r.Status == CheckoutRequestStatus.Failed))
+                .ExecuteUpdateAsync(
+                    s => s
+                        .SetProperty(r => r.Status, CheckoutRequestStatus.InProgress)
+                        .SetProperty(r => r.ClaimToken, claimToken)
+                        .SetProperty(r => r.LastAttemptAtUtc, now)
+                        .SetProperty(r => r.LeaseExpiresAtUtc, now.Add(CheckoutRequest.DefaultLeaseDuration)),
+                    cancellationToken);
+
+            if (reclaimedRows == 0)
             {
-                var replayedOrder = await LoadOrderDtoAsync(storeId, existing.OrderId.Value, cancellationToken);
-                if (replayedOrder is not null)
-                {
-                    return new CheckoutResult(CheckoutOutcomeStatus.Replayed, replayedOrder);
-                }
+                return new CheckoutResult(
+                    CheckoutOutcomeStatus.ConcurrentInFlight,
+                    null,
+                    "A checkout request with this Idempotency-Key is currently being recovered or completed.");
             }
 
-            return new CheckoutResult(
-                CheckoutOutcomeStatus.ValidationFailed,
-                null,
-                "Previous checkout attempt for this Idempotency-Key failed.");
+            claim = (await _dbContext.CheckoutRequests
+                .SingleAsync(r => r.Id == existing.Id && r.ClaimToken == claimToken, cancellationToken));
         }
 
-        // Step 2: Execute transactional checkout after atomic claim succeeded
+        // Step 2: Execute single atomic SaveChangesAsync transaction (Order + OrderItems + InventoryItems + CartItems + Claim)
         try
         {
             if (cart is null || cart.Items.Count == 0)
             {
-                claim.MarkFailed(400);
-                await _dbContext.SaveChangesAsync(cancellationToken);
+                await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 400, cancellationToken);
                 return new CheckoutResult(CheckoutOutcomeStatus.ValidationFailed, null, "Cart is empty.");
             }
 
@@ -120,8 +182,7 @@ public sealed class CheckoutService : ICheckoutService
 
             if (store?.Settings?.Currency is null || !store.IsPubliclyAccessible)
             {
-                claim.MarkFailed(404);
-                await _dbContext.SaveChangesAsync(cancellationToken);
+                await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 404, cancellationToken);
                 return new CheckoutResult(CheckoutOutcomeStatus.ValidationFailed, null, "Store is not active.");
             }
 
@@ -131,8 +192,7 @@ public sealed class CheckoutService : ICheckoutService
             {
                 if (!command.DeliveryZoneId.HasValue)
                 {
-                    claim.MarkFailed(400);
-                    await _dbContext.SaveChangesAsync(cancellationToken);
+                    await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 400, cancellationToken);
                     return new CheckoutResult(CheckoutOutcomeStatus.ValidationFailed, null, "DeliveryZoneId is required.");
                 }
 
@@ -144,8 +204,7 @@ public sealed class CheckoutService : ICheckoutService
 
                 if (zone is null)
                 {
-                    claim.MarkFailed(400);
-                    await _dbContext.SaveChangesAsync(cancellationToken);
+                    await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 400, cancellationToken);
                     return new CheckoutResult(CheckoutOutcomeStatus.ValidationFailed, null, "Selected delivery zone is unavailable.");
                 }
 
@@ -170,12 +229,11 @@ public sealed class CheckoutService : ICheckoutService
                     !product.Category.IsActive ||
                     product.InventoryItem is null)
                 {
-                    claim.MarkFailed(409);
-                    await _dbContext.SaveChangesAsync(cancellationToken);
+                    await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 409, cancellationToken);
                     return new CheckoutResult(
                         CheckoutOutcomeStatus.ValidationFailed,
                         null,
-                        $"Product '{cartItem.ProductId}' is no longer available.");
+                        "One or more items in your cart are unavailable. Please review your cart and retry.");
                 }
 
                 product.InventoryItem.Reserve(cartItem.Quantity);
@@ -209,24 +267,99 @@ public sealed class CheckoutService : ICheckoutService
 
             _dbContext.Orders.Add(order);
             _dbContext.CartItems.RemoveRange(cart.Items);
-            claim.MarkCompleted(order.Id, 201);
+            claim.MarkCompleted(order.Id, 201, now);
 
             await _dbContext.SaveChangesAsync(cancellationToken);
 
-            var dto = OrderService.Map(order);
-            return new CheckoutResult(CheckoutOutcomeStatus.Created, dto);
+            return new CheckoutResult(CheckoutOutcomeStatus.Created, OrderService.Map(order));
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or DbUpdateConcurrencyException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            claim.MarkFailed(409);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            return new CheckoutResult(CheckoutOutcomeStatus.ValidationFailed, null, ex.Message);
+            // Do not swallow cancellation/shutdown; check independent DB state in case commit already succeeded.
+            var committed = await TryReadCompletedOrderInNewScopeAsync(storeId, claim.Id, CancellationToken.None);
+            if (committed is not null)
+            {
+                return new CheckoutResult(CheckoutOutcomeStatus.Replayed, committed);
+            }
+
+            throw;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or DbUpdateConcurrencyException or DbUpdateException or SqlException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Checkout failed for StoreId={StoreId} ClaimId={ClaimId}; verifying committed state before marking Failed.",
+                storeId,
+                claim.Id);
+
+            // Clear all tracked mutations (e.g. partially reserved InventoryItems) before Read-After-Error.
+            _dbContext.ChangeTracker.Clear();
+
+            var committed = await TryReadCompletedOrderInNewScopeAsync(storeId, claim.Id, cancellationToken);
+            if (committed is not null)
+            {
+                return new CheckoutResult(CheckoutOutcomeStatus.Replayed, committed);
+            }
+
+            await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 409, cancellationToken);
+
+            return new CheckoutResult(
+                CheckoutOutcomeStatus.ValidationFailed,
+                null,
+                "Checkout could not be completed because item availability or order preconditions changed. Please review your cart and retry.");
         }
     }
 
-    private async Task<OrderDto?> LoadOrderDtoAsync(Guid storeId, Guid orderId, CancellationToken cancellationToken)
+    private async Task MarkClaimFailedIfOwnedAsync(
+        Guid claimId,
+        Guid claimToken,
+        int statusCode,
+        CancellationToken cancellationToken)
     {
-        var order = await _dbContext.Orders
+        _dbContext.ChangeTracker.Clear();
+        await _dbContext.CheckoutRequests
+            .Where(r => r.Id == claimId && r.ClaimToken == claimToken && r.Status == CheckoutRequestStatus.InProgress)
+            .ExecuteUpdateAsync(
+                s => s
+                    .SetProperty(r => r.Status, CheckoutRequestStatus.Failed)
+                    .SetProperty(r => r.ResponseStatusCode, statusCode),
+                cancellationToken);
+    }
+
+    private async Task<OrderDto?> TryReadCompletedOrderInNewScopeAsync(
+        Guid storeId,
+        Guid claimId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var freshDb = scope.ServiceProvider.GetRequiredService<RetailFlowDbContext>();
+
+            var freshClaim = await freshDb.CheckoutRequests
+                .AsNoTracking()
+                .SingleOrDefaultAsync(r => r.Id == claimId, cancellationToken);
+
+            if (freshClaim?.Status == CheckoutRequestStatus.Completed && freshClaim.OrderId.HasValue)
+            {
+                return await LoadOrderDtoAsync(freshDb, storeId, freshClaim.OrderId.Value, cancellationToken);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Read-After-Error failed for ClaimId={ClaimId}.", claimId);
+        }
+
+        return null;
+    }
+
+    private static async Task<OrderDto?> LoadOrderDtoAsync(
+        RetailFlowDbContext db,
+        Guid storeId,
+        Guid orderId,
+        CancellationToken cancellationToken)
+    {
+        var order = await db.Orders
             .AsNoTracking()
             .Include(o => o.Items)
             .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
@@ -237,9 +370,10 @@ public sealed class CheckoutService : ICheckoutService
     private static string ComputeRequestHash(
         Guid storeId,
         Guid customerId,
-        CheckoutCommand command)
+        CheckoutCommand command,
+        string cartSignature)
     {
-        var canonical = $"{storeId:N}|{customerId:N}|{(int)command.FulfillmentMode}|{command.DeliveryZoneId:N}|{command.DeliveryAddress?.Trim()}";
+        var canonical = $"{storeId:N}|{customerId:N}|{(int)command.FulfillmentMode}|{command.DeliveryZoneId:N}|{command.DeliveryAddress?.Trim()}|{cartSignature}";
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexString(bytes);
     }

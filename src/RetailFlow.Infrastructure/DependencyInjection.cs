@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -43,6 +44,43 @@ public static class DependencyInjection
 
             options.UseSqlServer(connectionString);
         });
+
+        services.Configure<EmailSettings>(configuration.GetSection("Email"));
+        services.AddSingleton<IValidateOptions<EmailSettings>>(_ =>
+            new EmailSettingsValidator(isDevelopment));
+        services.AddOptions<EmailSettings>().ValidateOnStart();
+        services.AddScoped<IRetailFlowEmailSender, SmtpEmailSender>();
+
+        services.Configure<DataProtectionTokenProviderOptions>(options =>
+        {
+            options.TokenLifespan = TimeSpan.FromMinutes(30);
+        });
+
+        services.AddScoped<IIdentityLookupScopeAccessor, IdentityLookupScopeAccessor>();
+        services.AddScoped<IPasswordHasher<RetailFlowIdentityUser>, RetailFlowPasswordHasher>();
+        services.AddScoped<IUserValidator<RetailFlowIdentityUser>, RetailFlowUserValidator>();
+        services.AddScoped<IUserClaimsPrincipalFactory<RetailFlowIdentityUser>, RetailFlowClaimsPrincipalFactory>();
+
+        services
+            .AddIdentityCore<RetailFlowIdentityUser>(options =>
+            {
+                options.User.RequireUniqueEmail = false;
+                options.Password.RequiredLength = 8;
+                options.Password.RequireDigit = false;
+                options.Password.RequireLowercase = false;
+                options.Password.RequireUppercase = false;
+                options.Password.RequireNonAlphanumeric = false;
+                options.Lockout.AllowedForNewUsers = true;
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+                options.SignIn.RequireConfirmedEmail = false;
+            })
+            .AddRoles<RetailFlowIdentityRole>()
+            .AddEntityFrameworkStores<RetailFlowDbContext>()
+            .AddUserStore<ScopedUserStore>()
+            .AddClaimsPrincipalFactory<RetailFlowClaimsPrincipalFactory>()
+            .AddSignInManager()
+            .AddDefaultTokenProviders();
 
         services.AddScoped<IStoreRequestContextAccessor, StoreRequestContextAccessor>();
         services.AddScoped<IStoreDirectoryResolver, StoreDirectoryResolver>();

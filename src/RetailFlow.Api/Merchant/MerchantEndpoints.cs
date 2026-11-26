@@ -160,11 +160,17 @@ public static class MerchantEndpoints
         });
 
         group.MapGet("/orders", async Task<IResult> (
+            int? page,
+            int? pageSize,
             IStoreRequestContextAccessor accessor,
             IOrderService orderService,
             CancellationToken ct) =>
         {
-            var orders = await orderService.GetMerchantOrdersAsync(accessor.Current!.StoreId, ct);
+            var orders = await orderService.GetMerchantOrdersAsync(
+                accessor.Current!.StoreId,
+                page ?? 1,
+                pageSize ?? 20,
+                ct);
             return TypedResults.Ok(orders);
         });
 

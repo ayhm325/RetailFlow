@@ -24,27 +24,48 @@ public static class PlatformAdminEndpoints
         group.MapPost("/{storeId:guid}/approve", async Task<IResult> (
             Guid storeId,
             IPlatformStoreService platformService,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var ok = await platformService.ApproveStoreAsync(storeId, ct);
+            if (ok)
+            {
+                loggerFactory.CreateLogger("RetailFlow.Audit.Platform")
+                    .LogInformation("Audit: StoreApproved StoreId={StoreId}", storeId);
+            }
+
             return ok ? TypedResults.NoContent() : TypedResults.NotFound();
         });
 
         group.MapPost("/{storeId:guid}/reject", async Task<IResult> (
             Guid storeId,
             IPlatformStoreService platformService,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var ok = await platformService.RejectStoreAsync(storeId, ct);
+            if (ok)
+            {
+                loggerFactory.CreateLogger("RetailFlow.Audit.Platform")
+                    .LogInformation("Audit: StoreRejected StoreId={StoreId}", storeId);
+            }
+
             return ok ? TypedResults.NoContent() : TypedResults.NotFound();
         });
 
         group.MapPost("/{storeId:guid}/suspend", async Task<IResult> (
             Guid storeId,
             IPlatformStoreService platformService,
+            ILoggerFactory loggerFactory,
             CancellationToken ct) =>
         {
             var ok = await platformService.SuspendStoreAsync(storeId, ct);
+            if (ok)
+            {
+                loggerFactory.CreateLogger("RetailFlow.Audit.Platform")
+                    .LogInformation("Audit: StoreSuspended StoreId={StoreId}", storeId);
+            }
+
             return ok ? TypedResults.NoContent() : TypedResults.NotFound();
         });
 
