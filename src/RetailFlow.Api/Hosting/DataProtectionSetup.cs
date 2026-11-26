@@ -1,5 +1,8 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using System.Security.Cryptography.Xml;
+using System.Xml;
+using System.Xml.Linq;
 
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.DataProtection.KeyManagement;
@@ -53,7 +56,9 @@ internal static class DataProtectionSetup
         services.Configure<RetailFlowDataProtectionOptions>(section);
 
         services.AddSingleton<IValidateOptions<RetailFlowDataProtectionOptions>>(
-            _ => new RetailFlowDataProtectionOptionsValidator(environment, effectiveTimeProvider));
+            sp => new RetailFlowDataProtectionOptionsValidator(
+                environment,
+                timeProvider ?? sp.GetService<TimeProvider>() ?? TimeProvider.System));
         services.AddOptions<RetailFlowDataProtectionOptions>().ValidateOnStart();
 
         services.AddDataProtection()
@@ -65,6 +70,7 @@ internal static class DataProtectionSetup
         services.AddSingleton<ICertificateResolver>(sp =>
         {
             var opts = sp.GetRequiredService<IOptions<RetailFlowDataProtectionOptions>>().Value;
+            var tp = timeProvider ?? sp.GetService<TimeProvider>() ?? TimeProvider.System;
             var certs = new Dictionary<string, X509Certificate2>(StringComparer.OrdinalIgnoreCase);
 
             if (!string.IsNullOrWhiteSpace(opts.CertificatePath))
@@ -74,7 +80,7 @@ internal static class DataProtectionSetup
                     opts.CertificatePassword,
                     opts.CertificateThumbprint,
                     requireCurrentlyValidWindow: true,
-                    effectiveTimeProvider.GetUtcNow(),
+                    tp.GetUtcNow(),
                     "primary");
                 certs[NormalizeThumbprint(primaryCert.Thumbprint)] = primaryCert;
 
@@ -92,7 +98,7 @@ internal static class DataProtectionSetup
                         prev.CertificatePassword,
                         prev.CertificateThumbprint,
                         requireCurrentlyValidWindow: false,
-                        effectiveTimeProvider.GetUtcNow(),
+                        tp.GetUtcNow(),
                         $"previous[{i}]");
                     certs[NormalizeThumbprint(prevCert.Thumbprint)] = prevCert;
                 }
@@ -102,9 +108,10 @@ internal static class DataProtectionSetup
         });
 
         services.AddOptions<KeyManagementOptions>()
-            .Configure<IOptions<RetailFlowDataProtectionOptions>, ILoggerFactory>((kmOptions, dpOptionsAccessor, loggerFactory) =>
+            .Configure<IOptions<RetailFlowDataProtectionOptions>, ILoggerFactory, IServiceProvider>((kmOptions, dpOptionsAccessor, loggerFactory, sp) =>
             {
                 var opts = dpOptionsAccessor.Value;
+                var tp = timeProvider ?? sp.GetService<TimeProvider>() ?? TimeProvider.System;
                 kmOptions.NewKeyLifetime = TimeSpan.FromDays(Math.Clamp(opts.DefaultKeyLifetimeDays, 7, 365));
 
                 if (!string.IsNullOrWhiteSpace(opts.CertificatePath))
@@ -114,16 +121,90 @@ internal static class DataProtectionSetup
                         opts.CertificatePassword,
                         opts.CertificateThumbprint,
                         requireCurrentlyValidWindow: true,
-                        effectiveTimeProvider.GetUtcNow(),
+                        tp.GetUtcNow(),
                         "primary");
 
-                    kmOptions.XmlEncryptor = new CertificateXmlEncryptor(primaryCert, loggerFactory);
+                    kmOptions.XmlEncryptor = new RetailFlowCertificateXmlEncryptor(primaryCert, loggerFactory);
                 }
             });
 
         services.AddHostedService<DataProtectionDiagnosticsHostedService>();
 
         return services;
+    }
+
+    private sealed class RetailFlowCertificateXmlEncryptor(
+        X509Certificate2 primaryCertificate,
+        ILoggerFactory loggerFactory) : IXmlEncryptor
+    {
+        private readonly CertificateXmlEncryptor _inner = new(primaryCertificate, loggerFactory);
+
+        public EncryptedXmlInfo Encrypt(XElement plaintextElement)
+        {
+            var innerInfo = _inner.Encrypt(plaintextElement);
+            return new EncryptedXmlInfo(innerInfo.EncryptedElement, typeof(RetailFlowCertificateXmlDecryptor));
+        }
+    }
+
+    private sealed class RetailFlowCertificateXmlDecryptor(
+        IServiceProvider services) : IXmlDecryptor
+    {
+        private readonly ICertificateResolver _certificateResolver = services.GetRequiredService<ICertificateResolver>();
+
+        public XElement Decrypt(XElement encryptedElement)
+        {
+            var doc = new XmlDocument { PreserveWhitespace = true };
+            using (var reader = encryptedElement.CreateReader())
+            {
+                doc.Load(reader);
+            }
+
+            var encryptedXml = new ResolverAwareEncryptedXml(doc, _certificateResolver);
+            encryptedXml.DecryptDocument();
+
+            using var nodeReader = new XmlNodeReader(doc.DocumentElement!);
+            return XElement.Load(nodeReader);
+        }
+
+        private sealed class ResolverAwareEncryptedXml(
+            XmlDocument document,
+            ICertificateResolver certificateResolver) : EncryptedXml(document)
+        {
+            public override byte[]? DecryptEncryptedKey(EncryptedKey encryptedKey)
+            {
+                if (encryptedKey?.KeyInfo is not null && encryptedKey.CipherData?.CipherValue is not null)
+                {
+                    var useOaep = string.Equals(
+                        encryptedKey.EncryptionMethod?.KeyAlgorithm,
+                        XmlEncRSAOAEPUrl,
+                        StringComparison.Ordinal);
+
+                    foreach (var clause in encryptedKey.KeyInfo)
+                    {
+                        if (clause is KeyInfoX509Data x509Data && x509Data.Certificates is not null)
+                        {
+                            foreach (var entry in x509Data.Certificates)
+                            {
+                                if (entry is X509Certificate2 embeddedCert)
+                                {
+                                    var resolved = certificateResolver.ResolveCertificate(embeddedCert.Thumbprint);
+                                    if (resolved is not null)
+                                    {
+                                        using var rsa = resolved.GetRSAPrivateKey();
+                                        if (rsa is not null)
+                                        {
+                                            return DecryptKey(encryptedKey.CipherData.CipherValue, rsa, useOaep);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                return base.DecryptEncryptedKey(encryptedKey!);
+            }
+        }
     }
 
     private sealed class RetailFlowCertificateResolver(
@@ -254,8 +335,13 @@ internal static class DataProtectionSetup
                     "DataProtection:DefaultKeyLifetimeDays must be between 7 and 365.");
             }
 
+            if (environment.IsProduction() && !options.RequireCertificateInProduction)
+            {
+                return ValidateOptionsResult.Fail(
+                    "DataProtection:RequireCertificateInProduction cannot be disabled in Production.");
+            }
+
             if (environment.IsProduction() &&
-                options.RequireCertificateInProduction &&
                 string.IsNullOrWhiteSpace(options.CertificatePath))
             {
                 return ValidateOptionsResult.Fail(

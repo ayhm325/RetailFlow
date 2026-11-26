@@ -146,13 +146,14 @@ public sealed class ProductHostIntegrationTests
                 builder.UseSetting("FORWARDEDHEADERS_ENABLED", "true");
                 builder.ConfigureAppConfiguration((_, config) =>
                 {
-                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    var values = new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = ProductionHost,
                         ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;",
-                        ["DataProtection:RequireCertificateInProduction"] = "false",
                         ["Email:RequireConfiguredInProduction"] = "false"
-                    });
+                    };
+                    TestDataProtectionCertHelper.ApplyTestCertificate(values);
+                    config.AddInMemoryCollection(values);
                 });
             });
 
@@ -179,13 +180,14 @@ public sealed class ProductHostIntegrationTests
                 builder.UseEnvironment(Microsoft.Extensions.Hosting.Environments.Production);
                 builder.ConfigureAppConfiguration((_, config) =>
                 {
-                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    var values = new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = ProductionHost,
                         ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;",
-                        ["DataProtection:RequireCertificateInProduction"] = "false",
                         ["Email:RequireConfiguredInProduction"] = "false"
-                    });
+                    };
+                    TestDataProtectionCertHelper.ApplyTestCertificate(values);
+                    config.AddInMemoryCollection(values);
                 });
                 builder.ConfigureServices(services =>
                 {
@@ -374,9 +376,9 @@ public sealed class ProductHostIntegrationTests
                     var values = new Dictionary<string, string?>
                     {
                         ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;",
-                        ["DataProtection:RequireCertificateInProduction"] = "false",
                         ["Email:RequireConfiguredInProduction"] = "false"
                     };
+                    TestDataProtectionCertHelper.ApplyTestCertificate(values);
                     if (allowedHosts is not null)
                     {
                         values["AllowedHosts"] = allowedHosts;

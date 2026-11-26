@@ -1445,14 +1445,15 @@ public sealed class CatalogSqlTestFixture : IAsyncLifetime
                 builder.UseEnvironment("Production");
                 builder.ConfigureAppConfiguration((_, config) =>
                 {
-                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    var values = new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = "retail.example.com",
                         ["RETAILFLOW_CONNECTION"] = effectiveConnection,
                         ["ConnectionStrings:RetailFlow"] = effectiveConnection,
-                        ["DataProtection:RequireCertificateInProduction"] = "false",
                         ["Email:RequireConfiguredInProduction"] = "false"
-                    });
+                    };
+                    TestDataProtectionCertHelper.ApplyTestCertificate(values);
+                    config.AddInMemoryCollection(values);
                 });
             });
     }

@@ -33,9 +33,9 @@
 | `Email:RequireConfiguredInProduction` | الافتراضي `true`؛ يفشل startup (fail-closed) في `Production` إذا غابت إعدادات SMTP أو `PublicBaseUrl` أو كان `EnableSsl = false` |
 | `PlatformSecurity:RequireAdminMfa` | الافتراضي `true`؛ يمنع `PlatformAdmin` غير المسجّل أو غير المتحقق بـ MFA من `/api/platform/stores/*`، ويرفض بدء التشغيل في `Production` إذا عُيّن إلى `false` عبر `PlatformSecurityOptionsValidator` |
 | `DataProtection:CertificatePath` / `CertificatePassword` / `CertificateThumbprint` | شهادة X.509 (PKCS#12 مع مفتاح خاص وصلاحية سارية ومطابقة thumbprint اختيارية) لتشفير مفاتيح Data Protection في SQL Server (`DataProtectionSetup.cs`) |
-| `DataProtection:PreviousCertificates` | قائمة شهادات سابقة (`CertificatePath` / `CertificatePassword` / `CertificateThumbprint`) لفك تشفير المفاتيح التاريخية أثناء تدوير الشهادة عبر `UnprotectKeysWithAnyCertificate` |
+| `DataProtection:PreviousCertificates` | قائمة شهادات سابقة (`CertificatePath` / `CertificatePassword` / `CertificateThumbprint`) لفك تشفير المفاتيح التاريخية أثناء تدوير الشهادة عبر `RetailFlowCertificateResolver` (`ICertificateResolver`) |
 | `DataProtection:DefaultKeyLifetimeDays` | عمر المفتاح الافتراضي بالأيام (الافتراضي `90`، مقيد بين `7` و`365`) |
-| `DataProtection:RequireCertificateInProduction` | الافتراضي `true`؛ يفشل startup (fail-closed) في Production إذا غابت شهادة Data Protection أو كانت غير صالحة |
+| `DataProtection:RequireCertificateInProduction` | الافتراضي `true`؛ شهادة X.509 إلزامية في `Production` ولا يمكن تعطيلها (`false` يفشل `ValidateOnStart`) |
 | سياسة كلمات المرور (`DependencyInjection.cs` / `RetailFlowPasswordValidator.cs`) | الحد الأدنى `15` حرفاً والحد الأقصى `1024` حرفاً، تطبيع Unicode NFC، حظر كلمات المرور الشائعة/الأنماط المتكررة، قفل الحساب بعد `5` محاولات لمدة `15` دقيقة |
 
 ## 5. Cookie/session

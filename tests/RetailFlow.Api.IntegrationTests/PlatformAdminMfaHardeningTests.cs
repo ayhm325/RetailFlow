@@ -45,9 +45,9 @@ public sealed class PlatformAdminMfaHardeningTests : IClassFixture<CatalogSqlTes
                         ["AllowedHosts"] = "retail.example.com",
                         ["RETAILFLOW_CONNECTION"] = _fixture.ConnectionString,
                         ["ConnectionStrings:RetailFlow"] = _fixture.ConnectionString,
-                        ["DataProtection:RequireCertificateInProduction"] = "false",
                         ["Email:RequireConfiguredInProduction"] = "false"
                     };
+                    TestDataProtectionCertHelper.ApplyTestCertificate(values);
 
                     if (overrides is not null)
                     {
