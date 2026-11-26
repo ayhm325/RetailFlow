@@ -1408,7 +1408,8 @@ public sealed class CatalogSqlTestFixture : IAsyncLifetime
                     {
                         ["AllowedHosts"] = "localhost",
                         ["RETAILFLOW_CONNECTION"] = ConnectionString,
-                        ["ConnectionStrings:RetailFlow"] = ConnectionString
+                        ["ConnectionStrings:RetailFlow"] = ConnectionString,
+                        ["PlatformSecurity:RequireAdminMfa"] = "false"
                     });
                 });
             });
@@ -1448,7 +1449,9 @@ public sealed class CatalogSqlTestFixture : IAsyncLifetime
                     {
                         ["AllowedHosts"] = "retail.example.com",
                         ["RETAILFLOW_CONNECTION"] = effectiveConnection,
-                        ["ConnectionStrings:RetailFlow"] = effectiveConnection
+                        ["ConnectionStrings:RetailFlow"] = effectiveConnection,
+                        ["DataProtection:RequireCertificateInProduction"] = "false",
+                        ["Email:RequireConfiguredInProduction"] = "false"
                     });
                 });
             });

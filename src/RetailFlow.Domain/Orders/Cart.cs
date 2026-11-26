@@ -16,6 +16,8 @@ public sealed class Cart
 
     public DateTimeOffset UpdatedAtUtc { get; private set; }
 
+    public byte[] RowVersion { get; private set; } = [];
+
     public IReadOnlyCollection<CartItem> Items => _items;
 
     public static Cart Create(Guid id, Guid storeId, Guid customerId, DateTimeOffset updatedAtUtc)
@@ -51,6 +53,8 @@ public sealed class CartItem
     public Guid ProductId { get; private set; }
 
     public int Quantity { get; private set; }
+
+    public byte[] RowVersion { get; private set; } = [];
 
     public static CartItem Create(Guid id, Guid storeId, Guid cartId, Guid productId, int quantity)
     {

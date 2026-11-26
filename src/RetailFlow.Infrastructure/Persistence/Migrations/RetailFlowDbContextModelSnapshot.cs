@@ -425,6 +425,12 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");
 
+                    b.Property<DateTimeOffset>("AbsoluteExpiresAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<DateTimeOffset>("CreatedAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
                     b.Property<DateTimeOffset>("ExpiresAtUtc")
                         .HasColumnType("datetimeoffset(3)");
 
@@ -442,6 +448,9 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         .HasColumnType("varbinary(max)");
 
                     b.HasKey("Key");
+
+                    b.HasIndex("AbsoluteExpiresAtUtc")
+                        .HasDatabaseName("IX_SessionTickets_AbsoluteExpiresAtUtc");
 
                     b.HasIndex("ExpiresAtUtc")
                         .HasDatabaseName("IX_SessionTickets_ExpiresAtUtc");
@@ -498,6 +507,12 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("CustomerId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<Guid>("StoreId")
                         .HasColumnType("uniqueidentifier");
 
@@ -529,6 +544,12 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("Quantity")
                         .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<Guid>("StoreId")
                         .HasColumnType("uniqueidentifier");

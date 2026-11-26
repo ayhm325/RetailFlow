@@ -7,7 +7,8 @@
 - Store users ينتمون إلى `StoreId` ويستخدمون Customer أو MerchantOwner.
 - PlatformAdmin مستخدم global حيث StoreId null.
 - `AuthService` يبحث عن المستخدم باستخدام `StoreId + NormalizedEmail` أو منصة بدون StoreId.
-- كلمة المرور تُخزّن كـ PBKDF2-SHA256 encoded string مع version/iteration/salt/hash.
+- كلمة المرور تُخزّن عبر `RetailFlowPasswordHasher` بصيغة ASP.NET Core Identity V3 (PBKDF2-HMAC-SHA512 بـ `220,000` تكرار) مع توافق التجزئات القديمة `v1.` والترقية التلقائية عند الدخول، وتطبيع Unicode NFC.
+- سياسة كلمات المرور المركزية (`DependencyInjection.cs` + `RetailFlowPasswordValidator.cs`) متوافقة مع إرشادات NIST SP 800-63B-4: حد أدنى `15` حرفاً وحد أقصى `1024` حرفاً، دون قيود تركيب أحرف مصطنعة، مع السماح بالمسافات وUnicode، وحظر كلمات المرور الشائعة/المخترقة ومطابقات البريد والاسم والأنماط المتكررة، ودون انتهاء صلاحية دوري تعسفي، مع حماية قفل الحساب (`5` محاولات / `15` دقيقة).
 - Cookie Authentication يصدر principal يحتوي NameIdentifier, Email, Name, Role و`store_id` عند وجوده.
 - SQL ticket store يستخدم `ITicketStore`.
 
@@ -23,9 +24,9 @@
 | SameSite | Lax |
 | Path | `/` |
 | Domain | غير مضبوط في الكود المعاين، وهو مناسب لشرط `__Host-` |
-| SlidingExpiration | true |
-| ExpireTimeSpan | 12 hours |
-| Ticket storage | SQL Server عبر `ITicketStore` |
+| SlidingExpiration | true (مقيد بالمهلة المطلقة `AbsoluteExpiresAtUtc`) |
+| ExpireTimeSpan | idle/absolute حسب الدور: `PlatformAdmin` (`1h`/`8h`)، `MerchantOwner` (`4h`/`24h`)، `Customer` (`12h`/`7d`) |
+| Ticket storage | SQL Server عبر `SqlSessionTicketStore` (`CreatedAtUtc`, `AbsoluteExpiresAtUtc`, `ExpiresAtUtc`, `LastSeenAtUtc`) |
 
 لا تعني هذه القيم أن إدارة الجلسات كاملة؛ راجع فجوات rotation/revocation/cleanup/Data Protection في `10-open-items`.
 

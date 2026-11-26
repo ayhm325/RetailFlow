@@ -105,7 +105,8 @@ public sealed class ProductHostIntegrationTests
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = allowedHosts,
-                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;"
+                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;",
+                        ["Email:RequireConfiguredInProduction"] = "false"
                     });
                 });
             });
@@ -148,7 +149,9 @@ public sealed class ProductHostIntegrationTests
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = ProductionHost,
-                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;"
+                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;",
+                        ["DataProtection:RequireCertificateInProduction"] = "false",
+                        ["Email:RequireConfiguredInProduction"] = "false"
                     });
                 });
             });
@@ -179,7 +182,9 @@ public sealed class ProductHostIntegrationTests
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = ProductionHost,
-                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;"
+                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;",
+                        ["DataProtection:RequireCertificateInProduction"] = "false",
+                        ["Email:RequireConfiguredInProduction"] = "false"
                     });
                 });
                 builder.ConfigureServices(services =>
@@ -368,7 +373,9 @@ public sealed class ProductHostIntegrationTests
                 {
                     var values = new Dictionary<string, string?>
                     {
-                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;"
+                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;",
+                        ["DataProtection:RequireCertificateInProduction"] = "false",
+                        ["Email:RequireConfiguredInProduction"] = "false"
                     };
                     if (allowedHosts is not null)
                     {

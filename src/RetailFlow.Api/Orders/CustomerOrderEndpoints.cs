@@ -21,6 +21,7 @@ public static class CustomerOrderEndpoints
             .AddEndpointFilter<TenantClaimMatchEndpointFilter>();
 
         group.MapGet("/cart", async Task<IResult> (
+            HttpResponse response,
             ClaimsPrincipal user,
             IStoreRequestContextAccessor accessor,
             ICartService cartService,
@@ -28,42 +29,74 @@ public static class CustomerOrderEndpoints
         {
             var customerId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
             var cart = await cartService.GetCartAsync(accessor.Current!.StoreId, customerId, ct);
+            SetCartETag(response, cart.Version);
             return TypedResults.Ok(cart);
         });
 
         group.MapPut("/cart/items", async Task<IResult> (
             UpsertCartItemCommand command,
+            HttpRequest request,
+            HttpResponse response,
             ClaimsPrincipal user,
             IStoreRequestContextAccessor accessor,
             ICartService cartService,
             CancellationToken ct) =>
         {
             var customerId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var cart = await cartService.UpsertItemAsync(accessor.Current!.StoreId, customerId, command, ct);
-            return TypedResults.Ok(cart);
+            var expectedVersion = ParseIfMatchVersion(request);
+            try
+            {
+                var cart = await cartService.UpsertItemAsync(accessor.Current!.StoreId, customerId, command, ct, expectedVersion);
+                SetCartETag(response, cart.Version);
+                return TypedResults.Ok(cart);
+            }
+            catch (CartConcurrencyConflictException ex)
+            {
+                return MapCartConflict(ex);
+            }
         });
 
         group.MapDelete("/cart/items/{productId:guid}", async Task<IResult> (
             Guid productId,
+            HttpRequest request,
+            HttpResponse response,
             ClaimsPrincipal user,
             IStoreRequestContextAccessor accessor,
             ICartService cartService,
             CancellationToken ct) =>
         {
             var customerId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var cart = await cartService.RemoveItemAsync(accessor.Current!.StoreId, customerId, productId, ct);
-            return TypedResults.Ok(cart);
+            var expectedVersion = ParseIfMatchVersion(request);
+            try
+            {
+                var cart = await cartService.RemoveItemAsync(accessor.Current!.StoreId, customerId, productId, ct, expectedVersion);
+                SetCartETag(response, cart.Version);
+                return TypedResults.Ok(cart);
+            }
+            catch (CartConcurrencyConflictException ex)
+            {
+                return MapCartConflict(ex);
+            }
         });
 
         group.MapDelete("/cart", async Task<IResult> (
+            HttpRequest request,
             ClaimsPrincipal user,
             IStoreRequestContextAccessor accessor,
             ICartService cartService,
             CancellationToken ct) =>
         {
             var customerId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            await cartService.ClearCartAsync(accessor.Current!.StoreId, customerId, ct);
-            return TypedResults.NoContent();
+            var expectedVersion = ParseIfMatchVersion(request);
+            try
+            {
+                await cartService.ClearCartAsync(accessor.Current!.StoreId, customerId, ct, expectedVersion);
+                return TypedResults.NoContent();
+            }
+            catch (CartConcurrencyConflictException ex)
+            {
+                return MapCartConflict(ex);
+            }
         });
 
         group.MapPost("/checkout", async Task<IResult> (
@@ -88,9 +121,31 @@ public static class CustomerOrderEndpoints
             {
                 CheckoutOutcomeStatus.Created => TypedResults.Created($"/api/stores/{accessor.Current.StoreSlug}/orders/{result.Order!.Id}", result.Order),
                 CheckoutOutcomeStatus.Replayed => TypedResults.Ok(result.Order),
-                CheckoutOutcomeStatus.ConcurrentInFlight => TypedResults.Problem(statusCode: StatusCodes.Status409Conflict, title: "Conflict", detail: result.ErrorDetail),
-                CheckoutOutcomeStatus.PayloadMismatch => TypedResults.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Idempotency Key Payload Mismatch", detail: result.ErrorDetail),
-                _ => TypedResults.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Checkout Failed", detail: result.ErrorDetail)
+                CheckoutOutcomeStatus.ConcurrentInFlight => TypedResults.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Conflict",
+                    detail: result.ErrorDetail,
+                    extensions: new Dictionary<string, object?> { ["code"] = "checkout_concurrent_in_flight" }),
+                CheckoutOutcomeStatus.ConcurrencyConflict => TypedResults.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Checkout Concurrency Conflict",
+                    detail: result.ErrorDetail,
+                    extensions: new Dictionary<string, object?> { ["code"] = "checkout_concurrency_conflict" }),
+                CheckoutOutcomeStatus.PayloadMismatch => TypedResults.Problem(
+                    statusCode: StatusCodes.Status422UnprocessableEntity,
+                    title: "Idempotency Key Payload Mismatch",
+                    detail: result.ErrorDetail,
+                    extensions: new Dictionary<string, object?> { ["code"] = "checkout_payload_mismatch" }),
+                CheckoutOutcomeStatus.BusinessRuleFailed => TypedResults.Problem(
+                    statusCode: StatusCodes.Status422UnprocessableEntity,
+                    title: "Checkout Business Rule Failed",
+                    detail: result.ErrorDetail,
+                    extensions: new Dictionary<string, object?> { ["code"] = "checkout_business_rule_failed" }),
+                _ => TypedResults.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Checkout Validation Failed",
+                    detail: result.ErrorDetail,
+                    extensions: new Dictionary<string, object?> { ["code"] = "checkout_validation_failed" })
             };
         });
 
@@ -151,5 +206,48 @@ public static class CustomerOrderEndpoints
         });
 
         return app;
+    }
+
+    private static void SetCartETag(HttpResponse response, string version)
+    {
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            response.Headers.ETag = $"\"{version}\"";
+        }
+    }
+
+    private static string? ParseIfMatchVersion(HttpRequest request)
+    {
+        var raw = request.Headers.IfMatch.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var trimmed = raw.Trim();
+        if (string.Equals(trimmed, "*", StringComparison.Ordinal))
+        {
+            return "*";
+        }
+
+        if (trimmed.StartsWith("W/", StringComparison.OrdinalIgnoreCase))
+        {
+            trimmed = trimmed[2..].Trim();
+        }
+
+        return trimmed.Trim('"');
+    }
+
+    private static IResult MapCartConflict(CartConcurrencyConflictException ex)
+    {
+        var status = ex.IsPreconditionFailed
+            ? StatusCodes.Status412PreconditionFailed
+            : StatusCodes.Status409Conflict;
+
+        return TypedResults.Problem(
+            statusCode: status,
+            title: ex.IsPreconditionFailed ? "Precondition Failed" : "Cart Concurrency Conflict",
+            detail: ex.Message,
+            extensions: new Dictionary<string, object?> { ["code"] = "cart_concurrency_conflict" });
     }
 }

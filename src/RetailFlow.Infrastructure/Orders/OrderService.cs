@@ -1,4 +1,9 @@
+using System.Data;
+
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 using RetailFlow.Application.Orders;
 using RetailFlow.Domain.Orders;
@@ -6,18 +11,44 @@ using RetailFlow.Infrastructure.Persistence;
 
 namespace RetailFlow.Infrastructure.Orders;
 
+internal interface IOrderReleaseHook
+{
+    Task OnBeforeSaveOrderReleaseAsync(Guid orderId, int attempt, CancellationToken cancellationToken);
+}
+
 public sealed class OrderService : IOrderService
 {
     public const int MaxPageSize = 50;
     private const int ReservationSweepBatchSize = 50;
+    private const int MaxOrderConcurrencyRetries = 3;
 
     private readonly RetailFlowDbContext _dbContext;
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly ILogger<OrderService> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly IOrderReleaseHook? _releaseHook;
 
-    public OrderService(RetailFlowDbContext dbContext, TimeProvider? timeProvider = null)
+    public OrderService(
+        RetailFlowDbContext dbContext,
+        IServiceScopeFactory scopeFactory,
+        ILogger<OrderService>? logger = null,
+        TimeProvider? timeProvider = null)
+        : this(dbContext, scopeFactory, logger, timeProvider, null)
+    {
+    }
+
+    internal OrderService(
+        RetailFlowDbContext dbContext,
+        IServiceScopeFactory scopeFactory,
+        ILogger<OrderService>? logger,
+        TimeProvider? timeProvider,
+        IOrderReleaseHook? releaseHook)
     {
         _dbContext = dbContext;
+        _scopeFactory = scopeFactory;
+        _logger = logger ?? NullLogger<OrderService>.Instance;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _releaseHook = releaseHook;
     }
 
     public async Task<PagedOrdersResponse> GetCustomerOrdersAsync(
@@ -183,51 +214,142 @@ public sealed class OrderService : IOrderService
     public async Task<int> ReleaseExpiredReservationsAsync(DateTimeOffset utcNow, CancellationToken cancellationToken)
     {
         var releasedCount = 0;
+        var skippedOrderIds = new HashSet<Guid>();
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            _dbContext.ChangeTracker.Clear();
-
-            var batch = await _dbContext.Orders
-                .Include(o => o.Items)
-                .Include(o => o.History)
-                .AsSplitQuery()
-                .Where(o => o.OrderStatus == OrderStatus.Pending && o.ReservationExpiresAtUtc <= utcNow)
+            // Query only candidate Order IDs without tracking so each order executes in an isolated Unit of Work.
+            var candidateIds = await _dbContext.Orders
+                .AsNoTracking()
+                .Where(o =>
+                    o.OrderStatus == OrderStatus.Pending &&
+                    o.ReservationExpiresAtUtc <= utcNow &&
+                    !skippedOrderIds.Contains(o.Id))
                 .OrderBy(o => o.ReservationExpiresAtUtc)
                 .ThenBy(o => o.Id)
+                .Select(o => o.Id)
                 .Take(ReservationSweepBatchSize)
                 .ToListAsync(cancellationToken);
 
-            if (batch.Count == 0)
+            if (candidateIds.Count == 0)
             {
                 break;
             }
 
-            var batchHadConflict = false;
-            foreach (var order in batch)
+            foreach (var orderId in candidateIds)
             {
-                try
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var outcome = await ReleaseSingleExpiredOrderAsync(orderId, utcNow, cancellationToken);
+                if (outcome == OrderReleaseOutcome.Released)
                 {
-                    order.CancelByMerchantOrTimeout(null, "System", "Reservation expired (15-minute timeout)", utcNow);
-                    await ReleaseOrderReservationsAsync(order, cancellationToken);
-                    await _dbContext.SaveChangesAsync(cancellationToken);
                     releasedCount++;
                 }
-                catch (DbUpdateConcurrencyException)
+                else if (outcome == OrderReleaseOutcome.Skipped)
                 {
-                    // Another worker instance concurrently updated/released this order; clear tracker and skip.
-                    batchHadConflict = true;
-                    _dbContext.ChangeTracker.Clear();
+                    skippedOrderIds.Add(orderId);
                 }
             }
 
-            if (batch.Count < ReservationSweepBatchSize && !batchHadConflict)
+            if (candidateIds.Count < ReservationSweepBatchSize)
             {
                 break;
             }
         }
 
         return releasedCount;
+    }
+
+    private enum OrderReleaseOutcome
+    {
+        Released = 1,
+        AlreadyProcessed = 2,
+        Skipped = 3
+    }
+
+    private async Task<OrderReleaseOutcome> ReleaseSingleExpiredOrderAsync(
+        Guid orderId,
+        DateTimeOffset utcNow,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= MaxOrderConcurrencyRetries; attempt++)
+        {
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var unitDb = scope.ServiceProvider.GetRequiredService<RetailFlowDbContext>();
+
+            Guid? storeId = null;
+            try
+            {
+                await using var tx = await unitDb.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+
+                var order = await unitDb.Orders
+                    .Include(o => o.Items)
+                    .Include(o => o.History)
+                    .AsSplitQuery()
+                    .SingleOrDefaultAsync(o => o.Id == orderId, cancellationToken);
+
+                if (order is null || order.OrderStatus != OrderStatus.Pending || order.ReservationExpiresAtUtc > utcNow)
+                {
+                    await tx.CommitAsync(cancellationToken);
+                    return OrderReleaseOutcome.AlreadyProcessed;
+                }
+
+                storeId = order.StoreId;
+                order.CancelByMerchantOrTimeout(null, "System", "Reservation expired (15-minute timeout)", utcNow);
+                await ReleaseOrderReservationsAsync(unitDb, order, cancellationToken);
+
+                if (_releaseHook is not null)
+                {
+                    await _releaseHook.OnBeforeSaveOrderReleaseAsync(order.Id, attempt, cancellationToken);
+                }
+
+                await unitDb.SaveChangesAsync(cancellationToken);
+                await tx.CommitAsync(cancellationToken);
+
+                _logger.LogInformation(
+                    "Expired order reservation released. StoreId={StoreId} OrderId={OrderId} Attempt={Attempt} Outcome={Outcome}",
+                    storeId,
+                    orderId,
+                    attempt,
+                    "Released");
+
+                return OrderReleaseOutcome.Released;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Concurrency conflict releasing expired order. StoreId={StoreId} OrderId={OrderId} Attempt={Attempt} ExceptionType={ExceptionType} Outcome={Outcome}",
+                    storeId,
+                    orderId,
+                    attempt,
+                    ex.GetType().Name,
+                    attempt < MaxOrderConcurrencyRetries ? "Retrying" : "ConcurrencyExhausted");
+
+                if (attempt == MaxOrderConcurrencyRetries)
+                {
+                    return OrderReleaseOutcome.Skipped;
+                }
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+            {
+                _logger.LogError(
+                    ex,
+                    "Domain/state error releasing expired order; skipping order. StoreId={StoreId} OrderId={OrderId} Attempt={Attempt} ExceptionType={ExceptionType} Outcome={Outcome}",
+                    storeId,
+                    orderId,
+                    attempt,
+                    ex.GetType().Name,
+                    "Skipped");
+                return OrderReleaseOutcome.Skipped;
+            }
+        }
+
+        return OrderReleaseOutcome.Skipped;
     }
 
     private static async Task<PagedOrdersResponse> ExecutePagedOrderQueryAsync(
@@ -269,10 +391,13 @@ public sealed class OrderService : IOrderService
             orders.Select(Map).ToList());
     }
 
-    private async Task ReleaseOrderReservationsAsync(Order order, CancellationToken cancellationToken)
+    private static async Task ReleaseOrderReservationsAsync(
+        RetailFlowDbContext dbContext,
+        Order order,
+        CancellationToken cancellationToken)
     {
         var productIds = order.Items.Select(i => i.ProductId).Distinct().ToList();
-        var inventories = await _dbContext.InventoryItems
+        var inventories = await dbContext.InventoryItems
             .Where(i => i.StoreId == order.StoreId && productIds.Contains(i.ProductId))
             .ToDictionaryAsync(i => i.ProductId, cancellationToken);
 
@@ -284,6 +409,9 @@ public sealed class OrderService : IOrderService
             }
         }
     }
+
+    private Task ReleaseOrderReservationsAsync(Order order, CancellationToken cancellationToken) =>
+        ReleaseOrderReservationsAsync(_dbContext, order, cancellationToken);
 
     private async Task CommitOrderReservationsAsync(Order order, CancellationToken cancellationToken)
     {

@@ -53,12 +53,12 @@ public sealed class IdentityAdoptionIntegrationTests : IClassFixture<CatalogSqlT
             // 1. Register same email independently in Store A and Store B
             using var regA = await clientA.PostAsJsonAsync(
                 $"/api/stores/{storeA.Slug}/auth/register",
-                new RegisterCustomerCommand(sharedEmail, "User Alpha", "Str0ngPass!A"));
+                new RegisterCustomerCommand(sharedEmail, "User Alpha", "Str0ngPassphrase!A"));
             Assert.Equal(HttpStatusCode.Created, regA.StatusCode);
 
             using var regB = await clientB.PostAsJsonAsync(
                 $"/api/stores/{storeB.Slug}/auth/register",
-                new RegisterCustomerCommand(sharedEmail, "User Beta", "Str0ngPass!B"));
+                new RegisterCustomerCommand(sharedEmail, "User Beta", "Str0ngPassphrase!B"));
             Assert.Equal(HttpStatusCode.Created, regB.StatusCode);
 
             var dtoA = await regA.Content.ReadFromJsonAsync<AuthenticatedUserDto>();
@@ -71,7 +71,7 @@ public sealed class IdentityAdoptionIntegrationTests : IClassFixture<CatalogSqlT
             using var anonClient = _fixture.CreateHttpsClient();
             using var crossLogin = await anonClient.PostAsJsonAsync(
                 $"/api/stores/{storeB.Slug}/auth/login",
-                new LoginCommand(sharedEmail, "Str0ngPass!A"));
+                new LoginCommand(sharedEmail, "Str0ngPassphrase!A"));
             Assert.Equal(HttpStatusCode.Unauthorized, crossLogin.StatusCode);
 
             // 3. Store A cookie is rejected on Store B /auth/me with 403 Forbidden (preserving Store A session)
@@ -127,7 +127,7 @@ public sealed class IdentityAdoptionIntegrationTests : IClassFixture<CatalogSqlT
 
             using var reg = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/register",
-                new RegisterCustomerCommand(email, "Sec User", "Str0ngPass!1"));
+                new RegisterCustomerCommand(email, "Sec User", "Str0ngPassphrase!1"));
             Assert.Equal(HttpStatusCode.Created, reg.StatusCode);
             var userDto = await reg.Content.ReadFromJsonAsync<AuthenticatedUserDto>();
             Assert.NotNull(userDto);
@@ -157,7 +157,7 @@ public sealed class IdentityAdoptionIntegrationTests : IClassFixture<CatalogSqlT
 
             using var resetResp = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/reset-password",
-                new ResetPasswordCommand(email, resetToken, "NewStr0ngPass!2"));
+                new ResetPasswordCommand(email, resetToken, "NewStr0ngPassphrase!2"));
             Assert.Equal(HttpStatusCode.NoContent, resetResp.StatusCode);
 
             using var staleMe = await client.GetAsync($"/api/stores/{store.Slug}/auth/me");
@@ -182,7 +182,7 @@ public sealed class IdentityAdoptionIntegrationTests : IClassFixture<CatalogSqlT
 
             using var validDuringLockout = await lockoutClient.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/login",
-                new LoginCommand(email, "NewStr0ngPass!2"));
+                new LoginCommand(email, "NewStr0ngPassphrase!2"));
             Assert.Equal(HttpStatusCode.Locked, validDuringLockout.StatusCode);
 
             // Clear lockout and test 2FA setup + recovery code sign-in
@@ -198,12 +198,12 @@ public sealed class IdentityAdoptionIntegrationTests : IClassFixture<CatalogSqlT
 
             using var loginOk = await lockoutClient.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/login",
-                new LoginCommand(email, "NewStr0ngPass!2"));
+                new LoginCommand(email, "NewStr0ngPassphrase!2"));
             Assert.Equal(HttpStatusCode.OK, loginOk.StatusCode);
 
             using var setup2fa = await lockoutClient.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/2fa/setup",
-                new BeginTwoFactorSetupCommand("NewStr0ngPass!2"));
+                new BeginTwoFactorSetupCommand("NewStr0ngPassphrase!2"));
             Assert.Equal(HttpStatusCode.OK, setup2fa.StatusCode);
             var setupDto = await setup2fa.Content.ReadFromJsonAsync<TwoFactorSetupDto>();
             Assert.NotNull(setupDto);
@@ -225,12 +225,12 @@ public sealed class IdentityAdoptionIntegrationTests : IClassFixture<CatalogSqlT
             using var freshClient = _fixture.CreateHttpsClient();
             using var missing2fa = await freshClient.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/login",
-                new LoginCommand(email, "NewStr0ngPass!2"));
+                new LoginCommand(email, "NewStr0ngPassphrase!2"));
             Assert.Equal(HttpStatusCode.Unauthorized, missing2fa.StatusCode);
 
             using var recoveryLogin = await freshClient.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/login",
-                new LoginCommand(email, "NewStr0ngPass!2", RecoveryCode: recoveryCodes[0]));
+                new LoginCommand(email, "NewStr0ngPassphrase!2", RecoveryCode: recoveryCodes[0]));
             Assert.Equal(HttpStatusCode.OK, recoveryLogin.StatusCode);
 
             using var meAfter2fa = await freshClient.GetAsync($"/api/stores/{store.Slug}/auth/me");

@@ -1,10 +1,13 @@
+using System.Globalization;
 using System.Security.Claims;
 
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 
+using RetailFlow.Domain.Identity;
 using RetailFlow.Infrastructure.Identity;
 
 namespace RetailFlow.Api.Auth;
@@ -18,23 +21,50 @@ public sealed class RetailFlowCookieEvents : CookieAuthenticationEvents
 {
     private readonly UserManager<RetailFlowIdentityUser> _userManager;
     private readonly IIdentityLookupScopeAccessor _scopeAccessor;
+    private readonly IOptions<PlatformSecurityOptions> _platformSecurityOptions;
+    private readonly TimeProvider _timeProvider;
+    private readonly ILogger<RetailFlowCookieEvents> _logger;
 
     public RetailFlowCookieEvents(
         UserManager<RetailFlowIdentityUser> userManager,
-        IIdentityLookupScopeAccessor scopeAccessor)
+        IIdentityLookupScopeAccessor scopeAccessor,
+        IOptions<PlatformSecurityOptions> platformSecurityOptions,
+        TimeProvider timeProvider,
+        ILogger<RetailFlowCookieEvents> logger)
     {
         _userManager = userManager;
         _scopeAccessor = scopeAccessor;
+        _platformSecurityOptions = platformSecurityOptions;
+        _timeProvider = timeProvider;
+        _logger = logger;
     }
 
     public override async Task ValidatePrincipal(CookieValidatePrincipalContext context)
     {
         var userIdClaim = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdClaim, out _))
+        if (!Guid.TryParse(userIdClaim, out var parsedUserId))
         {
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
             return;
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        if (context.Properties.Items.TryGetValue(SqlSessionTicketStore.AbsoluteExpirationPropertyKey, out var absRaw) &&
+            DateTimeOffset.TryParse(absRaw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var absExpiresAt))
+        {
+            if (now >= absExpiresAt)
+            {
+                _logger.LogInformation("Audit: SessionAbsoluteTimeoutReached UserId={UserId}", parsedUserId);
+                context.RejectPrincipal();
+                await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
+                return;
+            }
+
+            if (context.Properties.ExpiresUtc.HasValue && context.Properties.ExpiresUtc.Value > absExpiresAt)
+            {
+                context.Properties.ExpiresUtc = absExpiresAt;
+            }
         }
 
         var currentScope = _scopeAccessor.Current;
@@ -68,6 +98,10 @@ public sealed class RetailFlowCookieEvents : CookieAuthenticationEvents
             return;
         }
 
+        var originalPrincipalHadMfa =
+            string.Equals(context.Principal!.FindFirstValue("amr"), "mfa", StringComparison.Ordinal) ||
+            string.Equals(context.Principal!.FindFirstValue("mfa_enrolled"), "true", StringComparison.Ordinal);
+
         await SecurityStampValidator.ValidatePrincipalAsync(context);
         if (context.Principal is null)
         {
@@ -85,6 +119,16 @@ public sealed class RetailFlowCookieEvents : CookieAuthenticationEvents
         }
 
         if (hasStoreClaim && user.StoreId != claimStoreId)
+        {
+            context.RejectPrincipal();
+            await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
+            return;
+        }
+
+        if (_platformSecurityOptions.Value.RequireAdminMfa &&
+            context.Principal.IsInRole(nameof(AppRole.PlatformAdmin)) &&
+            originalPrincipalHadMfa &&
+            (!user.TwoFactorEnabled || user.MfaEnrollmentStatus != MfaEnrollmentStatus.Enabled))
         {
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);

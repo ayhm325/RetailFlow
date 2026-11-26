@@ -9,6 +9,7 @@ using Microsoft.Extensions.Logging;
 
 using RetailFlow.Application.Orders;
 using RetailFlow.Domain.Catalog;
+using RetailFlow.Domain.Inventory;
 using RetailFlow.Domain.Orders;
 using RetailFlow.Infrastructure.Persistence;
 
@@ -189,8 +190,8 @@ public sealed class CheckoutService : ICheckoutService
         {
             if (cart is null || cart.Items.Count == 0)
             {
-                await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 400, cancellationToken);
-                return new CheckoutResult(CheckoutOutcomeStatus.ValidationFailed, null, "Cart is empty.");
+                await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 422, cancellationToken);
+                return new CheckoutResult(CheckoutOutcomeStatus.BusinessRuleFailed, null, "Cart is empty.");
             }
 
             var store = await _dbContext.Stores
@@ -200,8 +201,8 @@ public sealed class CheckoutService : ICheckoutService
 
             if (store?.Settings?.Currency is null || !store.IsPubliclyAccessible)
             {
-                await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 404, cancellationToken);
-                return new CheckoutResult(CheckoutOutcomeStatus.ValidationFailed, null, "Store is not active.");
+                await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 422, cancellationToken);
+                return new CheckoutResult(CheckoutOutcomeStatus.BusinessRuleFailed, null, "Store is not active.");
             }
 
             decimal deliveryFee = 0m;
@@ -222,8 +223,8 @@ public sealed class CheckoutService : ICheckoutService
 
                 if (zone is null)
                 {
-                    await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 400, cancellationToken);
-                    return new CheckoutResult(CheckoutOutcomeStatus.ValidationFailed, null, "Selected delivery zone is unavailable.");
+                    await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 422, cancellationToken);
+                    return new CheckoutResult(CheckoutOutcomeStatus.BusinessRuleFailed, null, "Selected delivery zone is unavailable.");
                 }
 
                 deliveryFee = zone.FlatFee;
@@ -247,9 +248,9 @@ public sealed class CheckoutService : ICheckoutService
                     !product.Category.IsActive ||
                     product.InventoryItem is null)
                 {
-                    await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 409, cancellationToken);
+                    await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 422, cancellationToken);
                     return new CheckoutResult(
-                        CheckoutOutcomeStatus.ValidationFailed,
+                        CheckoutOutcomeStatus.BusinessRuleFailed,
                         null,
                         "One or more items in your cart are unavailable. Please review your cart and retry.");
                 }
@@ -345,15 +346,11 @@ public sealed class CheckoutService : ICheckoutService
 
             throw;
         }
-        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or DbUpdateConcurrencyException or DbUpdateException or SqlException)
+        catch (DbUpdateConcurrencyException ex)
         {
-            _logger.LogWarning(
-                ex,
-                "Checkout failed for StoreId={StoreId} ClaimId={ClaimId}; verifying committed state before marking Failed.",
-                storeId,
-                claim.Id);
+            var isExpectedBusinessConflict = ex.Entries.Count > 0 &&
+                ex.Entries.All(e => e.Entity is InventoryItem or Cart or CartItem);
 
-            // Clear all tracked mutations (e.g. partially reserved InventoryItems) before Read-After-Error.
             _dbContext.ChangeTracker.Clear();
 
             var committed = await TryReadCompletedOrderInNewScopeAsync(storeId, claim.Id, cancellationToken);
@@ -362,12 +359,88 @@ public sealed class CheckoutService : ICheckoutService
                 return new CheckoutResult(CheckoutOutcomeStatus.Replayed, committed);
             }
 
-            await MarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 409, cancellationToken);
+            if (isExpectedBusinessConflict)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Checkout concurrency conflict for StoreId={StoreId} ClaimId={ClaimId}.",
+                    storeId,
+                    claim.Id);
+
+                await TryMarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 409, cancellationToken);
+
+                return new CheckoutResult(
+                    CheckoutOutcomeStatus.ConcurrencyConflict,
+                    null,
+                    "Checkout could not be completed because item availability or cart state changed concurrently. Please review your cart and retry.");
+            }
+
+            _logger.LogError(
+                ex,
+                "Unexpected DbUpdateConcurrencyException during checkout for StoreId={StoreId} ClaimId={ClaimId}.",
+                storeId,
+                claim.Id);
+
+            await TryMarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 500, CancellationToken.None);
+            throw;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Checkout business rule rejected for StoreId={StoreId} ClaimId={ClaimId}.",
+                storeId,
+                claim.Id);
+
+            _dbContext.ChangeTracker.Clear();
+
+            var committed = await TryReadCompletedOrderInNewScopeAsync(storeId, claim.Id, cancellationToken);
+            if (committed is not null)
+            {
+                return new CheckoutResult(CheckoutOutcomeStatus.Replayed, committed);
+            }
+
+            await TryMarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 422, cancellationToken);
 
             return new CheckoutResult(
-                CheckoutOutcomeStatus.ValidationFailed,
+                CheckoutOutcomeStatus.BusinessRuleFailed,
                 null,
-                "Checkout could not be completed because item availability or order preconditions changed. Please review your cart and retry.");
+                "Checkout could not be completed because order preconditions or item availability were not satisfied.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                ex,
+                "Unexpected persistence or system failure during checkout for StoreId={StoreId} ClaimId={ClaimId}.",
+                storeId,
+                claim.Id);
+
+            _dbContext.ChangeTracker.Clear();
+
+            var committed = await TryReadCompletedOrderInNewScopeAsync(storeId, claim.Id, CancellationToken.None);
+            if (committed is not null)
+            {
+                return new CheckoutResult(CheckoutOutcomeStatus.Replayed, committed);
+            }
+
+            await TryMarkClaimFailedIfOwnedAsync(claim.Id, claimToken, 500, CancellationToken.None);
+            throw;
+        }
+    }
+
+    private async Task TryMarkClaimFailedIfOwnedAsync(
+        Guid claimId,
+        Guid claimToken,
+        int statusCode,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await MarkClaimFailedIfOwnedAsync(claimId, claimToken, statusCode, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Best-effort claim failure update failed for ClaimId={ClaimId}.", claimId);
         }
     }
 

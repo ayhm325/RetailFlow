@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.HostFiltering;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
@@ -33,28 +34,17 @@ public static class ProductHostExtensions
         ArgumentNullException.ThrowIfNull(environment);
 
         services.AddProblemDetails();
+        services.AddExceptionHandler<RetailFlowExceptionHandler>();
         services.AddOpenApi();
 
-        var dataProtection = services.AddDataProtection()
-            .SetApplicationName("RetailFlow")
-            .PersistKeysToDbContext<RetailFlowDbContext>();
-
-        var certPath = configuration["DataProtection:CertificatePath"];
-        var certPassword = configuration["DataProtection:CertificatePassword"];
-        var requireCertInProd = configuration.GetValue<bool>("DataProtection:RequireCertificateInProduction");
-        if (!string.IsNullOrWhiteSpace(certPath))
-        {
-            var certificate = X509CertificateLoader.LoadPkcs12FromFile(certPath, certPassword);
-            dataProtection.ProtectKeysWithCertificate(certificate);
-        }
-        else if (environment.IsProduction() && requireCertInProd)
-        {
-            throw new InvalidOperationException(
-                "DataProtection:CertificatePath must be configured in Production when RequireCertificateInProduction is enabled.");
-        }
+        services.AddRetailFlowDataProtection(configuration, environment);
 
         services.Configure<PlatformSecurityOptions>(configuration.GetSection("PlatformSecurity"));
+        services.AddSingleton<IValidateOptions<PlatformSecurityOptions>>(
+            _ => new PlatformSecurityOptionsValidator(environment));
+        services.AddOptions<PlatformSecurityOptions>().ValidateOnStart();
 
+        services.TryAddSingleton(TimeProvider.System);
         services.AddSingleton<ITicketStore, SqlSessionTicketStore>();
         services.AddScoped<RetailFlowCookieEvents>();
         services.AddHostedService<MaintenanceBackgroundService>();
@@ -190,12 +180,12 @@ public static class ProductHostExtensions
         //    so Kestrel must remain isolated behind App Service and live behavior must be verified).
         app.UseForwardedHeaders();
 
-        // 2. Centralized exception handling outside Development (returns RFC 9457 ProblemDetails
+        // 2. Centralized exception handling (returns RFC 9457 ProblemDetails
         //    without exposing stack traces or internal details).
+        app.UseExceptionHandler();
+
         if (!app.Environment.IsDevelopment())
         {
-            app.UseExceptionHandler();
-
             // 3. HSTS outside Development.
             app.UseHsts();
         }
@@ -505,5 +495,20 @@ public static class ProductHostExtensions
         public int PermitLimit { get; set; } = 120;
         public int AuthPermitLimit { get; set; } = 20;
         public int WindowSeconds { get; set; } = 60;
+    }
+
+    private sealed class PlatformSecurityOptionsValidator(IHostEnvironment environment)
+        : IValidateOptions<PlatformSecurityOptions>
+    {
+        public ValidateOptionsResult Validate(string? name, PlatformSecurityOptions options)
+        {
+            if (environment.IsProduction() && !options.RequireAdminMfa)
+            {
+                return ValidateOptionsResult.Fail(
+                    "PlatformSecurity:RequireAdminMfa must be enabled in Production and cannot be disabled.");
+            }
+
+            return ValidateOptionsResult.Success;
+        }
     }
 }

@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text;
 
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Options;
@@ -36,12 +37,18 @@ public sealed class RetailFlowPasswordHasher : IPasswordHasher<RetailFlowIdentit
     public string HashPassword(RetailFlowIdentityUser user, string password)
     {
         ArgumentNullException.ThrowIfNull(user);
-        if (string.IsNullOrEmpty(password) || password.Length > MaxPasswordLength)
+        if (string.IsNullOrEmpty(password))
         {
             throw new ArgumentException($"Password length must be between 1 and {MaxPasswordLength} characters.", nameof(password));
         }
 
-        return _identityHasher.HashPassword(user, password);
+        var normalized = NormalizePassword(password);
+        if (normalized.Length > MaxPasswordLength)
+        {
+            throw new ArgumentException($"Password length must be between 1 and {MaxPasswordLength} characters.", nameof(password));
+        }
+
+        return _identityHasher.HashPassword(user, normalized);
     }
 
     public PasswordVerificationResult VerifyHashedPassword(
@@ -51,7 +58,13 @@ public sealed class RetailFlowPasswordHasher : IPasswordHasher<RetailFlowIdentit
     {
         ArgumentNullException.ThrowIfNull(user);
 
-        if (string.IsNullOrEmpty(providedPassword) || providedPassword.Length > MaxPasswordLength)
+        if (string.IsNullOrEmpty(providedPassword))
+        {
+            return PasswordVerificationResult.Failed;
+        }
+
+        var normalized = NormalizePassword(providedPassword);
+        if (normalized.Length > MaxPasswordLength)
         {
             return PasswordVerificationResult.Failed;
         }
@@ -63,18 +76,23 @@ public sealed class RetailFlowPasswordHasher : IPasswordHasher<RetailFlowIdentit
 
         if (hashedPassword.StartsWith("v1.", StringComparison.Ordinal))
         {
-            return VerifyLegacyV1(providedPassword, hashedPassword);
+            return VerifyLegacyV1(normalized, hashedPassword);
         }
 
         try
         {
-            return _identityHasher.VerifyHashedPassword(user, hashedPassword, providedPassword);
+            return _identityHasher.VerifyHashedPassword(user, hashedPassword, normalized);
         }
         catch (FormatException)
         {
             return PasswordVerificationResult.Failed;
         }
     }
+
+    private static string NormalizePassword(string password) =>
+        password.IsNormalized(NormalizationForm.FormC)
+            ? password
+            : password.Normalize(NormalizationForm.FormC);
 
     private static PasswordVerificationResult VerifyLegacyV1(string password, string encodedHash)
     {

@@ -28,12 +28,15 @@
 
 | المفتاح | المعنى |
 |---|---|
-| `Email:PublicBaseUrl` | الأصل الموثوق لبناء روابط استعادة كلمة المرور وتوثيق البريد |
-| `Email:SmtpHost` / `SmtpPort` / `EnableSsl` / `Username` / `Password` / `FromAddress` | إعدادات SMTP للإرسال الفعلي في الإنتاج |
-| `Email:RequireConfiguredInProduction` | يفشل عند startup خارج Development إذا غابت إعدادات SMTP أو `PublicBaseUrl` |
-| `PlatformSecurity:RequireAdminMfa` | عند `true`، يمنع `PlatformAdmin` غير المسجّل في MFA من `/api/platform/stores/*` حتى إكمال التسجيل والدخول بـ TOTP |
-| `DataProtection:CertificatePath` / `CertificatePassword` | شهادة X.509 لحماية مفاتيح Data Protection في SQL Server |
-| `DataProtection:RequireCertificateInProduction` | يفشل عند startup في Production إذا غابت شهادة Data Protection |
+| `Email:PublicBaseUrl` | الأصل الموثوق لبناء روابط استعادة كلمة المرور وتوثيق البريد (يجب أن يكون `https://` فقط في `Production` بدون بيانات اعتماد أو query/fragment) |
+| `Email:SmtpHost` / `SmtpPort` / `EnableSsl` / `Username` / `Password` / `FromAddress` / `TimeoutSeconds` | إعدادات SMTP للإرسال الفعلي في الإنتاج؛ يجب أن يكون `EnableSsl = true` في `Production` (`TimeoutSeconds` بين `1` و`120`، الافتراضي `15`) |
+| `Email:RequireConfiguredInProduction` | الافتراضي `true`؛ يفشل startup (fail-closed) في `Production` إذا غابت إعدادات SMTP أو `PublicBaseUrl` أو كان `EnableSsl = false` |
+| `PlatformSecurity:RequireAdminMfa` | الافتراضي `true`؛ يمنع `PlatformAdmin` غير المسجّل أو غير المتحقق بـ MFA من `/api/platform/stores/*`، ويرفض بدء التشغيل في `Production` إذا عُيّن إلى `false` عبر `PlatformSecurityOptionsValidator` |
+| `DataProtection:CertificatePath` / `CertificatePassword` / `CertificateThumbprint` | شهادة X.509 (PKCS#12 مع مفتاح خاص وصلاحية سارية ومطابقة thumbprint اختيارية) لتشفير مفاتيح Data Protection في SQL Server (`DataProtectionSetup.cs`) |
+| `DataProtection:PreviousCertificates` | قائمة شهادات سابقة (`CertificatePath` / `CertificatePassword` / `CertificateThumbprint`) لفك تشفير المفاتيح التاريخية أثناء تدوير الشهادة عبر `UnprotectKeysWithAnyCertificate` |
+| `DataProtection:DefaultKeyLifetimeDays` | عمر المفتاح الافتراضي بالأيام (الافتراضي `90`، مقيد بين `7` و`365`) |
+| `DataProtection:RequireCertificateInProduction` | الافتراضي `true`؛ يفشل startup (fail-closed) في Production إذا غابت شهادة Data Protection أو كانت غير صالحة |
+| سياسة كلمات المرور (`DependencyInjection.cs` / `RetailFlowPasswordValidator.cs`) | الحد الأدنى `15` حرفاً والحد الأقصى `1024` حرفاً، تطبيع Unicode NFC، حظر كلمات المرور الشائعة/الأنماط المتكررة، قفل الحساب بعد `5` محاولات لمدة `15` دقيقة |
 
 ## 5. Cookie/session
 

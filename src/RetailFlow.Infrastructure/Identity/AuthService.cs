@@ -394,8 +394,15 @@ public sealed class AuthService : IAuthService
             : $"/stores/{UrlEncoder.Default.Encode(storeSlug)}/reset-password";
 
         var resetLink = $"{baseUrl}{resetPath}?email={encodedEmail}&token={encodedToken}";
-        await _emailSender.SendPasswordResetAsync(user.Email!, resetLink, cancellationToken);
-        _logger.LogInformation("Audit: PasswordResetRequested UserId={UserId}", user.Id);
+        try
+        {
+            await _emailSender.SendPasswordResetAsync(user.Email!, resetLink, cancellationToken);
+            _logger.LogInformation("Audit: PasswordResetRequested UserId={UserId}", user.Id);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Audit: PasswordResetEmailDeliveryFailed UserId={UserId}", user.Id);
+        }
     }
 
     public async Task<bool> ResetPasswordAsync(ResetPasswordCommand command, CancellationToken cancellationToken)
@@ -426,11 +433,18 @@ public sealed class AuthService : IAuthService
             .Where(t => t.UserId == user.Id)
             .ExecuteDeleteAsync(cancellationToken);
 
-        await _emailSender.SendSecurityNotificationAsync(
-            user.Email!,
-            "RetailFlow Password Changed",
-            "Your RetailFlow account password was recently reset. All active sessions have been revoked.",
-            cancellationToken);
+        try
+        {
+            await _emailSender.SendSecurityNotificationAsync(
+                user.Email!,
+                "RetailFlow Password Changed",
+                "Your RetailFlow account password was recently reset. All active sessions have been revoked.",
+                cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Audit: PasswordResetNotificationDeliveryFailed UserId={UserId}", user.Id);
+        }
 
         _logger.LogInformation("Audit: PasswordResetCompleted UserId={UserId}", user.Id);
         return true;
@@ -464,8 +478,15 @@ public sealed class AuthService : IAuthService
             : $"/stores/{UrlEncoder.Default.Encode(storeSlug)}/confirm-email";
 
         var confirmationLink = $"{baseUrl}{confirmPath}?userId={encodedUserId}&token={encodedToken}";
-        await _emailSender.SendEmailConfirmationAsync(user.Email!, confirmationLink, cancellationToken);
-        _logger.LogInformation("Audit: EmailConfirmationRequested UserId={UserId}", user.Id);
+        try
+        {
+            await _emailSender.SendEmailConfirmationAsync(user.Email!, confirmationLink, cancellationToken);
+            _logger.LogInformation("Audit: EmailConfirmationRequested UserId={UserId}", user.Id);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Audit: EmailConfirmationDeliveryFailed UserId={UserId}", user.Id);
+        }
     }
 
     public async Task<bool> ConfirmEmailAsync(ConfirmEmailCommand command, CancellationToken cancellationToken)
@@ -908,6 +929,15 @@ public sealed class AuthService : IAuthService
                         now,
                         cancellationToken);
                 }
+
+                if (twoFactorPassed)
+                {
+                    _logger.LogInformation("Audit: MfaVerificationSucceeded UserId={UserId} Method=Totp", user.Id);
+                }
+                else
+                {
+                    _logger.LogWarning("Audit: MfaVerificationFailed UserId={UserId} Method=Totp", user.Id);
+                }
             }
             else if (!string.IsNullOrWhiteSpace(command.RecoveryCode))
             {
@@ -916,9 +946,14 @@ public sealed class AuthService : IAuthService
                     command.RecoveryCode.Replace(" ", string.Empty, StringComparison.Ordinal));
                 twoFactorPassed = redeemResult.Succeeded;
 
-                if (!twoFactorPassed)
+                if (twoFactorPassed)
+                {
+                    _logger.LogInformation("Audit: MfaRecoveryCodeUsed UserId={UserId}", user.Id);
+                }
+                else
                 {
                     await RecordMfaFailureAsync(user, now, cancellationToken);
+                    _logger.LogWarning("Audit: MfaVerificationFailed UserId={UserId} Method=RecoveryCode", user.Id);
                 }
             }
 

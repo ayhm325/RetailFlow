@@ -3,8 +3,8 @@ namespace RetailFlow.Infrastructure.Identity;
 public sealed class PlatformSecurityOptions
 {
     /// <summary>
-    /// When true, PlatformAdmin accounts must complete MFA enrollment and TOTP sign-in
-    /// before accessing privileged /api/platform/stores endpoints.
+    /// Defaults to true so PlatformAdmin accounts must complete MFA enrollment and TOTP sign-in
+    /// before accessing privileged /api/platform/stores endpoints. Cannot be disabled in Production.
     /// </summary>
-    public bool RequireAdminMfa { get; set; }
+    public bool RequireAdminMfa { get; set; } = true;
 }

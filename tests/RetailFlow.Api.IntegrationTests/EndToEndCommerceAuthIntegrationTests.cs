@@ -63,7 +63,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
             // 2. Register Customer (sets __Host-RetailFlow.Session cookie)
             using var regResp = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/register",
-                new RegisterCustomerCommand($"cust-{suffix}@example.com", "Customer One", "Str0ngPass!1"));
+                new RegisterCustomerCommand($"cust-{suffix}@example.com", "Customer One", "Str0ngPassphrase!1"));
             Assert.Equal(HttpStatusCode.Created, regResp.StatusCode);
 
             // 3. Authenticated unsafe POST WITHOUT X-CSRF: 1 -> 403 ProblemDetails
@@ -144,7 +144,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
                 IsActive = true,
                 CreatedAtUtc = DateTimeOffset.UtcNow
             };
-            var created = await userManager.CreateAsync(admin, "Adm1nPass!99");
+            var created = await userManager.CreateAsync(admin, "Adm1nPassphrase!99");
             Assert.True(created.Succeeded);
             var roled = await userManager.AddToRoleAsync(admin, IdentityRoleNames.PlatformAdmin);
             Assert.True(roled.Succeeded);
@@ -158,7 +158,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
 
             using var adminLogin = await adminClient.PostAsJsonAsync(
                 "/api/platform/auth/login",
-                new LoginCommand(adminEmail, "Adm1nPass!99"));
+                new LoginCommand(adminEmail, "Adm1nPassphrase!99"));
             Assert.Equal(HttpStatusCode.OK, adminLogin.StatusCode);
 
             using var createStoreAResp = await adminClient.PostAsJsonAsync(
@@ -186,7 +186,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
             var merchantEmail = $"merch-{suffix}@example.com";
             using var createMerchResp = await adminClient.PostAsJsonAsync(
                 $"/api/platform/stores/{storeA.Id}/merchant-owner",
-                new CreateMerchantUserCommand(merchantEmail, "Merchant A", "MerchPass!1"));
+                new CreateMerchantUserCommand(merchantEmail, "Merchant A", "MerchPassphrase!1"));
             Assert.Equal(HttpStatusCode.Created, createMerchResp.StatusCode);
 
             // 2. Merchant A logs in, creates Zone, Category, Product (OnHand = 10)
@@ -195,7 +195,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
 
             using var merchLogin = await merchantClient.PostAsJsonAsync(
                 $"/api/stores/{storeA.Slug}/auth/login",
-                new LoginCommand(merchantEmail, "MerchPass!1"));
+                new LoginCommand(merchantEmail, "MerchPassphrase!1"));
             Assert.Equal(HttpStatusCode.OK, merchLogin.StatusCode);
 
             // Cross-store BOLA: Merchant A cannot write to Store B -> 403 Forbidden
@@ -228,7 +228,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
 
             using var custReg = await customerClient.PostAsJsonAsync(
                 $"/api/stores/{storeA.Slug}/auth/register",
-                new RegisterCustomerCommand($"cust2-{suffix}@example.com", "Customer Two", "CustPass!1"));
+                new RegisterCustomerCommand($"cust2-{suffix}@example.com", "Customer Two", "CustPassphrase!1"));
             Assert.Equal(HttpStatusCode.Created, custReg.StatusCode);
 
             using var cartResp = await customerClient.PutAsJsonAsync(
@@ -405,7 +405,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
 
             using var reg = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/register",
-                new RegisterCustomerCommand($"atomic-{suffix}@example.com", "Atomic User", "Str0ngPass!1"));
+                new RegisterCustomerCommand($"atomic-{suffix}@example.com", "Atomic User", "Str0ngPassphrase!1"));
             Assert.Equal(HttpStatusCode.Created, reg.StatusCode);
 
             await client.PutAsJsonAsync($"/api/stores/{store.Slug}/cart/items", new UpsertCartItemCommand(prod1.Id, 2));
@@ -416,7 +416,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
             req.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Delivery, zone.Id, "Amman"));
 
             using var resp = await client.SendAsync(req);
-            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, resp.StatusCode);
             var body = await resp.Content.ReadAsStringAsync();
             Assert.DoesNotContain("Insufficient available inventory", body, StringComparison.OrdinalIgnoreCase);
 

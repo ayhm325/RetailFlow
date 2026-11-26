@@ -51,8 +51,13 @@ internal sealed class SessionTicketConfiguration : IEntityTypeConfiguration<Sess
         builder.Property(x => x.Value).IsRequired();
         builder.Property(x => x.ExpiresAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
         builder.Property(x => x.LastSeenAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
+        builder.Property(x => x.CreatedAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
+        builder.Property(x => x.AbsoluteExpiresAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
 
         builder.HasIndex(x => x.ExpiresAtUtc)
             .HasDatabaseName("IX_SessionTickets_ExpiresAtUtc");
+
+        builder.HasIndex(x => x.AbsoluteExpiresAtUtc)
+            .HasDatabaseName("IX_SessionTickets_AbsoluteExpiresAtUtc");
     }
 }
