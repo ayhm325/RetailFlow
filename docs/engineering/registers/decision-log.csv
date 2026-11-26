@@ -1,2 +1,0 @@
-Decision_ID,Title,ADR_Path,Status,Owner_Approval,Implementation_Status,Related_Findings,Last_Verified_Commit,Notes
-AUTH-ADR-01,Session Transport Strategy,Repository docs/AUTH-ADR-01-Session-Transport.md,Proposed,Pending,PoC exists; Product Host integration not established,AUD-009; related session findings,04392c875c275e99f4b5ee378f63b3a8b8fc541d,"Overall ADR remains Proposed in inspected header; some MVP sub-decisions marked adopted."

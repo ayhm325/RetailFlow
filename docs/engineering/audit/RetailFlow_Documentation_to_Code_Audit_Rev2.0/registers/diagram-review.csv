@@ -1,9 +1,0 @@
-﻿Diagram,Baseline Type,Audit Result,Finding,Recommended Action
-c4-context-current.mmd,Current,Needs correction,API appears as external system; database/system boundary semantics are unclear.,Redraw C4 System Context with actors/external systems only.
-c4-container-target.mmd,Target,Needs refinement,Layer flowchart rather than a precise C4 container view.,"Identify SPA, Product Host, database and external services as containers."
-component-current.mmd,Current,Partial,"Useful catalog path, but omits host pipeline, DI, health, exception handling.",Expand or label as a focused Catalog component slice.
-request-pipeline-target.mmd,Target,Review at integration,Correctly marked target; not current Product Host behavior.,Validate order with actual middleware and browser tests when identity is integrated.
-checkout-sequence-target.mmd,Target,High issue,Idempotency pre-read outside transaction; no atomic claim/conflict branch.,Add unique-key claim and concurrent duplicate path.
-order-state-target.mmd,Target,High issue,"Combines order, fulfillment and payment states.",Split three state models and cross-state policies.
-deployment-target.mmd,Target,Acceptable draft,"Managed DB, telemetry and key store still pending selection.",Keep Target labels; add ADR/evidence once chosen.
-ci-cd-target.mmd,Target,Acceptable draft,"Describes future scans, artifact, staging, approval and production flow not present in current workflow.",Keep Target label and add implementation status only after workflow evidence.
