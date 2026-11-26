@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -13,6 +14,7 @@ using RetailFlow.Domain.Identity;
 using RetailFlow.Domain.Inventory;
 using RetailFlow.Domain.Orders;
 using RetailFlow.Domain.Stores;
+using RetailFlow.Infrastructure.Identity;
 using RetailFlow.Infrastructure.Persistence;
 
 namespace RetailFlow.Api.IntegrationTests;
@@ -41,28 +43,72 @@ public sealed class AuditPhasesIntegrationTests : IClassFixture<CatalogSqlTestFi
         var store = Store.Create(Guid.NewGuid(), "Hash Shop", $"hash-{suffix}", StoreType.OnlineOnly, StoreStatus.Active, DateTimeOffset.UtcNow);
         var settings = StoreSettings.Create(Guid.NewGuid(), store, Jod, "Asia/Amman", true, false);
 
-        // Legacy 6-char password (< 8 new policy)
-        var storeUser = AppUser.CreateStoreUser(
-            Guid.NewGuid(),
-            store.Id,
-            $"legacy-{suffix}@example.com",
-            "Legacy User",
-            CreateLegacy310kHash("Leg123"),
-            AppRole.Customer,
-            DateTimeOffset.UtcNow);
+        var storeUserId = Guid.NewGuid();
+        var storeUser = new RetailFlowIdentityUser
+        {
+            Id = storeUserId,
+            UserName = storeUserId.ToString("N"),
+            NormalizedUserName = storeUserId.ToString("N").ToUpperInvariant(),
+            Email = $"legacy-{suffix}@example.com",
+            NormalizedEmail = $"LEGACY-{suffix}@EXAMPLE.COM",
+            DisplayName = "Legacy User",
+            StoreId = store.Id,
+            PasswordHash = CreateLegacy310kHash("Leg123"),
+            SecurityStamp = Guid.NewGuid().ToString("N").ToUpperInvariant(),
+            ConcurrencyStamp = Guid.NewGuid().ToString(),
+            LockoutEnabled = true,
+            IsActive = true,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        };
 
-        var adminUser = AppUser.CreatePlatformAdmin(
-            Guid.NewGuid(),
-            $"legadmin-{suffix}@example.com",
-            "Legacy Admin",
-            CreateLegacy310kHash("Adm123"),
-            DateTimeOffset.UtcNow);
+        var adminUserId = Guid.NewGuid();
+        var adminUser = new RetailFlowIdentityUser
+        {
+            Id = adminUserId,
+            UserName = adminUserId.ToString("N"),
+            NormalizedUserName = adminUserId.ToString("N").ToUpperInvariant(),
+            Email = $"legadmin-{suffix}@example.com",
+            NormalizedEmail = $"LEGADMIN-{suffix}@EXAMPLE.COM",
+            DisplayName = "Legacy Admin",
+            StoreId = null,
+            PasswordHash = CreateLegacy310kHash("Adm123"),
+            SecurityStamp = Guid.NewGuid().ToString("N").ToUpperInvariant(),
+            ConcurrencyStamp = Guid.NewGuid().ToString(),
+            LockoutEnabled = true,
+            IsActive = true,
+            CreatedAtUtc = DateTimeOffset.UtcNow
+        };
 
         await using (var db = _fixture.CreateDbContext())
         {
             db.Stores.Add(store);
             db.StoreSettings.Add(settings);
-            db.AppUsers.AddRange(storeUser, adminUser);
+            if (!await db.Roles.AnyAsync(r => r.Id == RetailFlowIdentityRole.CustomerRoleId))
+            {
+                db.Roles.Add(new RetailFlowIdentityRole
+                {
+                    Id = RetailFlowIdentityRole.CustomerRoleId,
+                    Name = IdentityRoleNames.Customer,
+                    NormalizedName = IdentityRoleNames.Customer.ToUpperInvariant(),
+                    ConcurrencyStamp = Guid.NewGuid().ToString()
+                });
+            }
+
+            if (!await db.Roles.AnyAsync(r => r.Id == RetailFlowIdentityRole.PlatformAdminRoleId))
+            {
+                db.Roles.Add(new RetailFlowIdentityRole
+                {
+                    Id = RetailFlowIdentityRole.PlatformAdminRoleId,
+                    Name = IdentityRoleNames.PlatformAdmin,
+                    NormalizedName = IdentityRoleNames.PlatformAdmin.ToUpperInvariant(),
+                    ConcurrencyStamp = Guid.NewGuid().ToString()
+                });
+            }
+
+            db.Users.AddRange(storeUser, adminUser);
+            db.UserRoles.AddRange(
+                new IdentityUserRole<Guid> { UserId = storeUser.Id, RoleId = RetailFlowIdentityRole.CustomerRoleId },
+                new IdentityUserRole<Guid> { UserId = adminUser.Id, RoleId = RetailFlowIdentityRole.PlatformAdminRoleId });
             await db.SaveChangesAsync();
         }
 
@@ -73,37 +119,38 @@ public sealed class AuditPhasesIntegrationTests : IClassFixture<CatalogSqlTestFi
             var auth1 = scope1.ServiceProvider.GetRequiredService<IAuthService>();
             var auth2 = scope2.ServiceProvider.GetRequiredService<IAuthService>();
 
-            // Failed login does NOT upgrade hash
-            Assert.Null(await auth1.AuthenticateStoreUserAsync(store.Id, new LoginCommand(storeUser.Email, "WrongPass"), CancellationToken.None));
+            // Failed login on PlatformAdmin does NOT upgrade hash
+            var failed = await auth1.SignInPlatformAdminAsync(new LoginCommand(adminUser.Email!, "WrongPass"), CancellationToken.None);
+            Assert.Equal(AuthSignInOutcome.Failed, failed.Outcome);
             await using (var db = _fixture.CreateDbContext())
             {
-                var u = await db.AppUsers.AsNoTracking().SingleAsync(x => x.Id == storeUser.Id);
-                Assert.StartsWith("v1.310000.", u.PasswordHash, StringComparison.Ordinal);
+                var a = await db.Users.AsNoTracking().SingleAsync(x => x.Id == adminUser.Id);
+                Assert.StartsWith("v1.310000.", a.PasswordHash, StringComparison.Ordinal);
             }
 
-            // Concurrent successful logins for StoreUser both succeed and upgrade hash to v1.600000.
+            // Concurrent successful logins for StoreUser both succeed and upgrade hash to Identity V3 (AQAAAA)
             var results = await Task.WhenAll(
-                auth1.AuthenticateStoreUserAsync(store.Id, new LoginCommand(storeUser.Email, "Leg123"), CancellationToken.None),
-                auth2.AuthenticateStoreUserAsync(store.Id, new LoginCommand(storeUser.Email, "Leg123"), CancellationToken.None));
-            Assert.All(results, Assert.NotNull);
+                auth1.SignInStoreUserAsync(store.Id, new LoginCommand(storeUser.Email!, "Leg123"), CancellationToken.None),
+                auth2.SignInStoreUserAsync(store.Id, new LoginCommand(storeUser.Email!, "Leg123"), CancellationToken.None));
+            Assert.All(results, r => Assert.Equal(AuthSignInOutcome.Succeeded, r.Outcome));
 
-            // PlatformAdmin login also upgrades hash to v1.600000.
-            var adminResult = await auth1.AuthenticatePlatformAdminAsync(new LoginCommand(adminUser.Email, "Adm123"), CancellationToken.None);
-            Assert.NotNull(adminResult);
+            // PlatformAdmin login also upgrades hash to Identity V3 (AQAAAA)
+            var adminResult = await auth1.SignInPlatformAdminAsync(new LoginCommand(adminUser.Email!, "Adm123"), CancellationToken.None);
+            Assert.Equal(AuthSignInOutcome.Succeeded, adminResult.Outcome);
 
             await using (var db = _fixture.CreateDbContext())
             {
-                var upgradedUser = await db.AppUsers.AsNoTracking().SingleAsync(x => x.Id == storeUser.Id);
-                var upgradedAdmin = await db.AppUsers.AsNoTracking().SingleAsync(x => x.Id == adminUser.Id);
-                Assert.StartsWith("v1.600000.", upgradedUser.PasswordHash, StringComparison.Ordinal);
-                Assert.StartsWith("v1.600000.", upgradedAdmin.PasswordHash, StringComparison.Ordinal);
+                var upgradedUser = await db.Users.AsNoTracking().SingleAsync(x => x.Id == storeUser.Id);
+                var upgradedAdmin = await db.Users.AsNoTracking().SingleAsync(x => x.Id == adminUser.Id);
+                Assert.StartsWith("AQAAAA", upgradedUser.PasswordHash, StringComparison.Ordinal);
+                Assert.StartsWith("AQAAAA", upgradedAdmin.PasswordHash, StringComparison.Ordinal);
             }
         }
         finally
         {
             await _fixture.DeleteStoresAsync(store.Id);
             await using var db = _fixture.CreateDbContext();
-            await db.AppUsers.Where(u => u.Id == adminUser.Id).ExecuteDeleteAsync();
+            await db.Users.Where(u => u.Id == adminUser.Id).ExecuteDeleteAsync();
         }
     }
 
@@ -201,10 +248,12 @@ public sealed class AuditPhasesIntegrationTests : IClassFixture<CatalogSqlTestFi
     public async Task Phase5_ConcurrentPlatformAdminBootstrap_CreatesAtMostOneAdmin()
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
-        var existingAdmins = await _fixture.CreateDbContext().AppUsers
-            .AsNoTracking()
-            .Where(u => u.Role == AppRole.PlatformAdmin)
-            .Select(u => u.Id)
+        var verifyDb0 = _fixture.CreateDbContext();
+        var existingAdmins = await (
+            from ur in verifyDb0.UserRoles.AsNoTracking()
+            join r in verifyDb0.Roles.AsNoTracking() on ur.RoleId equals r.Id
+            where r.NormalizedName == IdentityRoleNames.PlatformAdmin.ToUpperInvariant()
+            select ur.UserId)
             .ToListAsync();
 
         if (existingAdmins.Count > 0)
@@ -237,14 +286,20 @@ public sealed class AuditPhasesIntegrationTests : IClassFixture<CatalogSqlTestFi
             }
 
             await using var verifyDb = _fixture.CreateDbContext();
-            Assert.True(await verifyDb.AppUsers.AsNoTracking().AnyAsync(u => u.Role == AppRole.PlatformAdmin));
+            var hasAdmin = await (
+                from ur in verifyDb.UserRoles.AsNoTracking()
+                join r in verifyDb.Roles.AsNoTracking() on ur.RoleId equals r.Id
+                where r.NormalizedName == IdentityRoleNames.PlatformAdmin.ToUpperInvariant()
+                select ur.UserId)
+                .AnyAsync();
+            Assert.True(hasAdmin);
         }
         finally
         {
             if (createdId.HasValue)
             {
                 await using var db = _fixture.CreateDbContext();
-                await db.AppUsers.Where(u => u.Id == createdId.Value).ExecuteDeleteAsync();
+                await db.Users.Where(u => u.Id == createdId.Value).ExecuteDeleteAsync();
             }
         }
     }

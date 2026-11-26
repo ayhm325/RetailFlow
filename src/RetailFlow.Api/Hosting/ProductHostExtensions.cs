@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HostFiltering;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -50,8 +51,8 @@ public static class ProductHostExtensions
         services.AddHostedService<MaintenanceBackgroundService>();
         services.AddHostedService<PlatformBootstrapHostedService>();
         services
-            .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
-            .AddCookie(options =>
+            .AddAuthentication(IdentityConstants.ApplicationScheme)
+            .AddCookie(IdentityConstants.ApplicationScheme, options =>
             {
                 options.Cookie.Name = "__Host-RetailFlow.Session";
                 options.Cookie.HttpOnly = true;
@@ -63,8 +64,13 @@ public static class ProductHostExtensions
                 options.EventsType = typeof(RetailFlowCookieEvents);
             });
 
-        services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
+        services.AddOptions<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme)
             .Configure<ITicketStore>((options, ticketStore) => options.SessionStore = ticketStore);
+
+        services.Configure<SecurityStampValidatorOptions>(options =>
+        {
+            options.ValidationInterval = TimeSpan.FromMinutes(1);
+        });
 
         services.AddAuthorizationBuilder()
             .AddPolicy("Customer", policy => policy.RequireRole(nameof(AppRole.Customer)))
@@ -173,8 +179,10 @@ public static class ProductHostExtensions
             await next();
         });
 
-        // 6. Rate Limiting (OWASP API4:2023).
+        // 6. Routing & Rate Limiting (OWASP API4:2023) before Tenant Identity Scope & Authentication.
+        app.UseRouting();
         app.UseRateLimiter();
+        app.UseMiddleware<RetailFlowIdentityScopeMiddleware>();
 
         // 7. Authentication, CSRF Protection (OWASP REF-06), & Authorization (AUTH-ADR-01).
         app.UseAuthentication();

@@ -7,82 +7,19 @@ public enum AppRole
     PlatformAdmin = 3
 }
 
-public sealed class AppUser
+public static class IdentityRoleNames
 {
-    private AppUser()
+    public const string Customer = nameof(AppRole.Customer);
+    public const string MerchantOwner = nameof(AppRole.MerchantOwner);
+    public const string PlatformAdmin = nameof(AppRole.PlatformAdmin);
+
+    public static string FromAppRole(AppRole role) => role switch
     {
-        Email = string.Empty;
-        NormalizedEmail = string.Empty;
-        DisplayName = string.Empty;
-        PasswordHash = string.Empty;
-    }
-
-    public Guid Id { get; private set; }
-    public Guid? StoreId { get; private set; }
-    public string Email { get; private set; }
-    public string NormalizedEmail { get; private set; }
-    public string DisplayName { get; private set; }
-    public string PasswordHash { get; private set; }
-    public AppRole Role { get; private set; }
-    public bool IsActive { get; private set; }
-    public DateTimeOffset CreatedAtUtc { get; private set; }
-
-    public static AppUser CreateStoreUser(
-        Guid id,
-        Guid storeId,
-        string email,
-        string displayName,
-        string passwordHash,
-        AppRole role,
-        DateTimeOffset createdAtUtc)
-    {
-        if (id == Guid.Empty) throw new ArgumentException("User id cannot be empty.", nameof(id));
-        if (storeId == Guid.Empty) throw new ArgumentException("StoreId is required for store users.", nameof(storeId));
-        if (role == AppRole.PlatformAdmin) throw new ArgumentException("PlatformAdmin cannot be store-scoped.", nameof(role));
-
-        return CreateInternal(id, storeId, email, displayName, passwordHash, role, createdAtUtc);
-    }
-
-    public static AppUser CreatePlatformAdmin(
-        Guid id,
-        string email,
-        string displayName,
-        string passwordHash,
-        DateTimeOffset createdAtUtc)
-    {
-        if (id == Guid.Empty) throw new ArgumentException("User id cannot be empty.", nameof(id));
-        return CreateInternal(id, null, email, displayName, passwordHash, AppRole.PlatformAdmin, createdAtUtc);
-    }
-
-    private static AppUser CreateInternal(
-        Guid id,
-        Guid? storeId,
-        string email,
-        string displayName,
-        string passwordHash,
-        AppRole role,
-        DateTimeOffset createdAtUtc)
-    {
-        if (string.IsNullOrWhiteSpace(email)) throw new ArgumentException("Email is required.", nameof(email));
-        if (string.IsNullOrWhiteSpace(displayName)) throw new ArgumentException("DisplayName is required.", nameof(displayName));
-        if (string.IsNullOrWhiteSpace(passwordHash)) throw new ArgumentException("PasswordHash is required.", nameof(passwordHash));
-
-        var trimmedEmail = email.Trim();
-        return new AppUser
-        {
-            Id = id,
-            StoreId = storeId,
-            Email = trimmedEmail,
-            NormalizedEmail = trimmedEmail.ToUpperInvariant(),
-            DisplayName = displayName.Trim(),
-            PasswordHash = passwordHash,
-            Role = role,
-            IsActive = true,
-            CreatedAtUtc = createdAtUtc
-        };
-    }
-
-    public void Deactivate() => IsActive = false;
+        AppRole.Customer => Customer,
+        AppRole.MerchantOwner => MerchantOwner,
+        AppRole.PlatformAdmin => PlatformAdmin,
+        _ => throw new ArgumentOutOfRangeException(nameof(role), role, "Unsupported role.")
+    };
 }
 
 public sealed class SessionTicket

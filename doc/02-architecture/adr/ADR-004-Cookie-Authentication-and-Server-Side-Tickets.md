@@ -1,10 +1,10 @@
 # ADR-004: Cookie authentication مع server-side tickets
 
-**Status:** Inferred from implementation — Needs Security Approval
+**Status:** Updated by [ADR-006](file:///c:/Users/ayhm3/source/RetailFlow/doc/02-architecture/adr/ADR-006-ASP.NET-Core-Identity-Adoption.md) (ASP.NET Core Identity Adoption)
 
 ## Context
 
-Product Host يستخدم ASP.NET Core Cookie Authentication، ويخزن ticket في SQL Server عبر `ITicketStore` مخصص.
+Product Host يستخدم ASP.NET Core Identity (`IdentityConstants.ApplicationScheme`) مع Cookie Authentication، ويخزن ticket في SQL Server عبر `ITicketStore` مخصص (`SqlSessionTicketStore`) مع `SecurityStampValidator` وفحص `IsActive`.
 
 ## Observed decision
 

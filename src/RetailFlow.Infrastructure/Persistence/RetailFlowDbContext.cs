@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
+using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 using RetailFlow.Domain.Catalog;
@@ -8,10 +9,13 @@ using RetailFlow.Domain.Identity;
 using RetailFlow.Domain.Inventory;
 using RetailFlow.Domain.Orders;
 using RetailFlow.Domain.Stores;
+using RetailFlow.Infrastructure.Identity;
 
 namespace RetailFlow.Infrastructure.Persistence;
 
-public sealed class RetailFlowDbContext : DbContext, IDataProtectionKeyContext
+public sealed class RetailFlowDbContext
+    : IdentityDbContext<RetailFlowIdentityUser, RetailFlowIdentityRole, Guid>,
+      IDataProtectionKeyContext
 {
     public RetailFlowDbContext(DbContextOptions<RetailFlowDbContext> options)
         : base(options)
@@ -45,8 +49,6 @@ public sealed class RetailFlowDbContext : DbContext, IDataProtectionKeyContext
     public DbSet<OrderStatusHistory> OrderStatusHistories => Set<OrderStatusHistory>();
 
     public DbSet<CheckoutRequest> CheckoutRequests => Set<CheckoutRequest>();
-
-    public DbSet<AppUser> AppUsers => Set<AppUser>();
 
     public DbSet<SessionTicket> SessionTickets => Set<SessionTicket>();
 

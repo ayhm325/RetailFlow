@@ -13,6 +13,7 @@
 | `20261125234930_AddIdentityAndSessionTickets` | AppUsers وSessionTickets |
 | `20261126085623_AddDataProtectionKeys` | DataProtectionKeys (`IDataProtectionKeyContext`) |
 | `20261126092137_AddCheckoutRequestLeaseAndRecoveryFields` | CheckoutRequests (`ClaimToken`, `LeaseExpiresAtUtc`, `LastAttemptAtUtc`, `CompletedAtUtc`) |
+| `20261126094533_AdoptAspNetCoreIdentity` | تحويل `AppUsers` إلى `AspNetUsers` مع الحفاظ على `Guid` وبيانات المستخدمين، وإضافة `AspNetRoles`, `AspNetUserRoles`, `AspNetUserClaims`, `AspNetUserLogins`, `AspNetUserTokens`, `AspNetRoleClaims` وتحويل الأدوار (`1/2/3`) |
 
 كل migration لها Designer file، ويوجد `RetailFlowDbContextModelSnapshot.cs`.
 

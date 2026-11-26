@@ -14,6 +14,11 @@ public sealed class StoreResolutionEndpointFilter(
         EndpointFilterInvocationContext context,
         EndpointFilterDelegate next)
     {
+        if (storeRequestContextAccessor.Current is not null)
+        {
+            return await next(context);
+        }
+
         var slug = context.HttpContext.GetRouteValue("slug") as string;
         if (string.IsNullOrWhiteSpace(slug))
         {

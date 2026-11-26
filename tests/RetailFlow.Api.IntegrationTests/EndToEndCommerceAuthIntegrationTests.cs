@@ -89,12 +89,15 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
             using var crossSiteFetchResp = await client.SendAsync(crossSiteFetchReq);
             Assert.Equal(HttpStatusCode.Forbidden, crossSiteFetchResp.StatusCode);
 
-            // 5. Deactivating AppUser invalidates active cookie session (GAP-008)
-            await using (var db = _fixture.CreateDbContext())
+            // 5. Deactivating user invalidates active cookie session (GAP-008 + SecurityStamp)
+            await using (var scope = _fixture.CreateAsyncScope())
             {
-                var user = await db.AppUsers.SingleAsync(u => u.StoreId == store.Id);
-                user.Deactivate();
-                await db.SaveChangesAsync();
+                var scopeAccessor = scope.ServiceProvider.GetRequiredService<RetailFlow.Infrastructure.Identity.IIdentityLookupScopeAccessor>();
+                scopeAccessor.SetCurrent(RetailFlow.Infrastructure.Identity.IdentityLookupScope.ForStore(store.Id));
+                var db = scope.ServiceProvider.GetRequiredService<RetailFlow.Infrastructure.Persistence.RetailFlowDbContext>();
+                var userId = await db.Users.Where(u => u.StoreId == store.Id).Select(u => u.Id).SingleAsync();
+                var authService = scope.ServiceProvider.GetRequiredService<IAuthService>();
+                Assert.True(await authService.DeactivateUserAsync(userId, CancellationToken.None));
             }
 
             using var deactivatedMe = await client.GetAsync($"/api/stores/{store.Slug}/auth/me");
@@ -115,12 +118,36 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
         Guid storeAId = Guid.Empty;
         Guid storeBId = Guid.Empty;
 
-        await using (var db = _fixture.CreateDbContext())
+        await using (var scope = _fixture.CreateAsyncScope())
         {
-            // Seed PlatformAdmin directly for bootstrap
-            var adminHash = RetailFlow.Infrastructure.Identity.PasswordHasherService.Hash("Adm1nPass!99");
-            db.AppUsers.Add(AppUser.CreatePlatformAdmin(adminId, adminEmail, "Platform Admin", adminHash, DateTimeOffset.UtcNow));
-            await db.SaveChangesAsync();
+            var scopeAccessor = scope.ServiceProvider.GetRequiredService<RetailFlow.Infrastructure.Identity.IIdentityLookupScopeAccessor>();
+            scopeAccessor.SetCurrent(RetailFlow.Infrastructure.Identity.IdentityLookupScope.ForSystemProvisioning());
+            var roleManager = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.RoleManager<RetailFlow.Infrastructure.Identity.RetailFlowIdentityRole>>();
+            if (!await roleManager.RoleExistsAsync(IdentityRoleNames.PlatformAdmin))
+            {
+                await roleManager.CreateAsync(new RetailFlow.Infrastructure.Identity.RetailFlowIdentityRole
+                {
+                    Id = RetailFlow.Infrastructure.Identity.RetailFlowIdentityRole.PlatformAdminRoleId,
+                    Name = IdentityRoleNames.PlatformAdmin,
+                    NormalizedName = IdentityRoleNames.PlatformAdmin.ToUpperInvariant()
+                });
+            }
+
+            var userManager = scope.ServiceProvider.GetRequiredService<Microsoft.AspNetCore.Identity.UserManager<RetailFlow.Infrastructure.Identity.RetailFlowIdentityUser>>();
+            var admin = new RetailFlow.Infrastructure.Identity.RetailFlowIdentityUser
+            {
+                Id = adminId,
+                UserName = adminId.ToString("N"),
+                Email = adminEmail,
+                DisplayName = "Platform Admin",
+                StoreId = null,
+                IsActive = true,
+                CreatedAtUtc = DateTimeOffset.UtcNow
+            };
+            var created = await userManager.CreateAsync(admin, "Adm1nPass!99");
+            Assert.True(created.Succeeded);
+            var roled = await userManager.AddToRoleAsync(admin, IdentityRoleNames.PlatformAdmin);
+            Assert.True(roled.Succeeded);
         }
 
         try
@@ -343,7 +370,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
 
             await using var db = _fixture.CreateDbContext();
             await db.SessionTickets.Where(t => t.UserId == adminId).ExecuteDeleteAsync();
-            await db.AppUsers.Where(u => u.Id == adminId).ExecuteDeleteAsync();
+            await db.Users.Where(u => u.Id == adminId).ExecuteDeleteAsync();
         }
     }
 
