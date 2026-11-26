@@ -18,12 +18,13 @@ Checkout يمكن أن يصل أكثر من مرة بسبب إعادة المح�
 
 `CustomerOrderEndpoints.cs`, `CheckoutService.cs`, `CheckoutRequest.cs`, `InventoryItem.cs`, `InventoryItemConfiguration.cs`, `CheckoutRequestConfiguration.cs`.
 
-## Important implementation limits
+## Important implementation limits (Historical Baseline) & Current Reconciliation (2026-11-26)
 
-- hash الحالي لا يتضمن بنود Cart والكميات؛ بل يشمل StoreId وCustomerId وFulfillmentMode وDeliveryZoneId وDeliveryAddress.
-- claim الأول يُحفظ في SaveChanges منفصلة عن حفظ الطلب.
-- ExpiresAtUtc مسجل 24 ساعة، لكن لا يظهر في الخدمة مسار تنظيف/إعادة استخدام بعد الانتهاء.
-- لا يوجد scheduler أو hosted worker ظاهر في Product Host يستدعي `ReleaseExpiredReservationsAsync`.
+> النقاط التالية توضح ما كان ملحوظاً في Baseline الأولي مقابل التنفيذ الفعلي الحالي في الكود:
+
+- **Request Hash (تم إصلاحه في الكود):** `CheckoutService.ComputeRequestHash` يشمل الآن `StoreId` و`CustomerId` و`FulfillmentMode` و`DeliveryZoneId` و`DeliveryAddress` بالإضافة إلى `cartSignature` (`ProductId:Quantity` مرتبة)، ويعيد بناء التوقيع من `Order.Items` عند Replay.
+- **Claim & Lease & Transaction Boundaries:** الـ claim الأول (`CheckoutRequest`) يُحفظ في `SaveChangesAsync` أولى مع `ClaimToken` و`LeaseExpiresAtUtc` (`60s`) و`ExpiresAtUtc` (`24h`)، وتنتهي معالجة الطلب وحجز المخزون وإفراغ السلة واكتمال الـ claim داخل معاملة `ReadCommitted` صريحة في `CheckoutService`. عند انتهاء `ExpiresAtUtc` يُحذف السجل المتقادم ويُسمح بإعادة استخدام المفتاح؛ وعند تعطل `InProgress` بعد انتهاء Lease يُسترد السجل ذرياً.
+- **Background Reservation Release (تم تنفيذه في الكود):** `MaintenanceBackgroundService` مسجل في `ProductHostExtensions` ويعمل كل دقيقة عبر `PeriodicTimer` لاستدعاء `OrderService.ReleaseExpiredReservationsAsync` وتنظيف `CheckoutRequests` و`SessionTickets` المنتهية.
 
 ## Open questions
 

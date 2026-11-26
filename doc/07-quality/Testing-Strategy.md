@@ -8,13 +8,16 @@
 
 ### API Integration Tests
 
-المشروع `tests/RetailFlow.Api.IntegrationTests` يستخدم `Microsoft.AspNetCore.Mvc.Testing` وSQL Server provider وxUnit. الملفات تشمل:
+المشروع `tests/RetailFlow.Api.IntegrationTests` يستخدم `Microsoft.AspNetCore.Mvc.Testing` وSQL Server provider وxUnit، ويضم 18 ملف اختبار ومساعدات:
 
-- `ProductHostIntegrationTests.cs`
-- `PublicStoreCatalogIntegrationTests.cs`
-- `OwaspApiSecurityIntegrationTests.cs`
-- `EndToEndCommerceAuthIntegrationTests.cs`
-- ملف مشروع integration tests وملف/fixture اختبار SQL.
+- `ProductHostIntegrationTests.cs` و`PublicStoreCatalogIntegrationTests.cs`
+- `OwaspApiSecurityIntegrationTests.cs` و`EndToEndCommerceAuthIntegrationTests.cs`
+- `CartConcurrencyTests.cs` و`CheckoutErrorClassificationTests.cs` و`CheckoutLeaseAndCookieScopeTests.cs`
+- `MaintenanceBatchConcurrencyTests.cs` و`AuditPhasesIntegrationTests.cs`
+- `IdentityAdoptionIntegrationTests.cs` و`IdentitySecurityHardeningTests.cs`
+- `PlatformAdminMfaHardeningTests.cs` و`SessionLifetimeHardeningTests.cs`
+- `PasswordHasherTests.cs` و`PasswordPolicyHardeningTests.cs`
+- `DataProtectionHardeningTests.cs` و`EmailHardeningTests.cs` و`TestDataProtectionCertHelper.cs`
 
 الاختبارات تشمل startup/health/OpenAPI، security headers، host filtering، forwarded headers، exception handling، SPA fallback semantics، catalog, pagination, tenancy, delivery zones, store lifecycle، auth/CSRF، BOLA وrate limiting وcommerce flow وidempotency وreservation timeout في الحالات المكتوبة.
 
@@ -45,17 +48,12 @@ dotnet test RetailFlow.slnx --configuration Release --logger "console;verbosity=
 
 الاختبارات التكاملية تحتاج SQL Server واتصال `RETAILFLOW_CONNECTION` مضبوطاً. تحقق من fixture setup قبل تشغيلها خارج CI.
 
-## 4. فجوات التحقق المقترحة
+## 4. فجوات التحقق المتبقية
 
-- Checkout idempotency: same key/same complete cart, same key/cart changed, simultaneous same key, same key after expiry, failure after claim insertion.
-- Inventory: simultaneous checkouts على آخر stock، lost update، retry/Conflict semantics.
-- Reservation timeout: هل يوجد worker؟ هل يتعامل مع أكثر من instance؟ هل تحرير stock idempotent؟
-- Orders: كل transition matrix لكل fulfillment mode، invalid transitions، concurrent merchant/customer cancel.
-- Authentication: session rotation/fixation، logout invalidation، account deactivation، expiry، multi-instance DataProtection.
-- Tenancy: جميع endpoints وsubresource IDs وnested relationships.
-- API: malformed/oversized bodies، unexpected content types، validation لكل DTO.
-- Performance: query plans/index usage، pagination limits، N+1 profiling، load tests.
-- Resilience: SQL outage، transient retry, startup failures, cancellation.
+- **Performance & Load:** query plans/index usage، pagination limits، N+1 profiling، load tests (`GAP-018`).
+- **API:** contract tests شاملة لكل malformed/oversized body وunexpected content types.
+- **Browser E2E للمنتج:** لا يوجد React SPA أو Playwright tests للـ Product Host بعد (موجود فقط لـ `SessionTransportSpike`).
+- **Operational Resilience:** SQL outage recovery drills، backup/restore drills (`GAP-011`).
 
 ## 5. تفسير نتائج الاختبار
 

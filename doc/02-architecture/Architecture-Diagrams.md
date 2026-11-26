@@ -73,17 +73,17 @@ sequenceDiagram
   Customer->>API: POST /checkout + Idempotency-Key
   API->>Checkout: CheckoutAsync(storeId, customerId, key, command)
   Checkout->>DB: Read Cart
-  Checkout->>Checkout: Compute SHA-256 request hash
-  Checkout->>DB: Insert CheckoutRequest(InProgress) + SaveChanges
-  alt Unique key collision
-    Checkout->>DB: Load existing key
-    Checkout-->>API: Replayed / Conflict / PayloadMismatch / Failed
-  else Key claim acquired
-    Checkout->>DB: Load Store, Zone, Products, Inventory
-    Checkout->>Checkout: Reserve inventory; create Order + OrderItems
-    Checkout->>DB: Save order, inventory, clear cart, mark claim Completed
-    Checkout-->>API: Created order
-  end
+    Checkout->>Checkout: Compute SHA-256 hash (incl. cart snapshot)
+    Checkout->>DB: Insert CheckoutRequest(InProgress, Lease 60s) + SaveChanges
+    alt Unique key collision
+      Checkout->>DB: Load existing key (reclaim if lease expired / delete if 24h expired)
+      Checkout-->>API: Replayed / Conflict / PayloadMismatch / Failed
+    else Key claim acquired
+      Checkout->>DB: BeginTransaction(ReadCommitted) + Load Store, Zone, Products, Inventory
+      Checkout->>Checkout: Reserve inventory; create Order + OrderItems
+      Checkout->>DB: SaveChanges + Commit (order, inventory, clear cart, claim Completed)
+      Checkout-->>API: Created order
+    end
   API-->>Customer: 201 / 200 / 409 / 422 / 400
 ```
 

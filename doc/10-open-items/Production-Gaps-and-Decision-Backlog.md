@@ -23,15 +23,13 @@
 | GAP-017 | **Verified — Tests Passed** | `StoreSettings.FulfillmentAddress` مستبعد من `PublicStoreIdentityDto` ومختبر | `PublicCatalogQueryService.cs` + `PublicStoreCatalogIntegrationTests` | تم التحقق محلياً |
 | GAP-018 | **Open** | لا توجد اختبارات حمل/أداء (k6/NBomber) لقياس P95/P99 وCookie DB lookup وCheckout concurrency | `doc/07-quality/Testing-Strategy.md` | مطلوب قبل الإطلاق الإنتاجي |
 
-## قرارات مالك المنتج المطلوبة
+## قرارات مالك المنتج المفتوحة والملاحظات البرمجية المؤجلة
 
-1. هل الدفع COD فقط في أول إصدار؟ وهل Delivery/Pickup شروط إلزامية حسب StoreType وStoreSettings؟
-2. ما قواعد مدة الحجز، انتهاء الطلب، الإلغاء من العميل/التاجر، وتحرير المخزون؟
-3. ما الـ session model المطلوب: idle timeout، absolute timeout، تعدد الأجهزة، revoke all، password-change invalidation؟
-4. ما مستوى ASVS المستهدف ومن يملك sign-off الأمني؟
-5. ما سياسات حفظ بيانات الطلب والعناوين والجلسات وسجلات التدقيق؟
-6. ما بيئة Production ومَن يملك DB/backup/release operations؟
-7. هل واجهة React مشروع منفصل أو ستُخدم static assets من Product Host؟
+1. ما قواعد مدة الحجز، انتهاء الطلب، الإلغاء من العميل/التاجر، وتحرير المخزون النهائية للإنتاج؟ (قرار الدفع `COD` في MVP وقرار استضافة `React` بنمط Same-Origin اعتُمدا في `ADR-007`، وسياسة `Idle`/`Absolute` timeout نُفذت في `SqlSessionTicketStore`).
+2. ما مستوى ASVS المستهدف ومن يملك sign-off الأمني؟
+3. ما سياسات حفظ بيانات الطلب والعناوين والجلسات وسجلات التدقيق؟
+4. ما بيئة Production ومَن يملك DB/backup/release operations؟
+5. **ملاحظة برمجية مؤجلة (Deferred Finding — خارج نطاق Phase 0A):** تعليق XML في `src/RetailFlow.Api/Auth/SqlSessionTicketStore.cs:14` يشير إلى `AUTH-ADR-01` غير الموجود في `doc/02-architecture/adr/` (المرجع الصحيح هو `ADR-004` و`ADR-006`). يُصحح في مهمة كود لاحقة.
 
 ## قاعدة الإغلاق
 

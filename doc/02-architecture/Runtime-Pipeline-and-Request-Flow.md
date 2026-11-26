@@ -16,8 +16,10 @@ Forwarded Headers
   → HTTPS Redirection
   → Security Response Headers
   → Rate Limiter
-  → Authentication
-  → X-CSRF marker check for authenticated unsafe methods
+  → Routing
+  → RetailFlowIdentityScopeMiddleware
+  → Authentication (Cookie + SqlSessionTicketStore + RetailFlowCookieEvents)
+  → X-CSRF marker + Sec-Fetch-Site/Origin check for authenticated unsafe methods
   → Authorization
   → Default Files / Static Files
   → Endpoint execution / SPA fallback
@@ -42,7 +44,7 @@ Forwarded Headers
 
 - المستخدم يدخل عبر `/api/stores/{slug}/auth/login` أو `/api/platform/auth/login`.
 - يتم التحقق من بيانات الدخول بواسطة `IAuthService`.
-- `SignInAsync` يبني ClaimsPrincipal (NameIdentifier, Email, Name, Role, optional `store_id`) ويصدر Cookie.
+- `SignInSessionAsync` يبني ClaimsPrincipal عبر `RetailFlowClaimsPrincipalFactory` (`NameIdentifier`, `Email`, `Name`, `Role`, `store_id?`, `mfa_enrolled`) ويضيف `amr=mfa` فقط عند التحقق الفعلي من MFA في الجلسة، ثم يصدر Cookie.
 - ASP.NET Core Cookie handler يستخدم `SqlSessionTicketStore` لتخزين AuthenticationTicket في SQL Server.
 - الطلبات التالية تتحقق من cookie وتسترجع ticket من SQL store.
 - Logout يستدعي `SignOutAsync`، ما يطلب إزالة ticket من ticket store.

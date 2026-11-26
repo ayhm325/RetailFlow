@@ -12,4 +12,4 @@ description: Audit RetailFlow documentation against actual repository implementa
 6. Build requirement-to-UC/BR/AC/test/source/commit/CI traceability. Never fill missing evidence by inference.
 7. Review diagrams for Current vs Target accuracy, trust boundaries, state separation, transaction boundaries, and failure paths.
 8. Report audit limitations honestly: files not inspected, tests not run, production/operational checks not performed.
-9. Update `audit/` and control files only after preserving original source reports.
+9. Update affected `doc/` chapters, `doc/09-traceability/Feature-Code-Test-Matrix.md`, and `doc/10-open-items/Production-Gaps-and-Decision-Backlog.md` with verified evidence.

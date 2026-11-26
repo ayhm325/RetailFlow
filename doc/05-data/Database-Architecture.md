@@ -16,7 +16,9 @@ erDiagram
   Products ||--|| InventoryItems : stock
   Products ||--o{ ProductImages : images
   Stores ||--o{ DeliveryZones : defines
-  Stores ||--o{ AppUsers : scopes
+  Stores ||--o{ AspNetUsers : scopes
+  AspNetUsers ||--o{ AspNetUserRoles : assigns
+  AspNetRoles ||--o{ AspNetUserRoles : grants
   Stores ||--o{ Carts : owns
   Carts ||--o{ CartItems : contains
   Stores ||--o{ CheckoutRequests : claims
@@ -24,6 +26,7 @@ erDiagram
   Orders ||--o{ OrderItems : contains
   Orders ||--o{ OrderStatusHistories : records
   Stores ||--o{ SessionTickets : scopes
+  DataProtectionKeys ||--o{ DataProtectionKeys : "XML key ring"
 ```
 
 المخطط توضيحي للعلاقات العامة؛ راجع EF configurations وmigrations لتفاصيل المفاتيح المركبة والـ delete behaviors.
@@ -48,7 +51,7 @@ erDiagram
 - Check constraints لحالة Store/Order/Product وبعض القيم غير السالبة والكميات.
 - `decimal(19,4)` للأسعار والإجماليات ورسوم التوصيل.
 - `datetimeoffset(3)` أو precision 3 للتواريخ الزمنية في أغلب الجداول.
-- SQL Server `rowversion` على InventoryItem وOrder (وفق config).
+- SQL Server `rowversion` على `InventoryItem`, `Order`, `Cart`, و`CartItem` (وفق EF configurations).
 - `Restrict` delete behavior في علاقات أساسية لتجنب الحذف المتسلسل غير المقصود.
 
 ## 5. Concurrency
@@ -60,10 +63,10 @@ erDiagram
 EF Core يلف التغييرات داخل SaveChanges واحدة بtransaction عند استخدام provider علائقي. لكن العمليات التي تنفذ عدة SaveChanges أو عدة contexts ليست تلقائياً معاملة واحدة.
 
 في `CheckoutService`:
-- claim يتم حفظه في SaveChanges أولى.
-- ثم تتم قراءة البيانات والتغييرات على المخزون والطلب والسلة واكتمال claim، وتحفظ في SaveChanges ثانية.
+- claim الأول (`CheckoutRequest`) يُحفظ في `SaveChangesAsync` أولى مع `ClaimToken` و`LeaseExpiresAtUtc` (`60s`).
+- ثم تُفتح معاملة `ReadCommitted` صريحة تُقرأ فيها البيانات وتُنفذ تغييرات المخزون والطلب والسلة واكتمال claim (مع التحقق من `ClaimToken` و`LeaseExpiresAtUtc`)، وتُحفظ وتُعتمد (`CommitAsync`) معاً.
 
-العملية الثانية تُحفظ معاً في SaveChanges واحدة، لكن سجل claim الأول خارجها. لا تكتب في وصف النظام أن كامل checkout (من claim إلى order) transaction واحدة.
+العملية الثانية تُحفظ وتُعتمد ذرياً داخل `BeginTransactionAsync(IsolationLevel.ReadCommitted)`، لكن سجل claim الأول خارجها. لا تكتب في وصف النظام أن كامل checkout (من claim إلى order) transaction واحدة.
 
 ## 7. النسخ الاحتياطي والاستعادة
 

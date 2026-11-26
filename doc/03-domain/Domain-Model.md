@@ -12,10 +12,10 @@
 | ProductImage | StoreId, ProductId, ImageUrl, AltText, SortOrder | HTTP/HTTPS absolute URL وحدود طول ونظام ترتيب |
 | InventoryItem | StoreId, ProductId, OnHand, Reserved, RowVersion | Available = OnHand - Reserved؛ Reserve/Release/Commit/SetOnHand |
 | DeliveryZone | StoreId, Name, NormalizedName, FlatFee, IsEnabled | رسم ثابت غير سالب بعملة المتجر |
-| AppUser | StoreId?, Email, NormalizedEmail, Role, IsActive, PasswordHash | حسابات متجر أو PlatformAdmin |
-| SessionTicket | Key, UserId, StoreId?, Value, ExpiresAtUtc, LastSeenAtUtc | Renew للـ server-side ticket |
-| Cart / CartItem | StoreId, CustomerId, ProductId, Quantity | Cart واحدة لكل store/customer بحسب unique index |
-| CheckoutRequest | StoreId, CustomerId, IdempotencyKey, RequestHash, Status, OrderId, ExpiresAtUtc | Claim/MarkCompleted/MarkFailed |
+| RetailFlowIdentityUser / AppRole | Id, StoreId?, Email, NormalizedEmail, IsActive, TwoFactorEnabled, MfaEnrollmentStatus | ASP.NET Core Identity (`AspNetUsers` + `AspNetRoles`: `Customer`, `MerchantOwner`, `PlatformAdmin`) |
+| SessionTicket | Key, UserId, StoreId?, Value, CreatedAtUtc, ExpiresAtUtc, LastSeenAtUtc, AbsoluteExpiresAtUtc | server-side ticket مع idle وabsolute timeout |
+| Cart / CartItem | StoreId, CustomerId, ProductId, Quantity, RowVersion | Cart واحدة لكل store/customer مع SQL `rowversion` للتزامن التفاؤلي |
+| CheckoutRequest | StoreId, CustomerId, IdempotencyKey, RequestHash, Status, ClaimToken, LeaseExpiresAtUtc, OrderId, ExpiresAtUtc | Claim / Lease (60s) / Recovery / MarkCompleted / MarkFailed |
 | Order | StoreId, CustomerId, OrderNumber, Status axes, totals, fulfillment details | Domain methods تتحكم بالانتقالات وتسجل History |
 | OrderItem | Product snapshot, SKU, unit price, quantity, line total | يحفظ بيانات المنتج وقت الطلب |
 | OrderStatusHistory | from/to statuses, actor, note, timestamp | يسجل الانتقالات |

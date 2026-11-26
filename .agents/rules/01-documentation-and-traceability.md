@@ -9,4 +9,4 @@ description: Apply when creating, reviewing, changing, or closing project docume
 - Do not use generic placeholders such as "test required" as acceptance evidence.
 - Keep Current and Target artifacts distinct. Label diagrams and schemas with status and source commit.
 - When evidence is missing, mark it Missing/Unknown; do not infer it.
-- Update `WORK-LOG.md` by appending; do not rewrite historical entries.
+- Update `doc/09-traceability/Feature-Code-Test-Matrix.md` and `doc/10-open-items/Production-Gaps-and-Decision-Backlog.md` when verified facts or gap statuses change.

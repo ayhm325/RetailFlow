@@ -14,14 +14,14 @@ RetailFlow هو Product Host لإدارة متاجر متعددة (multi-store /
 | MerchantOwner | يدير إعدادات المتجر والكتالوج والمخزون والطلبات | `MerchantOwner` |
 | PlatformAdmin | ينشئ المتاجر ويوافق/يرفض/يعلق المتاجر وينشئ حساب مالك متجر | `PlatformAdmin` |
 
-**CODE:** `src/RetailFlow.Domain/Identity/AppUser.cs`, `src/RetailFlow.Api/Hosting/ProductHostExtensions.cs`, `AuthEndpoints.cs`, `MerchantEndpoints.cs`, `PlatformAdminEndpoints.cs`.
+**CODE:** `src/RetailFlow.Domain/Identity/AppRole.cs`, `src/RetailFlow.Infrastructure/Identity/RetailFlowIdentityUser.cs`, `src/RetailFlow.Api/Hosting/ProductHostExtensions.cs`, `AuthEndpoints.cs`, `MerchantEndpoints.cs`, `PlatformAdminEndpoints.cs`.
 
-## 3. الحدود الحالية
+## 3. الحدود الحالية والقرارات المعتمدة
 
-- الواجهة الموجودة في هذا المستودع هي HTTP API؛ لم يظهر React/TypeScript frontend في baseline.
-- يوجد SPA fallback في Product Host لتقديم `wwwroot/index.html` عند وجوده، لكن ملفات SPA نفسها لم تظهر في Git tree.
-- لا يوجد Provider دفع إلكتروني في Product Host؛ الحالات الموجودة تدعم Pending/Collected/Voided ويظهر مسار COD في endpoint/service.
-- لا يوجد دليل على تكامل شحن خارجي أو إشعارات بريد/SMS أو تقارير مالية أو مخزون متعدد المستودعات.
+- **نطاق MVP التجاري (`ADR-007`):** الهدف بناء MVP تجاري قابل للإنتاج (ليس Demo)، مع قصر الدفع على `COD` في هذه المرحلة دون بناء بوابة دفع إلكتروني، مع الحفاظ على فصل محاور الدفع والطلب للتوسع مستقبلاً.
+- **الواجهة المستهدفة (`ADR-007`):** الواجهة المستقبلية `React` ستُستضاف داخل ASP.NET Core Product Host بنمط Same-Origin؛ وحتى الآن لم يظهر كود React/TypeScript في المستودع (يوجد SPA fallback في `Program.cs` لتقديم `wwwroot/index.html` عند توفره).
+- **البريد الإلكتروني:** `SmtpEmailSender` و`IRetailFlowEmailSender` منفذان لدعم استعادة كلمة المرور وتأكيد البريد، لكن إعدادات SMTP الإنتاجية لا تزال معلقة قبل التشغيل الحي (`GAP-009`).
+- لا يوجد دليل على تكامل شحن خارجي أو SMS أو تقارير مالية أو مخزون متعدد المستودعات.
 - `IdentitySpike` و`SessionTransportSpike` مشاريع مستقلة للتجارب؛ لا تخلطها مع مسار Product Host.
 
 ## 4. خصائص المنتج الملحوظة

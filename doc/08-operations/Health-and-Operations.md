@@ -11,7 +11,7 @@
 
 ## Logging
 
-`src/RetailFlow.Api/appsettings.json` يحدد Default=Information وMicrosoft.AspNetCore=Warning. لا يظهر ضمن الملفات الأساسية التي تم فحصها إعداد OpenTelemetry أو metrics exporter أو distributed tracing أو audit event pipeline.
+`src/RetailFlow.Api/appsettings.json` يحدد Default=Information وMicrosoft.AspNetCore=Warning. توجد سجلات تدقيق مهيكلة في الكود (`RetailFlow.Audit.Auth`, `RetailFlow.Audit.Platform`, `SqlSessionTicketStore`, `DataProtectionSetup`)، لكن لا يظهر حتى الآن إعداد OpenTelemetry أو metrics exporter أو distributed tracing (`GAP-015`).
 
 ## ما يجب قياسه قبل Production
 
@@ -22,7 +22,7 @@
 - Active/expired SessionTickets and storage growth.
 - Failed login and rate-limit events.
 - 401/403 per route and tenant boundary violations.
-- Background reservation release lag (بعد تصميم worker).
+- Background reservation release lag (`MaintenanceBackgroundService`).
 
 ## Data operations
 

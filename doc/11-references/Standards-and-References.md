@@ -10,14 +10,19 @@
 4. **EF Core Transactions** — SaveChanges transactions, explicit transactions and savepoints: https://learn.microsoft.com/en-us/ef/core/saving/transactions
 5. **EF Core Handling Concurrency Conflicts** — optimistic concurrency and SQL Server rowversion: https://learn.microsoft.com/en-us/ef/core/saving/concurrency
 6. **EF Core Saving Data** — atomicity of a SaveChanges call on relational providers: https://learn.microsoft.com/en-us/ef/core/saving/
+7. **ASP.NET Core Multi-factor authentication (MFA)** — `amr` claim and session assurance: https://learn.microsoft.com/en-us/aspnet/core/security/authentication/mfa?view=aspnetcore-10.0
+8. **ASP.NET Core Data Protection key storage & encryption at rest**: https://learn.microsoft.com/en-us/aspnet/core/security/data-protection/configuration/overview?view=aspnetcore-10.0
 
-## OWASP
+## OWASP & NIST & RFC
 
-7. **OWASP ASVS 5.0.0** — Application Security Verification Standard; stable release published 30 May 2025: https://asvs.owasp.org/
-8. **OWASP API Security Top 10 2023**: https://owasp.org/www-project-api-security/
-9. **OWASP Password Storage Cheat Sheet** — adaptive password hashing and algorithm parameters: https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
-10. **OWASP Session Management Cheat Sheet** — cookie and server-side session practices: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
-11. **OWASP CSRF Prevention Cheat Sheet** — Origin/Referer and token-based defenses: https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
+9. **OWASP ASVS 5.0.0** — Application Security Verification Standard; stable release published 30 May 2025: https://asvs.owasp.org/
+10. **OWASP API Security Top 10 2023**: https://owasp.org/www-project-api-security/
+11. **OWASP Password Storage Cheat Sheet** — adaptive password hashing and algorithm parameters: https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+12. **OWASP Session Management Cheat Sheet** — cookie and server-side session practices: https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html
+13. **OWASP Multifactor Authentication Cheat Sheet**: https://cheatsheetseries.owasp.org/cheatsheets/Multifactor_Authentication_Cheat_Sheet.html
+14. **OWASP CSRF Prevention Cheat Sheet** — Origin/Referer and token-based defenses: https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
+15. **NIST SP 800-63B-4** — Digital Identity Guidelines (Authentication and Lifecycle Management): https://pages.nist.gov/800-63-4/sp800-63b.html
+16. **RFC 6238** — TOTP: Time-Based One-Time Password Algorithm: https://www.rfc-editor.org/rfc/rfc6238.html
 
 ## Architecture documentation / experts
 

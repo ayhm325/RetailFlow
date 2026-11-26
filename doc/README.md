@@ -1,11 +1,11 @@
 # RetailFlow — حزمة التوثيق الهندسي
 
-**الإصدار:** 1.0.0 (Initial Code-Derived Baseline)  
-**تاريخ إعداد الحزمة:** 2026-11-26  
+**الإصدار:** 1.1.0 (Code-Derived & Reconciled Baseline)  
+**تاريخ التحديث:** 2026-11-26  
 **المستودع:** https://github.com/ayhm325/RetailFlow  
 **الفرع المرجعي:** `main`  
-**Commit المرجعي:** `b279883a664e5f515a1049fbf7055865d6f5b662`  
-**حالة الوثائق:** Draft — Code-derived, not an approved product specification
+**Commit المرجعي:** `ef1cdfc2097653abedbac1f8e5f2deb1d80a8641`  
+**حالة الوثائق:** Reviewed — Code-derived with Approved Product Decisions (`ADR-007`)
 
 > هذه الحزمة أُنشئت انطلاقاً من الكود وإعدادات البناء والاختبارات في الـ commit أعلاه. لم يتم استخدام ملفات التوثيق الموجودة في المستودع كمصدر للحقيقة. عند التعارض، الكود هو دليل التنفيذ، والاختبارات دليل سلوك مختبَر، والمراجع الرسمية دليل للممارسة الموصى بها؛ ولا يحوّل أي منها الميزة غير الموجودة إلى ميزة منفذة.
 
@@ -30,11 +30,14 @@ RetailFlow_Documentation_v1.0/
 │   ├── Architecture-Diagrams.md
 │   └── adr/
 │       ├── README.md
+│       ├── ADR-TEMPLATE.md
 │       ├── ADR-001-Layered-Product-Host.md
 │       ├── ADR-002-SQL-Server-and-EF-Core.md
 │       ├── ADR-003-Store-Scoped-Tenancy.md
 │       ├── ADR-004-Cookie-Authentication-and-Server-Side-Tickets.md
-│       └── ADR-005-Checkout-Idempotency-and-Inventory-Reservation.md
+│       ├── ADR-005-Checkout-Idempotency-and-Inventory-Reservation.md
+│       ├── ADR-006-ASP.NET-Core-Identity-Adoption.md
+│       └── ADR-007-Commercial-MVP-Same-Origin-React-and-COD.md
 ├── 03-domain/
 │   ├── Domain-Model.md
 │   └── Commerce-Lifecycle.md

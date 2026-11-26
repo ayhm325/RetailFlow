@@ -39,7 +39,7 @@ RetailFlow.Application ───────────────► RetailFl
 - Stores: Store lifecycle, StoreSettings, tenancy context.
 - Catalog: Category, Product, ProductImage, public/merchant catalog services.
 - Inventory: InventoryItem and reservation semantics.
-- Identity: AppUser roles and SessionTicket persistence.
+- Identity: ASP.NET Core Identity (`RetailFlowIdentityUser`, `RetailFlowIdentityRole`, `ScopedUserStore`) و`SessionTicket` persistence.
 - Orders: Cart, CheckoutRequest, Order/OrderItem/History.
 - Fulfillment: DeliveryZone and fulfillment statuses.
 - Currencies: currency code and money precision rules.
@@ -56,11 +56,12 @@ RetailFlow.Application ───────────────► RetailFl
 
 مشروعا `IdentitySpike` و`SessionTransportSpike` لهما solutions وDbContexts/مشاريع مستقلة. CI يبنيهما ويختبرهما منفصلين. لا تعتمد على أي class في هذين المسارين باعتباره مستخدماً في Product Host ما لم يثبت ذلك من `Program.cs` وDI في المنتج.
 
-## 8. حدود المعمارية الحالية
+## 8. حدود المعمارية الحالية والهدف المستقبلي
 
-- لا يوجد React client project في tree.
-- توجد معاملة EF ضمن `SaveChanges` الواحدة؛ العمليات متعددة المراحل عبر أكثر من `SaveChanges` يجب تحليلها بعناية. Checkout يسجل claim أولاً في SaveChanges مستقل، ثم يحفظ order/inventory/cart/claim completion لاحقاً.
-- لا يظهر Outbox, background worker, message broker, distributed cache, external payment adapter أو storage abstraction للصور.
-- لا توجد وثيقة نشر Infrastructure-as-Code في شجرة baseline.
+- **التنفيذ الحالي:** Product Host يخدم HTTP Minimal APIs فقط؛ لا يوجد React client project في tree حتى الآن.
+- **البنية المستهدفة للواجهة (`ADR-007`):** استضافة React SPA مستقبلاً داخل ASP.NET Core Product Host نفسه بنمط Same-Origin.
+- **العامل الخلفي والصيانة:** يوجد `MaintenanceBackgroundService` (`PeriodicTimer`) مسجلاً في `ProductHostExtensions` لتحرير حجوزات المخزون المنتهية وتنظيف `CheckoutRequests` و`SessionTickets` المنتهية؛ كما يوجد `PlatformBootstrapHostedService` لتهيئة أول `PlatformAdmin`.
+- **حدود المعاملات:** في `CheckoutService` يُحفظ الـ claim (`CheckoutRequest`) أولاً في `SaveChangesAsync` مستقل (مع Lease 60s)، ثم تنفذ بقية العملية (Order + Inventory + Cart + Claim completion) داخل معاملة `ReadCommitted` صريحة.
+- لا يظهر Outbox، message broker، distributed cache، external payment adapter، أو object storage للصور، ولا توجد ملفات نشر IaC في الشجرة.
 
 هذه ملاحظات وصفية وليست توصية بأن النظام يجب أن يتبنى الخدمات الموزعة.
