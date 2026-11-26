@@ -416,7 +416,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
             req.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Delivery, zone.Id, "Amman"));
 
             using var resp = await client.SendAsync(req);
-            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, resp.StatusCode);
             var body = await resp.Content.ReadAsStringAsync();
             Assert.DoesNotContain("Insufficient available inventory", body, StringComparison.OrdinalIgnoreCase);
 

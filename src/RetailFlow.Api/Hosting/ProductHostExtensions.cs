@@ -33,6 +33,7 @@ public static class ProductHostExtensions
         ArgumentNullException.ThrowIfNull(environment);
 
         services.AddProblemDetails();
+        services.AddExceptionHandler<RetailFlowExceptionHandler>();
         services.AddOpenApi();
 
         services.AddRetailFlowDataProtection(configuration, environment);
@@ -177,12 +178,12 @@ public static class ProductHostExtensions
         //    so Kestrel must remain isolated behind App Service and live behavior must be verified).
         app.UseForwardedHeaders();
 
-        // 2. Centralized exception handling outside Development (returns RFC 9457 ProblemDetails
+        // 2. Centralized exception handling (returns RFC 9457 ProblemDetails
         //    without exposing stack traces or internal details).
+        app.UseExceptionHandler();
+
         if (!app.Environment.IsDevelopment())
         {
-            app.UseExceptionHandler();
-
             // 3. HSTS outside Development.
             app.UseHsts();
         }

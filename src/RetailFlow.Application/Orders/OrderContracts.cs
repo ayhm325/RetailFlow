@@ -32,7 +32,9 @@ public enum CheckoutOutcomeStatus
     Replayed = 2,
     ConcurrentInFlight = 3,
     PayloadMismatch = 4,
-    ValidationFailed = 5
+    ValidationFailed = 5,
+    BusinessRuleFailed = 6,
+    ConcurrencyConflict = 7
 }
 
 public sealed record CheckoutResult(

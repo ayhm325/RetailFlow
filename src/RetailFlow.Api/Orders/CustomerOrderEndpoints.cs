@@ -121,9 +121,31 @@ public static class CustomerOrderEndpoints
             {
                 CheckoutOutcomeStatus.Created => TypedResults.Created($"/api/stores/{accessor.Current.StoreSlug}/orders/{result.Order!.Id}", result.Order),
                 CheckoutOutcomeStatus.Replayed => TypedResults.Ok(result.Order),
-                CheckoutOutcomeStatus.ConcurrentInFlight => TypedResults.Problem(statusCode: StatusCodes.Status409Conflict, title: "Conflict", detail: result.ErrorDetail),
-                CheckoutOutcomeStatus.PayloadMismatch => TypedResults.Problem(statusCode: StatusCodes.Status422UnprocessableEntity, title: "Idempotency Key Payload Mismatch", detail: result.ErrorDetail),
-                _ => TypedResults.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Checkout Failed", detail: result.ErrorDetail)
+                CheckoutOutcomeStatus.ConcurrentInFlight => TypedResults.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Conflict",
+                    detail: result.ErrorDetail,
+                    extensions: new Dictionary<string, object?> { ["code"] = "checkout_concurrent_in_flight" }),
+                CheckoutOutcomeStatus.ConcurrencyConflict => TypedResults.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Checkout Concurrency Conflict",
+                    detail: result.ErrorDetail,
+                    extensions: new Dictionary<string, object?> { ["code"] = "checkout_concurrency_conflict" }),
+                CheckoutOutcomeStatus.PayloadMismatch => TypedResults.Problem(
+                    statusCode: StatusCodes.Status422UnprocessableEntity,
+                    title: "Idempotency Key Payload Mismatch",
+                    detail: result.ErrorDetail,
+                    extensions: new Dictionary<string, object?> { ["code"] = "checkout_payload_mismatch" }),
+                CheckoutOutcomeStatus.BusinessRuleFailed => TypedResults.Problem(
+                    statusCode: StatusCodes.Status422UnprocessableEntity,
+                    title: "Checkout Business Rule Failed",
+                    detail: result.ErrorDetail,
+                    extensions: new Dictionary<string, object?> { ["code"] = "checkout_business_rule_failed" }),
+                _ => TypedResults.Problem(
+                    statusCode: StatusCodes.Status400BadRequest,
+                    title: "Checkout Validation Failed",
+                    detail: result.ErrorDetail,
+                    extensions: new Dictionary<string, object?> { ["code"] = "checkout_validation_failed" })
             };
         });
 

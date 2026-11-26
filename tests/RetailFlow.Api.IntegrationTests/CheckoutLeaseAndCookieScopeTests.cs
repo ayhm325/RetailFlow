@@ -308,7 +308,7 @@ public sealed class CheckoutLeaseAndCookieScopeTests : IClassFixture<CatalogSqlT
 
             hook.Release();
             var result = await task;
-            Assert.Equal(CheckoutOutcomeStatus.ValidationFailed, result.Status);
+            Assert.Equal(CheckoutOutcomeStatus.ConcurrencyConflict, result.Status);
 
             await using var verifyDb = _fixture.CreateDbContext();
             Assert.Equal(0, await verifyDb.Orders.CountAsync(o => o.StoreId == storeD.Id));

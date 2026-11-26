@@ -11,10 +11,12 @@
 | 401 | بيانات دخول غير صحيحة أو مستخدم غير مصادق |
 | 403 | Authorization أو tenant mismatch أو CSRF marker missing |
 | 404 | متجر غير نشط/غير موجود أو مورد لا يخص المتجر |
-| 409 | Checkout in progress / business transition conflict |
-| 422 | Idempotency key reused with a different request hash |
+| 409 | Checkout in progress / concurrency conflict (`checkout_concurrent_in_flight`, `checkout_concurrency_conflict`, `cart_concurrency_conflict`) |
+| 412 | فشل شرط `If-Match` على Cart (`cart_concurrency_conflict`) |
+| 422 | Idempotency key reused with a different request hash (`checkout_payload_mismatch`) أو فشل قاعدة عمل في Checkout (`checkout_business_rule_failed`) |
 | 429 | Rate limit exceeded |
-| 503 | readiness dependency unavailable |
+| 500 | خطأ خادم داخلي معقم عبر `RetailFlowExceptionHandler` (`internal_server_error` + `traceId`) |
+| 503 | readiness dependency unavailable أو عطل قاعدة بيانات مؤقت (`service_unavailable`) |
 
 ## Problem Details
 
