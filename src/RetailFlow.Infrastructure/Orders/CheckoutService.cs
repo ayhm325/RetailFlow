@@ -47,7 +47,11 @@ public sealed class CheckoutService : ICheckoutService
             .Include(c => c.Items)
             .SingleOrDefaultAsync(c => c.StoreId == storeId && c.CustomerId == customerId, cancellationToken);
 
-        var requestHash = ComputeRequestHash(storeId, customerId, command);
+        var cartSignature = cart is null || cart.Items.Count == 0
+            ? string.Empty
+            : string.Join(",", cart.Items.OrderBy(i => i.ProductId).Select(i => $"{i.ProductId}:{i.Quantity}"));
+
+        var requestHash = ComputeRequestHash(storeId, customerId, command, cartSignature);
 
         // Step 1: Atomic key claim in CheckoutRequests
         var claim = CheckoutRequest.Claim(Guid.NewGuid(), storeId, customerId, normalizedKey, requestHash, now);
@@ -72,7 +76,31 @@ public sealed class CheckoutService : ICheckoutService
                 return new CheckoutResult(CheckoutOutcomeStatus.ConcurrentInFlight, null, "Duplicate checkout in flight.");
             }
 
-            if (!string.Equals(existing.RequestHash, requestHash, StringComparison.Ordinal))
+            if (existing.ExpiresAtUtc <= now)
+            {
+                await _dbContext.CheckoutRequests
+                    .Where(r => r.Id == existing.Id && r.ExpiresAtUtc <= now)
+                    .ExecuteDeleteAsync(cancellationToken);
+
+                return new CheckoutResult(
+                    CheckoutOutcomeStatus.ValidationFailed,
+                    null,
+                    "Expired idempotency key was cleared; please retry.");
+            }
+
+            var effectiveHash = requestHash;
+            OrderDto? completedOrder = null;
+            if (string.IsNullOrEmpty(cartSignature) && existing.Status == CheckoutRequestStatus.Completed && existing.OrderId.HasValue)
+            {
+                completedOrder = await LoadOrderDtoAsync(storeId, existing.OrderId.Value, cancellationToken);
+                if (completedOrder is not null)
+                {
+                    var orderCartSignature = string.Join(",", completedOrder.Items.OrderBy(i => i.ProductId).Select(i => $"{i.ProductId}:{i.Quantity}"));
+                    effectiveHash = ComputeRequestHash(storeId, customerId, command, orderCartSignature);
+                }
+            }
+
+            if (!string.Equals(existing.RequestHash, effectiveHash, StringComparison.Ordinal))
             {
                 return new CheckoutResult(
                     CheckoutOutcomeStatus.PayloadMismatch,
@@ -90,7 +118,7 @@ public sealed class CheckoutService : ICheckoutService
 
             if (existing.Status == CheckoutRequestStatus.Completed && existing.OrderId.HasValue)
             {
-                var replayedOrder = await LoadOrderDtoAsync(storeId, existing.OrderId.Value, cancellationToken);
+                var replayedOrder = completedOrder ?? await LoadOrderDtoAsync(storeId, existing.OrderId.Value, cancellationToken);
                 if (replayedOrder is not null)
                 {
                     return new CheckoutResult(CheckoutOutcomeStatus.Replayed, replayedOrder);
@@ -237,9 +265,10 @@ public sealed class CheckoutService : ICheckoutService
     private static string ComputeRequestHash(
         Guid storeId,
         Guid customerId,
-        CheckoutCommand command)
+        CheckoutCommand command,
+        string cartSignature)
     {
-        var canonical = $"{storeId:N}|{customerId:N}|{(int)command.FulfillmentMode}|{command.DeliveryZoneId:N}|{command.DeliveryAddress?.Trim()}";
+        var canonical = $"{storeId:N}|{customerId:N}|{(int)command.FulfillmentMode}|{command.DeliveryZoneId:N}|{command.DeliveryAddress?.Trim()}|{cartSignature}";
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexString(bytes);
     }

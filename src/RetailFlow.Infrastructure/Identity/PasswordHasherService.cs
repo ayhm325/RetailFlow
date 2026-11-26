@@ -3,13 +3,13 @@ using System.Security.Cryptography;
 namespace RetailFlow.Infrastructure.Identity;
 
 /// <summary>
-/// OWASP-compliant PBKDF2-SHA256 password hashing (310,000 iterations, 128-bit salt, constant-time compare).
+/// OWASP Password Storage Cheat Sheet compliant PBKDF2-HMAC-SHA256 (600,000 iterations, 128-bit salt, constant-time compare).
 /// </summary>
 internal static class PasswordHasherService
 {
     private const int SaltSize = 16;
     private const int KeySize = 32;
-    private const int Iterations = 310_000;
+    private const int Iterations = 600_000;
 
     public static string Hash(string password)
     {

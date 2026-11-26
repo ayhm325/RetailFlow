@@ -31,6 +31,8 @@ public static class ProductHostExtensions
         services.AddOpenApi();
 
         services.AddSingleton<ITicketStore, SqlSessionTicketStore>();
+        services.AddScoped<RetailFlowCookieEvents>();
+        services.AddHostedService<MaintenanceBackgroundService>();
         services
             .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
             .AddCookie(options =>
@@ -42,19 +44,7 @@ public static class ProductHostExtensions
                 options.Cookie.Path = "/";
                 options.SlidingExpiration = true;
                 options.ExpireTimeSpan = TimeSpan.FromHours(12);
-                options.Events = new CookieAuthenticationEvents
-                {
-                    OnRedirectToLogin = ctx =>
-                    {
-                        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                        return Task.CompletedTask;
-                    },
-                    OnRedirectToAccessDenied = ctx =>
-                    {
-                        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        return Task.CompletedTask;
-                    }
-                };
+                options.EventsType = typeof(RetailFlowCookieEvents);
             });
 
         services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
@@ -179,27 +169,37 @@ public static class ProductHostExtensions
                 !HttpMethods.IsHead(context.Request.Method) &&
                 !HttpMethods.IsOptions(context.Request.Method);
 
-            if (isUnsafeMethod &&
-                context.User.Identity?.IsAuthenticated == true &&
-                !string.Equals(context.Request.Headers["X-CSRF"].FirstOrDefault(), "1", StringComparison.Ordinal))
+            if (isUnsafeMethod && context.User.Identity?.IsAuthenticated == true)
             {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                var problemDetailsService = context.RequestServices.GetService<IProblemDetailsService>();
-                if (problemDetailsService is not null)
-                {
-                    await problemDetailsService.WriteAsync(new ProblemDetailsContext
-                    {
-                        HttpContext = context,
-                        ProblemDetails = new ProblemDetails
-                        {
-                            Status = StatusCodes.Status403Forbidden,
-                            Title = "CSRF Validation Failed",
-                            Detail = "Missing or invalid X-CSRF header for authenticated state-changing request."
-                        }
-                    });
-                }
+                var hasCsrfMarker = string.Equals(
+                    context.Request.Headers["X-CSRF"].FirstOrDefault(),
+                    "1",
+                    StringComparison.Ordinal);
 
-                return;
+                var originValid = IsSameOriginIfPresent(context.Request);
+
+                if (!hasCsrfMarker || !originValid)
+                {
+                    context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    var problemDetailsService = context.RequestServices.GetService<IProblemDetailsService>();
+                    if (problemDetailsService is not null)
+                    {
+                        await problemDetailsService.WriteAsync(new ProblemDetailsContext
+                        {
+                            HttpContext = context,
+                            ProblemDetails = new ProblemDetails
+                            {
+                                Status = StatusCodes.Status403Forbidden,
+                                Title = "CSRF Validation Failed",
+                                Detail = !hasCsrfMarker
+                                    ? "Missing or invalid X-CSRF header for authenticated state-changing request."
+                                    : "Origin/Referer header does not match request host."
+                            }
+                        });
+                    }
+
+                    return;
+                }
             }
 
             await next();
@@ -385,6 +385,30 @@ public static class ProductHostExtensions
 
             return ValidateOptionsResult.Success;
         }
+    }
+
+    private static bool IsSameOriginIfPresent(HttpRequest request)
+    {
+        var headerValue = request.Headers.Origin.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(headerValue))
+        {
+            headerValue = request.Headers.Referer.FirstOrDefault();
+        }
+
+        if (string.IsNullOrWhiteSpace(headerValue))
+        {
+            return true;
+        }
+
+        if (!Uri.TryCreate(headerValue, UriKind.Absolute, out var sourceUri))
+        {
+            return false;
+        }
+
+        var expectedPort = request.Host.Port ?? (string.Equals(request.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? 443 : 80);
+        return string.Equals(sourceUri.Scheme, request.Scheme, StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(sourceUri.Host, request.Host.Host, StringComparison.OrdinalIgnoreCase) &&
+               sourceUri.Port == expectedPort;
     }
 
     private static string BuildRateLimitPartitionKey(PathString path, string ip)

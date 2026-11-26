@@ -70,6 +70,25 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
                 new CheckoutCommand(FulfillmentMode.Delivery, null, "Amman"));
             Assert.Equal(HttpStatusCode.Forbidden, missingCsrf.StatusCode);
             Assert.Equal("application/problem+json", missingCsrf.Content.Headers.ContentType?.MediaType);
+
+            // 4. Cross-origin Origin header WITH X-CSRF: 1 -> 403 ProblemDetails (GAP-006)
+            var evilOriginReq = new HttpRequestMessage(HttpMethod.Post, $"/api/stores/{store.Slug}/checkout");
+            evilOriginReq.Headers.Add("X-CSRF", "1");
+            evilOriginReq.Headers.Add("Origin", "https://evil.example");
+            evilOriginReq.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Delivery, null, "Amman"));
+            using var evilOriginResp = await client.SendAsync(evilOriginReq);
+            Assert.Equal(HttpStatusCode.Forbidden, evilOriginResp.StatusCode);
+
+            // 5. Deactivating AppUser invalidates active cookie session (GAP-008)
+            await using (var db = _fixture.CreateDbContext())
+            {
+                var user = await db.AppUsers.SingleAsync(u => u.StoreId == store.Id);
+                user.Deactivate();
+                await db.SaveChangesAsync();
+            }
+
+            using var deactivatedMe = await client.GetAsync($"/api/stores/{store.Slug}/auth/me");
+            Assert.Equal(HttpStatusCode.Unauthorized, deactivatedMe.StatusCode);
         }
         finally
         {
@@ -208,6 +227,17 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
             mismatchReq.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Delivery, zone.Id, "Different St 99"));
             using var mismatchResp = await customerClient.SendAsync(mismatchReq);
             Assert.Equal(HttpStatusCode.UnprocessableEntity, mismatchResp.StatusCode);
+
+            // Reuse same Idempotency-Key & same CheckoutCommand AFTER adding a different cart item -> 422 (GAP-001)
+            using (await customerClient.PutAsJsonAsync($"/api/stores/{storeA.Slug}/cart/items", new UpsertCartItemCommand(product.Id, 1)))
+            {
+                var cartMismatchReq = new HttpRequestMessage(HttpMethod.Post, $"/api/stores/{storeA.Slug}/checkout");
+                cartMismatchReq.Headers.Add("Idempotency-Key", $"idem-{suffix}");
+                cartMismatchReq.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Delivery, zone.Id, "Abdoun St 5"));
+                using var cartMismatchResp = await customerClient.SendAsync(cartMismatchReq);
+                Assert.Equal(HttpStatusCode.UnprocessableEntity, cartMismatchResp.StatusCode);
+            }
+            using (await customerClient.DeleteAsync($"/api/stores/{storeA.Slug}/cart")) { }
 
             // 4. Merchant confirms order -> Customer self-cancellation is blocked (409 Conflict, OD-002)
             using var confirmResp = await merchantClient.PostAsync($"/api/stores/{storeA.Slug}/merchant/orders/{order.Id}/confirm", null);
