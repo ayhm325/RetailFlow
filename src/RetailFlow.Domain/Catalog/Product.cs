@@ -113,4 +113,62 @@ public sealed class Product
             CreatedAtUtc = createdAtUtc.ToUniversalTime()
         };
     }
+
+    public void UpdateDetails(
+        Guid categoryId,
+        string name,
+        decimal price,
+        StoreSettings storeSettings,
+        Currency currency,
+        string? description = null,
+        string? sku = null)
+    {
+        ArgumentNullException.ThrowIfNull(storeSettings);
+        ArgumentNullException.ThrowIfNull(currency);
+
+        if (storeSettings.StoreId != StoreId)
+        {
+            throw new ArgumentException(
+                "StoreSettings does not belong to the product's store.",
+                nameof(storeSettings));
+        }
+
+        if (!string.Equals(storeSettings.CurrencyCode, currency.Code, StringComparison.Ordinal))
+        {
+            throw new ArgumentException(
+                $"Currency '{currency.Code}' does not match store settings currency '{storeSettings.CurrencyCode}'.",
+                nameof(currency));
+        }
+
+        MoneyPrecision.EnsureValidAmount(price, currency.MinorUnit, nameof(price));
+
+        if (categoryId == Guid.Empty)
+        {
+            throw new ArgumentException("CategoryId cannot be empty.", nameof(categoryId));
+        }
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Product name is required.", nameof(name));
+        }
+
+        if (price < 0m)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(price),
+                "Product price cannot be negative.");
+        }
+
+        CategoryId = categoryId;
+        Name = name.Trim();
+        Price = price;
+        Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+        Sku = string.IsNullOrWhiteSpace(sku) ? null : sku.Trim();
+    }
+
+    public void Publish() => Status = ProductStatus.Published;
+
+    public void Archive() => Status = ProductStatus.Archived;
+
+    public void MoveToDraft() => Status = ProductStatus.Draft;
 }

@@ -14,18 +14,15 @@
   - `src/RetailFlow.Domain`
   - `src/RetailFlow.Infrastructure`
   - `tests/RetailFlow.Api.IntegrationTests`
+  - `tests/RetailFlow.Domain.UnitTests`
 - `global.json` pins .NET SDK `10.0.404` with `latestPatch` roll-forward.
 - The current product solution (`RetailFlow.slnx`) and the experimental Identity/SessionTransport solutions (`experiments/IdentitySpike/`, `experiments/SessionTransportSpike/`) remain strictly separate.
 
-## 2. Product Host implementation facts (verified at `04392c8`)
-- **Vertical Slice 01 — Public Store Catalog Read API** is implemented and verified:
-  - Domain model includes `Currency`, `Store`, `StoreSettings`, `Category`, `Product`, `ProductImage`, `InventoryItem`, `MoneyPrecision`, and related value/status types.
-  - Application contains `StoreRequestContext`, store resolution abstractions, catalog query and read DTO/service contracts.
-  - Infrastructure contains `RetailFlowDbContext`, SQL Server persistence, EF Core mappings, 2 migrations, `ConnectionStringResolver`, and `StoreDirectoryResolver`.
-  - API exposes `/health/live`, `/health/ready`, and three public catalog GET endpoints:
-    - `GET /api/stores/{slug}/catalog/categories`
-    - `GET /api/stores/{slug}/catalog/products`
-    - `GET /api/stores/{slug}/catalog/products/{productId:guid}`
+## 2. Product Host implementation facts (verified on `feature/public-store-catalog-read`)
+- **Full Backend Implementation (Public Catalog, Auth/Session, Merchant, Platform Admin, Cart, Checkout & Orders)** is implemented and verified (`11/11` Domain unit tests + `65/65` SQL integration tests on `37f80f5` + local corrective pass):
+  - Domain model includes `Currency`, `Store`, `StoreSettings`, `Category`, `Product`, `ProductImage`, `InventoryItem` (with `Reserve`/`ReleaseReservation`/`CommitReservation`), `DeliveryZone`, `Cart`, `CartItem`, `Order` (`OrderStatus`/`FulfillmentStatus`/`PaymentStatus` per `ADR-0005`, `OD-001` 15-min timeout, `OD-002` `Pending`-only cancel), `OrderItem`, `OrderStatusHistory`, `CheckoutRequest` (`ADR-0006`), `AppUser`, `SessionTicket`, and `MoneyPrecision`.
+  - Application & Infrastructure implement `IPublicCatalogQueryService`, `IMerchantStoreService`, `IMerchantCatalogService`, `IPlatformStoreService`, `ICartService`, `ICheckoutService`, `IOrderService`, `IAuthService`, `SqlSessionTicketStore` (`ITicketStore`), and 5 EF Core migrations against SQL Server.
+  - API exposes `/health/live`, `/health/ready`, Development `/openapi/v1.json`, `RateLimiter` (`429 ProblemDetails`), Security Headers, Cookie + `ITicketStore` Auth + `X-CSRF` protection (`AUTH-ADR-01`), Public Store/Catalog/DeliveryZone endpoints, Auth endpoints, Merchant endpoints, Customer Cart/Checkout/Order endpoints, and Platform Admin endpoints.
 
 ## 3. Identity and session work — do not conflate with Product Host
 - `experiments/IdentitySpike/` and `experiments/SessionTransportSpike/` are isolated experiments.
@@ -36,7 +33,7 @@
 ## 4. Explicitly not established in Product Host
 - ASP.NET Core Identity integration, Authentication, Authorization.
 - Merchant/Admin catalog & store write APIs.
-- Shopping Cart, Checkout, Orders, Payments, Delivery Zones.
+- Shopping Cart, Checkout, Orders, Payments, and DeliveryZone/Merchant write APIs.
 - React frontend/ClientApp (`wwwroot` SPA assets).
 - Production Azure deployment workflow.
 
@@ -47,7 +44,7 @@
 
 ## 6. CI and security observation
 - `.github/workflows/ci.yml` builds Product Host and both PoC solutions, applies EF migrations to SQL Server service containers, runs integration suites and Playwright tests, and uploads test diagnostics.
-- **Open CI Hygiene Finding (`AUD-015`):** `.github/workflows/ci.yml` still contains a literal SQL Server SA test password in workflow environment configuration. Keep out of docs/logs and replace with a per-run generated value in the CI hygiene gate.
+- **CI Hygiene (`AUD-015` — Remediated on branch):** `.github/workflows/ci.yml` now generates a masked per-run ephemeral SQL Server SA password in a `prepare` job instead of a literal password.
 
 ## 7. Required refresh
 At the beginning of every substantial session, compare `e204c9e6f0d570be24fbdb2750889dd464d1e077` / `2c020de` to actual `HEAD`. If it differs, inspect the intervening changes and refresh this file only from evidence.

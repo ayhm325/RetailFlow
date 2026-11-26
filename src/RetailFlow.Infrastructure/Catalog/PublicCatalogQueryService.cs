@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using RetailFlow.Application.Catalog;
 using RetailFlow.Application.Stores;
 using RetailFlow.Domain.Catalog;
+using RetailFlow.Domain.Stores;
 using RetailFlow.Infrastructure.Persistence;
 
 namespace RetailFlow.Infrastructure.Catalog;
@@ -14,6 +15,80 @@ public sealed class PublicCatalogQueryService : IPublicCatalogQueryService
     public PublicCatalogQueryService(RetailFlowDbContext dbContext)
     {
         _dbContext = dbContext;
+    }
+
+    public async Task<PublicStoreIdentityDto?> GetStoreIdentityAsync(
+        StoreRequestContext store,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        return await _dbContext.Stores
+            .AsNoTracking()
+            .Where(s =>
+                s.Id == store.StoreId &&
+                s.Status == StoreStatus.Active &&
+                s.Settings != null)
+            .Select(s => new PublicStoreIdentityDto(
+                s.Name,
+                s.Slug,
+                s.StoreType,
+                s.Settings!.CurrencyCode,
+                s.LogoUrl,
+                s.PrimaryColor,
+                s.ContactEmail,
+                s.ContactPhone,
+                s.Settings.DeliveryEnabled,
+                s.StoreType == StoreType.Physical && s.Settings.PickupEnabled,
+                s.StoreType == StoreType.Physical ? s.Settings.PublicAddress : null))
+            .SingleOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<PublicDeliveryZonesResponse?> GetEnabledDeliveryZonesAsync(
+        StoreRequestContext store,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        var storeInfo = await _dbContext.Stores
+            .AsNoTracking()
+            .Where(s =>
+                s.Id == store.StoreId &&
+                s.Status == StoreStatus.Active &&
+                s.Settings != null)
+            .Select(s => new
+            {
+                s.Name,
+                s.Slug,
+                s.Settings!.CurrencyCode,
+                s.Settings.DeliveryEnabled
+            })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (storeInfo is null)
+        {
+            return null;
+        }
+
+        IReadOnlyList<PublicDeliveryZoneDto> zones = storeInfo.DeliveryEnabled
+            ? await _dbContext.DeliveryZones
+                .AsNoTracking()
+                .Where(z => z.StoreId == store.StoreId && z.IsEnabled)
+                .OrderBy(z => z.Name)
+                .ThenBy(z => z.Id)
+                .Select(z => new PublicDeliveryZoneDto(
+                    z.Id,
+                    z.Name,
+                    z.FlatFee))
+                .ToListAsync(cancellationToken)
+            : Array.Empty<PublicDeliveryZoneDto>();
+
+        return new PublicDeliveryZonesResponse(
+            storeInfo.Name,
+            storeInfo.Slug,
+            storeInfo.CurrencyCode,
+            storeInfo.DeliveryEnabled,
+            zones);
     }
 
     public async Task<CatalogCategoriesResponse> GetCategoriesAsync(

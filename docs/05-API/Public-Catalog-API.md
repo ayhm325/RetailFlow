@@ -1,6 +1,6 @@
 # Public Catalog API Reference
 
-**Last Verified:** `2026-11-26` | **Verified Commit:** `04392c875c275e99f4b5ee378f63b3a8b8fc541d`
+**Last Verified:** `2026-11-26` | **Branch:** `feature/public-store-catalog-read`
 
 All endpoints are unauthenticated, read-only, mapped before SPA fallback in [PublicCatalogEndpoints.cs](../../src/RetailFlow.Api/Catalog/PublicCatalogEndpoints.cs), and guarded by [StoreResolutionEndpointFilter.cs](../../src/RetailFlow.Api/Catalog/StoreResolutionEndpointFilter.cs).
 
@@ -8,7 +8,17 @@ All endpoints are unauthenticated, read-only, mapped before SPA fallback in [Pub
 - `{slug}` is normalized (`Trim().ToLowerInvariant()`) and matched against `Stores` where `Status == StoreStatus.Active` and `StoreSettings` + `Currency` exist.
 - Missing or non-active stores (`PendingApproval`, `Suspended`, `Rejected`) return `404 Not Found` (`application/problem+json`).
 
-## 2. Catalog Endpoints
+## 2. Store Identity & Delivery Zone Endpoints
+
+### `GET /api/stores/{slug}`
+- **Response (`200 OK`):** `PublicStoreIdentityDto` (`StoreName`, `StoreSlug`, `StoreType`, `CurrencyCode`, `LogoUrl`, `PrimaryColor`, `ContactEmail`, `ContactPhone`, `DeliveryEnabled`, `PickupEnabled`, `PublicAddress`).
+- **Privacy & StoreType Rules (`BR-011`, `ST-04`):** Never exposes internal `FulfillmentAddress`; for `OnlineOnly` stores, `PickupEnabled` is `false` and `PublicAddress` is `null`.
+
+### `GET /api/stores/{slug}/delivery-zones`
+- **Response (`200 OK`):** `PublicDeliveryZonesResponse` (`StoreName`, `StoreSlug`, `CurrencyCode`, `DeliveryEnabled`, `Zones[]` of `PublicDeliveryZoneDto(Id, Name, FlatFee)` ordered by `Name`, `Id`).
+- Returns only enabled zones (`IsEnabled == true`) for the resolved store when `DeliveryEnabled == true`, and an empty `Zones` array when `DeliveryEnabled == false`.
+
+## 3. Catalog Endpoints
 
 ### `GET /api/stores/{slug}/catalog/categories`
 - **Response (`200 OK`):** `CatalogCategoriesResponse` (`StoreName`, `StoreSlug`, `Categories[]` ordered by `SortOrder`, `Name`, `Id`).
@@ -30,6 +40,6 @@ All endpoints are unauthenticated, read-only, mapped before SPA fallback in [Pub
 - **Response (`200 OK`):** `CatalogProductDetailsDto` (includes `Description`, `Sku`, `Price`, `CurrencyCode`, `IsAvailable`, ordered `Images[]`).
 - **Not Found (`404`):** Returned if the product does not exist in the resolved store, is `Draft`/`Archived`, or belongs to an inactive category.
 
-## 3. Operational Health Probes
+## 4. Operational Health Probes
 - `GET /health/live`: Process liveness only (`Predicate = _ => false`), `200 Healthy`.
 - `GET /health/ready`: Runs `DatabaseReadinessHealthCheck` (tag `"ready"`), `200 Healthy` when SQL Server is reachable, `503 Unhealthy` otherwise without leaking connection strings.

@@ -87,10 +87,10 @@ foreach ($id in $expectedBRs) {
     Assert-Condition ($actualBRs -contains $id) "Missing canonical BR ID: $id"
 }
 
-$expectedNFRs = 1..11 | ForEach-Object { "NFR-{0:D3}" -f $_ }
+$expectedNFRs = 1..12 | ForEach-Object { "NFR-{0:D3}" -f $_ }
 $actualNFRs = @($nfrRows | ForEach-Object { $_.NFR_ID.Trim() })
-Assert-Condition ($actualNFRs.Count -eq 11) "Expected 11 NFR rows (NFR-001..NFR-011), found $($actualNFRs.Count)"
-Assert-Condition ((@($actualNFRs | Select-Object -Unique)).Count -eq 11) "Duplicate NFR_ID detected"
+Assert-Condition ($actualNFRs.Count -eq 12) "Expected 12 NFR rows (NFR-001..NFR-012), found $($actualNFRs.Count)"
+Assert-Condition ((@($actualNFRs | Select-Object -Unique)).Count -eq 12) "Duplicate NFR_ID detected"
 foreach ($id in $expectedNFRs) {
     Assert-Condition ($actualNFRs -contains $id) "Missing canonical NFR ID: $id"
 }
@@ -174,7 +174,38 @@ foreach ($row in $acRows) {
     }
 }
 
-# 3. Placeholder ban check across Gate 1 files
+# 3. Bidirectional FR <-> UC semantic consistency check
+$ucToFrFromSpec = @{}
+$ucBlocks = [regex]::Split($ucContent, '(?m)^(?=### UC-\d{2}\b)')
+foreach ($block in $ucBlocks) {
+    if ($block -match '^### (UC-\d{2})\b') {
+        $ucId = $Matches[1]
+        if ($block -match '(?m)^- \*\*Functional Requirements:\*\* (.+)$') {
+            $frIds = [regex]::Matches($Matches[1], 'FR-\d{3}') | ForEach-Object { $_.Value }
+            $ucToFrFromSpec[$ucId] = @($frIds | Select-Object -Unique)
+        }
+        else {
+            $ucToFrFromSpec[$ucId] = @()
+        }
+    }
+}
+
+foreach ($row in $frRows) {
+    $frId = $row.FR_ID.Trim()
+    $matrixUcs = Split-Ids $row.RelatedUCs
+    foreach ($ucId in $matrixUcs) {
+        Assert-Condition ($ucToFrFromSpec[$ucId] -contains $frId) "Bidirectional mismatch: $frId lists $ucId in FR matrix, but $ucId does not list $frId in Use-Case-Specifications.md"
+    }
+}
+foreach ($ucId in $expectedUCs) {
+    foreach ($frId in $ucToFrFromSpec[$ucId]) {
+        $frRow = $frRows | Where-Object { $_.FR_ID.Trim() -eq $frId } | Select-Object -First 1
+        $matrixUcs = if ($frRow) { Split-Ids $frRow.RelatedUCs } else { @() }
+        Assert-Condition ($matrixUcs -contains $ucId) "Bidirectional mismatch: $ucId lists $frId in Use-Case-Specifications.md, but $frId does not list $ucId in FR matrix"
+    }
+}
+
+# 4. Placeholder ban check across Gate 1 files
 $forbiddenPatterns = @('TO BE MAPPED', 'MISSING - add', 'See relevant AC')
 foreach ($file in @($frPath, $brPath, $nfrPath, $acPath, $ucPath, $acRecPath, $clOdPath)) {
     $raw = Get-Content -LiteralPath $file -Raw
@@ -187,7 +218,7 @@ Write-Output "Gate 1 Baseline Validation Summary (Mechanical Checks Only)"
 Write-Output "Repository Root : $RepoRoot"
 Write-Output "FR Rows         : $($frRows.Count) / 42"
 Write-Output "BR Rows         : $($brRows.Count) / 12"
-Write-Output "NFR Rows        : $($nfrRows.Count) / 11"
+Write-Output "NFR Rows        : $($nfrRows.Count) / 12"
 Write-Output "AC Rows         : $($acRows.Count) / 8"
 Write-Output "UC Sections     : $($ucMatches.Count) / 10"
 Write-Output "Checks Passed   : $checksPassed"

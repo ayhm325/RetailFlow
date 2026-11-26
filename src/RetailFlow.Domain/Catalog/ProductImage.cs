@@ -2,6 +2,9 @@ namespace RetailFlow.Domain.Catalog;
 
 public sealed class ProductImage
 {
+    public const int MaxImageUrlLength = 1000;
+    public const int MaxAltTextLength = 250;
+
     private ProductImage()
     {
         ImageUrl = string.Empty;
@@ -47,13 +50,36 @@ public sealed class ProductImage
             throw new ArgumentException("ImageUrl is required.", nameof(imageUrl));
         }
 
+        var trimmedUrl = imageUrl.Trim();
+        if (trimmedUrl.Length > MaxImageUrlLength)
+        {
+            throw new ArgumentException($"ImageUrl cannot exceed {MaxImageUrlLength} characters.", nameof(imageUrl));
+        }
+
+        if (!Uri.TryCreate(trimmedUrl, UriKind.Absolute, out var parsedUri) ||
+            (parsedUri.Scheme != Uri.UriSchemeHttp && parsedUri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new ArgumentException("ImageUrl must be an absolute HTTP or HTTPS URL.", nameof(imageUrl));
+        }
+
+        if (sortOrder < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sortOrder), "SortOrder cannot be negative.");
+        }
+
+        var normalizedAltText = string.IsNullOrWhiteSpace(altText) ? null : altText.Trim();
+        if (normalizedAltText is { Length: > MaxAltTextLength })
+        {
+            throw new ArgumentException($"AltText cannot exceed {MaxAltTextLength} characters.", nameof(altText));
+        }
+
         return new ProductImage
         {
             Id = id,
             StoreId = storeId,
             ProductId = productId,
-            ImageUrl = imageUrl.Trim(),
-            AltText = string.IsNullOrWhiteSpace(altText) ? null : altText.Trim(),
+            ImageUrl = trimmedUrl,
+            AltText = normalizedAltText,
             SortOrder = sortOrder
         };
     }

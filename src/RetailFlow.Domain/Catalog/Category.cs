@@ -58,4 +58,26 @@ public sealed class Category
             SortOrder = sortOrder
         };
     }
+
+    public void Update(
+        string name,
+        string slug,
+        bool isActive,
+        int sortOrder)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            throw new ArgumentException("Category name is required.", nameof(name));
+        }
+
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            throw new ArgumentException("Category slug is required.", nameof(slug));
+        }
+
+        Name = name.Trim();
+        Slug = slug.Trim().ToLowerInvariant();
+        IsActive = isActive;
+        SortOrder = sortOrder;
+    }
 }

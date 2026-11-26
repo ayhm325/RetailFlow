@@ -21,15 +21,15 @@ Gate 1 Baseline Validation Summary (Mechanical Checks Only)
 Repository Root : C:\Users\ayhm3\source\RetailFlow
 FR Rows         : 42 / 42
 BR Rows         : 12 / 12
-NFR Rows        : 11 / 11
+NFR Rows        : 12 / 12
 AC Rows         : 8 / 8
 UC Sections     : 10 / 10
-Checks Passed   : 796
+Checks Passed   : 911
 Failures        : 0
 RESULT: PASS (Mechanical integrity verified; semantic review & PO approval remain separate gates)
 ```
 
 ## 3. Checks Enforced vs. Limitations
 
-1. **Automated Mechanical Checks:** Completeness & uniqueness (`FR-001`–`FR-042`, `BR-001`–`BR-012`, `NFR-001`–`NFR-011`, `AC-01`–`AC-08`, `UC-01`–`UC-10`), bidirectional cross-reference resolution, status-combination guards (`Not Implemented`/`PoC Only` cannot claim `Passed`/`Partially Verified`; `Partially Implemented` cannot claim `Passed`), placeholder bans, source/test file existence, and C# test method name resolution inside `tests/`.
+1. **Automated Mechanical Checks:** Completeness & uniqueness (`FR-001`–`FR-042`, `BR-001`–`BR-012`, `NFR-001`–`NFR-012`, `AC-01`–`AC-08`, `UC-01`–`UC-10`), bidirectional `FR <-> UC` equality between `Requirements-Traceability-Matrix.csv` and `Use-Case-Specifications.md`, cross-reference resolution, status-combination guards (`Not Implemented`/`PoC Only` cannot claim `Passed`/`Partially Verified`; `Partially Implemented` cannot claim `Passed`), placeholder bans, source/test file existence, and C# test method name resolution inside `tests/`.
 2. **Not Proven by This Script:** Semantic accuracy of business rules, runtime `.NET` test execution, or Product Owner / Architecture approval.

@@ -25,6 +25,16 @@ public sealed class StoreSettings
 
     public bool PickupEnabled { get; private set; }
 
+    /// <summary>
+    /// Optional customer-facing store visit address (allowed only for Physical stores; ST-04).
+    /// </summary>
+    public string? PublicAddress { get; private set; }
+
+    /// <summary>
+    /// Internal fulfillment/dispatch address. Must never be exposed in public storefront responses (FR-006 / BR-011 / ST-04).
+    /// </summary>
+    public string? FulfillmentAddress { get; private set; }
+
     public Currency? Currency { get; private set; }
 
     public static StoreSettings Create(
@@ -33,7 +43,9 @@ public sealed class StoreSettings
         Currency currency,
         string timeZoneId,
         bool deliveryEnabled,
-        bool pickupEnabled)
+        bool pickupEnabled,
+        string? publicAddress = null,
+        string? fulfillmentAddress = null)
     {
         if (id == Guid.Empty)
         {
@@ -55,6 +67,13 @@ public sealed class StoreSettings
                 "Pickup cannot be enabled for OnlineOnly stores.");
         }
 
+        var normalizedPublicAddress = NormalizeOptional(publicAddress);
+        if (store.StoreType == StoreType.OnlineOnly && normalizedPublicAddress is not null)
+        {
+            throw new InvalidOperationException(
+                "OnlineOnly stores cannot define a public visit address.");
+        }
+
         if (string.IsNullOrWhiteSpace(timeZoneId))
         {
             throw new ArgumentException("TimeZoneId is required.", nameof(timeZoneId));
@@ -67,7 +86,9 @@ public sealed class StoreSettings
             CurrencyCode = currency.Code,
             TimeZoneId = timeZoneId.Trim(),
             DeliveryEnabled = deliveryEnabled,
-            PickupEnabled = pickupEnabled
+            PickupEnabled = pickupEnabled,
+            PublicAddress = normalizedPublicAddress,
+            FulfillmentAddress = NormalizeOptional(fulfillmentAddress)
         };
     }
 
@@ -94,4 +115,32 @@ public sealed class StoreSettings
         DeliveryEnabled = deliveryEnabled;
         PickupEnabled = pickupEnabled;
     }
+
+    public void UpdateAddresses(
+        Store store,
+        string? publicAddress,
+        string? fulfillmentAddress)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+
+        if (store.Id != StoreId)
+        {
+            throw new ArgumentException(
+                "Store does not match these store settings.",
+                nameof(store));
+        }
+
+        var normalizedPublicAddress = NormalizeOptional(publicAddress);
+        if (store.StoreType == StoreType.OnlineOnly && normalizedPublicAddress is not null)
+        {
+            throw new InvalidOperationException(
+                "OnlineOnly stores cannot define a public visit address.");
+        }
+
+        PublicAddress = normalizedPublicAddress;
+        FulfillmentAddress = NormalizeOptional(fulfillmentAddress);
+    }
+
+    private static string? NormalizeOptional(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

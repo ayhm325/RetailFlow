@@ -12,20 +12,67 @@ public static class PublicCatalogEndpoints
     {
         ArgumentNullException.ThrowIfNull(app);
 
-        var group = app
-            .MapGroup("/api/stores/{slug}/catalog")
+        var storeGroup = app
+            .MapGroup("/api/stores/{slug}")
             .AddEndpointFilter<StoreResolutionEndpointFilter>();
 
+        storeGroup.MapGet("", GetStoreIdentityAsync)
+            .WithName("GetPublicStoreIdentity")
+            .Produces<PublicStoreIdentityDto>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        storeGroup.MapGet("/delivery-zones", GetDeliveryZonesAsync)
+            .WithName("GetPublicStoreDeliveryZones")
+            .Produces<PublicDeliveryZonesResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        var group = storeGroup.MapGroup("/catalog");
+
         group.MapGet("/categories", GetCategoriesAsync)
-            .WithName("GetPublicStoreCategories");
+            .WithName("GetPublicStoreCategories")
+            .Produces<CatalogCategoriesResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapGet("/products", GetProductsAsync)
-            .WithName("GetPublicStoreProducts");
+            .WithName("GetPublicStoreProducts")
+            .Produces<CatalogProductsResponse>(StatusCodes.Status200OK)
+            .ProducesValidationProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         group.MapGet("/products/{productId:guid}", GetProductDetailsAsync)
-            .WithName("GetPublicStoreProductDetails");
+            .WithName("GetPublicStoreProductDetails")
+            .Produces<CatalogProductDetailsDto>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound);
 
         return app;
+    }
+
+    private static async Task<IResult> GetStoreIdentityAsync(
+        IStoreRequestContextAccessor storeContextAccessor,
+        IPublicCatalogQueryService catalogQueryService,
+        CancellationToken cancellationToken)
+    {
+        var store = storeContextAccessor.Current
+            ?? throw new InvalidOperationException("Store context was not resolved.");
+
+        var response = await catalogQueryService.GetStoreIdentityAsync(store, cancellationToken);
+        return response is null
+            ? TypedResults.NotFound()
+            : TypedResults.Ok(response);
+    }
+
+    private static async Task<IResult> GetDeliveryZonesAsync(
+        IStoreRequestContextAccessor storeContextAccessor,
+        IPublicCatalogQueryService catalogQueryService,
+        CancellationToken cancellationToken)
+    {
+        var store = storeContextAccessor.Current
+            ?? throw new InvalidOperationException("Store context was not resolved.");
+
+        var response = await catalogQueryService.GetEnabledDeliveryZonesAsync(store, cancellationToken);
+        return response is null
+            ? TypedResults.NotFound()
+            : TypedResults.Ok(response);
     }
 
     private static async Task<IResult> GetCategoriesAsync(

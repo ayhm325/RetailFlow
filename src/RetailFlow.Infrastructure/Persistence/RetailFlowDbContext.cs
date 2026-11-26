@@ -2,7 +2,10 @@ using Microsoft.EntityFrameworkCore;
 
 using RetailFlow.Domain.Catalog;
 using RetailFlow.Domain.Currencies;
+using RetailFlow.Domain.Fulfillment;
+using RetailFlow.Domain.Identity;
 using RetailFlow.Domain.Inventory;
+using RetailFlow.Domain.Orders;
 using RetailFlow.Domain.Stores;
 
 namespace RetailFlow.Infrastructure.Persistence;
@@ -27,6 +30,24 @@ public sealed class RetailFlowDbContext : DbContext
     public DbSet<ProductImage> ProductImages => Set<ProductImage>();
 
     public DbSet<InventoryItem> InventoryItems => Set<InventoryItem>();
+
+    public DbSet<DeliveryZone> DeliveryZones => Set<DeliveryZone>();
+
+    public DbSet<Cart> Carts => Set<Cart>();
+
+    public DbSet<CartItem> CartItems => Set<CartItem>();
+
+    public DbSet<Order> Orders => Set<Order>();
+
+    public DbSet<OrderItem> OrderItems => Set<OrderItem>();
+
+    public DbSet<OrderStatusHistory> OrderStatusHistories => Set<OrderStatusHistory>();
+
+    public DbSet<CheckoutRequest> CheckoutRequests => Set<CheckoutRequest>();
+
+    public DbSet<AppUser> AppUsers => Set<AppUser>();
+
+    public DbSet<SessionTicket> SessionTickets => Set<SessionTicket>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

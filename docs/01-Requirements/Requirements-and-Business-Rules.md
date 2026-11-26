@@ -8,7 +8,7 @@
 | Artifact | Purpose | Path |
 |---|---|---|
 | **Functional Requirements Matrix** | Complete `FR-001`–`FR-042` lifecycle, implementation, verification & CI evidence | [Requirements-Traceability-Matrix.csv](../09-Audit-and-Traceability/Requirements-Traceability-Matrix.csv) |
-| **Non-Functional Requirements Register** | Complete `NFR-001`–`NFR-009` targets, owners, and verification plans | [NFR-Register.csv](NFR-Register.csv) |
+| **Non-Functional Requirements Register** | Complete `NFR-001`–`NFR-012` targets, Rev2.0 crosswalk, owners & verification | [NFR-Register.csv](NFR-Register.csv) |
 | **Business Rules Traceability Matrix** | Complete `BR-001`–`BR-012` mapped to invariants, aggregates & tests | [Business-Rules-Traceability-Matrix.csv](Business-Rules-Traceability-Matrix.csv) |
 | **Acceptance Criteria Register** | Canonical `AC-01`–`AC-08` acceptance criteria | [Acceptance-Criteria.csv](Acceptance-Criteria.csv) |
 | **AC Reconciliation Report** | Resolution of `AC-07` conflict and external `AC-08`–`AC-10` status | [Acceptance-Criteria-Reconciliation.md](Acceptance-Criteria-Reconciliation.md) |

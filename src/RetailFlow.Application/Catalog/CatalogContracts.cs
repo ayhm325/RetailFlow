@@ -1,4 +1,31 @@
+using RetailFlow.Domain.Stores;
+
 namespace RetailFlow.Application.Catalog;
+
+public sealed record PublicStoreIdentityDto(
+    string StoreName,
+    string StoreSlug,
+    StoreType StoreType,
+    string CurrencyCode,
+    string? LogoUrl,
+    string? PrimaryColor,
+    string? ContactEmail,
+    string? ContactPhone,
+    bool DeliveryEnabled,
+    bool PickupEnabled,
+    string? PublicAddress);
+
+public sealed record PublicDeliveryZoneDto(
+    Guid Id,
+    string Name,
+    decimal FlatFee);
+
+public sealed record PublicDeliveryZonesResponse(
+    string StoreName,
+    string StoreSlug,
+    string CurrencyCode,
+    bool DeliveryEnabled,
+    IReadOnlyList<PublicDeliveryZoneDto> Zones);
 
 public enum CatalogSortOption
 {

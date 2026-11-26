@@ -32,6 +32,12 @@ internal sealed class StoreSettingsConfiguration : IEntityTypeConfiguration<Stor
         builder.Property(x => x.PickupEnabled)
             .IsRequired();
 
+        builder.Property(x => x.PublicAddress)
+            .HasMaxLength(500);
+
+        builder.Property(x => x.FulfillmentAddress)
+            .HasMaxLength(500);
+
         builder.HasOne<Store>()
             .WithOne(x => x.Settings)
             .HasForeignKey<StoreSettings>(x => x.StoreId)

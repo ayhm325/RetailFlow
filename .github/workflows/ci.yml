@@ -22,30 +22,43 @@ jobs:
     name: Build, SQL Integration & Playwright E2E
     runs-on: ubuntu-24.04
 
-    services:
-      sqlserver:
-        image: mcr.microsoft.com/mssql/server:2022-latest
-        env:
-          ACCEPT_EULA: "Y"
-          MSSQL_SA_PASSWORD: "RetailFlow_Ci_Sql_2026!#9a"
-        ports:
-          - 1433:1433
-        options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'RetailFlow_Ci_Sql_2026!#9a' -C -Q 'SELECT 1' || exit 1"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 12
-
     env:
       DOTNET_NOLOGO: "true"
       DOTNET_CLI_TELEMETRY_OPTOUT: "true"
-      RETAILFLOW_CONNECTION: "Server=localhost,1433;Database=RetailFlowProduct;User Id=sa;Password=RetailFlow_Ci_Sql_2026!#9a;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
-      ConnectionStrings__RetailFlow: "Server=localhost,1433;Database=RetailFlowProduct;User Id=sa;Password=RetailFlow_Ci_Sql_2026!#9a;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
-      RETAILFLOW_IDENTITY_SPIKE_CONNECTION: "Server=localhost,1433;Database=RetailFlowIdentitySpike;User Id=sa;Password=RetailFlow_Ci_Sql_2026!#9a;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Start ephemeral SQL Server container
+        run: |
+          PW="$(openssl rand -base64 24 | tr -dc 'A-Za-z0-9' | head -c 20)Aa1!"
+          echo "::add-mask::$PW"
+
+          docker run -d \
+            --name retailflow-sql \
+            -e ACCEPT_EULA=Y \
+            -e "MSSQL_SA_PASSWORD=$PW" \
+            -p 1433:1433 \
+            mcr.microsoft.com/mssql/server:2022-latest
+
+          CONN_PROD="Server=localhost,1433;Database=RetailFlowProduct;User Id=sa;Password=${PW};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
+          CONN_SPIKE="Server=localhost,1433;Database=RetailFlowIdentitySpike;User Id=sa;Password=${PW};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
+          echo "::add-mask::$CONN_PROD"
+          echo "::add-mask::$CONN_SPIKE"
+          echo "RETAILFLOW_CONNECTION=$CONN_PROD" >> "$GITHUB_ENV"
+          echo "ConnectionStrings__RetailFlow=$CONN_PROD" >> "$GITHUB_ENV"
+          echo "RETAILFLOW_IDENTITY_SPIKE_CONNECTION=$CONN_SPIKE" >> "$GITHUB_ENV"
+
+          for i in $(seq 1 24); do
+            if docker exec retailflow-sql /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$PW" -C -Q "SELECT 1" >/dev/null 2>&1; then
+              echo "SQL Server is ready."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "SQL Server failed to become ready."
+          exit 1
 
       - name: Setup .NET SDK from global.json
         uses: actions/setup-dotnet@v4
@@ -106,7 +119,7 @@ jobs:
       - name: Install Playwright Chromium and OS dependencies
         run: pwsh experiments/SessionTransportSpike/tests/RetailFlow.SessionTransportSpike.PlaywrightTests/bin/Release/net10.0/playwright.ps1 install --with-deps chromium
 
-      - name: Run RetailFlow Product Host Integration Tests (Release)
+      - name: Run RetailFlow Product Host Unit & Integration Tests (Release)
         run: |
           dotnet test RetailFlow.slnx \
             --configuration Release \
@@ -152,3 +165,7 @@ jobs:
             TestResults/**/*.trx
             TestResults/**/In/**
             experiments/SessionTransportSpike/tests/RetailFlow.SessionTransportSpike.PlaywrightTests/bin/Release/net10.0/test-artifacts/**
+
+      - name: Stop ephemeral SQL Server container
+        if: always()
+        run: docker rm -f retailflow-sql || true

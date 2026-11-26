@@ -1,8 +1,15 @@
+using System.Security.Claims;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HostFiltering;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
+using RetailFlow.Api.Auth;
+using RetailFlow.Domain.Identity;
 
 namespace RetailFlow.Api.Hosting;
 
@@ -22,6 +29,95 @@ public static class ProductHostExtensions
 
         services.AddProblemDetails();
         services.AddOpenApi();
+
+        services.AddSingleton<ITicketStore, SqlSessionTicketStore>();
+        services
+            .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+            .AddCookie(options =>
+            {
+                options.Cookie.Name = "__Host-RetailFlow.Session";
+                options.Cookie.HttpOnly = true;
+                options.Cookie.SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax;
+                options.Cookie.SecurePolicy = CookieSecurePolicy.Always;
+                options.Cookie.Path = "/";
+                options.SlidingExpiration = true;
+                options.ExpireTimeSpan = TimeSpan.FromHours(12);
+                options.Events = new CookieAuthenticationEvents
+                {
+                    OnRedirectToLogin = ctx =>
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                        return Task.CompletedTask;
+                    },
+                    OnRedirectToAccessDenied = ctx =>
+                    {
+                        ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        return Task.CompletedTask;
+                    }
+                };
+            });
+
+        services.AddOptions<CookieAuthenticationOptions>(CookieAuthenticationDefaults.AuthenticationScheme)
+            .Configure<ITicketStore>((options, ticketStore) => options.SessionStore = ticketStore);
+
+        services.AddAuthorizationBuilder()
+            .AddPolicy("Customer", policy => policy.RequireRole(nameof(AppRole.Customer)))
+            .AddPolicy("MerchantOwner", policy => policy.RequireRole(nameof(AppRole.MerchantOwner)))
+            .AddPolicy("PlatformAdmin", policy => policy.RequireRole(nameof(AppRole.PlatformAdmin)));
+
+        services.Configure<RateLimitingOptions>(configuration.GetSection("RateLimiting"));
+        services.AddRateLimiter();
+        services.AddOptions<RateLimiterOptions>()
+            .Configure<IOptions<RateLimitingOptions>>((options, rateLimitOptions) =>
+            {
+                var settings = rateLimitOptions.Value;
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                options.OnRejected = async (context, cancellationToken) =>
+                {
+                    context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
+                    {
+                        context.HttpContext.Response.Headers.RetryAfter =
+                            ((int)Math.Ceiling(retryAfter.TotalSeconds)).ToString();
+                    }
+
+                    var problemDetailsService = context.HttpContext.RequestServices.GetService<IProblemDetailsService>();
+                    if (problemDetailsService is not null)
+                    {
+                        await problemDetailsService.WriteAsync(new ProblemDetailsContext
+                        {
+                            HttpContext = context.HttpContext,
+                            ProblemDetails = new ProblemDetails
+                            {
+                                Status = StatusCodes.Status429TooManyRequests,
+                                Title = "Too Many Requests",
+                                Detail = "Rate limit exceeded. Please retry later."
+                            }
+                        });
+                    }
+                };
+
+                options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
+                {
+                    if (httpContext.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return RateLimitPartition.GetNoLimiter("health");
+                    }
+
+                    var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                    var partitionKey = BuildRateLimitPartitionKey(httpContext.Request.Path, ip);
+                    return RateLimitPartition.GetFixedWindowLimiter(
+                        partitionKey,
+                        _ => new FixedWindowRateLimiterOptions
+                        {
+                            PermitLimit = Math.Max(1, settings.PermitLimit),
+                            Window = TimeSpan.FromSeconds(Math.Max(1, settings.WindowSeconds)),
+                            QueueLimit = 0,
+                            AutoReplenishment = true
+                        });
+                });
+            });
+
         services.AddHealthChecks()
             .AddCheck<DatabaseReadinessHealthCheck>(
                 "database",
@@ -62,7 +158,55 @@ public static class ProductHostExtensions
         // 4. HTTPS Redirection.
         app.UseHttpsRedirection();
 
-        // 5. Default Files & 6. Static Files for future React SPA assets in wwwroot.
+        // 5. Security Response Headers (OWASP A05 / ASVS V14.4).
+        app.Use(async (context, next) =>
+        {
+            context.Response.Headers.TryAdd("X-Content-Type-Options", "nosniff");
+            context.Response.Headers.TryAdd("X-Frame-Options", "DENY");
+            context.Response.Headers.TryAdd("Referrer-Policy", "strict-origin-when-cross-origin");
+            await next();
+        });
+
+        // 6. Rate Limiting (OWASP API4:2023).
+        app.UseRateLimiter();
+
+        // 7. Authentication, CSRF Protection (OWASP REF-06), & Authorization (AUTH-ADR-01).
+        app.UseAuthentication();
+        app.Use(async (context, next) =>
+        {
+            var isUnsafeMethod =
+                !HttpMethods.IsGet(context.Request.Method) &&
+                !HttpMethods.IsHead(context.Request.Method) &&
+                !HttpMethods.IsOptions(context.Request.Method);
+
+            if (isUnsafeMethod &&
+                context.User.Identity?.IsAuthenticated == true &&
+                !string.Equals(context.Request.Headers["X-CSRF"].FirstOrDefault(), "1", StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                var problemDetailsService = context.RequestServices.GetService<IProblemDetailsService>();
+                if (problemDetailsService is not null)
+                {
+                    await problemDetailsService.WriteAsync(new ProblemDetailsContext
+                    {
+                        HttpContext = context,
+                        ProblemDetails = new ProblemDetails
+                        {
+                            Status = StatusCodes.Status403Forbidden,
+                            Title = "CSRF Validation Failed",
+                            Detail = "Missing or invalid X-CSRF header for authenticated state-changing request."
+                        }
+                    });
+                }
+
+                return;
+            }
+
+            await next();
+        });
+        app.UseAuthorization();
+
+        // 8. Default Files & 9. Static Files for future React SPA assets in wwwroot.
         app.UseDefaultFiles();
         app.UseStaticFiles();
 
@@ -241,5 +385,26 @@ public static class ProductHostExtensions
 
             return ValidateOptionsResult.Success;
         }
+    }
+
+    private static string BuildRateLimitPartitionKey(PathString path, string ip)
+    {
+        if (path.StartsWithSegments("/api/stores", StringComparison.OrdinalIgnoreCase))
+        {
+            var segments = path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments is { Length: >= 3 })
+            {
+                var normalizedSlug = segments[2].Trim().ToLowerInvariant();
+                return $"store:{normalizedSlug}:ip:{ip}";
+            }
+        }
+
+        return $"global:ip:{ip}";
+    }
+
+    private sealed class RateLimitingOptions
+    {
+        public int PermitLimit { get; set; } = 120;
+        public int WindowSeconds { get; set; } = 60;
     }
 }

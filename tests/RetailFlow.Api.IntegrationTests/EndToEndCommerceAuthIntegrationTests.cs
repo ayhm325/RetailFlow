@@ -1,0 +1,290 @@
+using System.Net;
+using System.Net.Http.Json;
+using System.Text.Json;
+
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+
+using RetailFlow.Application.Catalog;
+using RetailFlow.Application.Identity;
+using RetailFlow.Application.Orders;
+using RetailFlow.Application.Stores;
+using RetailFlow.Domain.Catalog;
+using RetailFlow.Domain.Currencies;
+using RetailFlow.Domain.Identity;
+using RetailFlow.Domain.Orders;
+using RetailFlow.Domain.Stores;
+
+namespace RetailFlow.Api.IntegrationTests;
+
+public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<CatalogSqlTestFixture>
+{
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private static readonly Currency Jod = Currency.Create("JOD", "400", 3);
+
+    private readonly CatalogSqlTestFixture _fixture;
+
+    public EndToEndCommerceAuthIntegrationTests(CatalogSqlTestFixture fixture)
+    {
+        _fixture = fixture;
+    }
+
+    [Fact]
+    public async Task UnauthenticatedAndCsrfMissingRequests_AreRejectedWith401And403()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var store = Store.Create(Guid.NewGuid(), "Auth Shop", $"auth-shop-{suffix}", StoreType.OnlineOnly, StoreStatus.Active, DateTimeOffset.UtcNow);
+        var settings = StoreSettings.Create(Guid.NewGuid(), store, Jod, "Asia/Amman", true, false);
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            db.Stores.Add(store);
+            db.StoreSettings.Add(settings);
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            using var client = _fixture.CreateHttpsClient();
+
+            // 1. Unauthenticated protected write endpoints -> 401
+            using var unauthMerchant = await client.PostAsJsonAsync(
+                $"/api/stores/{store.Slug}/merchant/categories",
+                new CreateCategoryCommand("Test", "test", 1, true));
+            Assert.Equal(HttpStatusCode.Unauthorized, unauthMerchant.StatusCode);
+
+            using var unauthCheckout = await client.PostAsJsonAsync(
+                $"/api/stores/{store.Slug}/checkout",
+                new CheckoutCommand(FulfillmentMode.Delivery, null, "Amman"));
+            Assert.Equal(HttpStatusCode.Unauthorized, unauthCheckout.StatusCode);
+
+            // 2. Register Customer (sets __Host-RetailFlow.Session cookie)
+            using var regResp = await client.PostAsJsonAsync(
+                $"/api/stores/{store.Slug}/auth/register",
+                new RegisterCustomerCommand($"cust-{suffix}@example.com", "Customer One", "Str0ngPass!1"));
+            Assert.Equal(HttpStatusCode.Created, regResp.StatusCode);
+
+            // 3. Authenticated unsafe POST WITHOUT X-CSRF: 1 -> 403 ProblemDetails
+            using var missingCsrf = await client.PostAsJsonAsync(
+                $"/api/stores/{store.Slug}/checkout",
+                new CheckoutCommand(FulfillmentMode.Delivery, null, "Amman"));
+            Assert.Equal(HttpStatusCode.Forbidden, missingCsrf.StatusCode);
+            Assert.Equal("application/problem+json", missingCsrf.Content.Headers.ContentType?.MediaType);
+        }
+        finally
+        {
+            await _fixture.DeleteStoresAsync(store.Id);
+        }
+    }
+
+    [Fact]
+    public async Task FullCommerceFlow_Auth_Bola_Idempotency_Od002Cancel_And_Od001Expiry_AllVerified()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var adminId = Guid.NewGuid();
+        var adminEmail = $"admin-{suffix}@retailflow.test";
+        Guid storeAId = Guid.Empty;
+        Guid storeBId = Guid.Empty;
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            // Seed PlatformAdmin directly for bootstrap
+            var adminHash = RetailFlow.Infrastructure.Identity.PasswordHasherService.Hash("Adm1nPass!99");
+            db.AppUsers.Add(AppUser.CreatePlatformAdmin(adminId, adminEmail, "Platform Admin", adminHash, DateTimeOffset.UtcNow));
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            // 1. PlatformAdmin logs in and creates + approves Store A and Store B + MerchantOwner A
+            using var adminClient = _fixture.CreateHttpsClient();
+            adminClient.DefaultRequestHeaders.Add("X-CSRF", "1");
+
+            using var adminLogin = await adminClient.PostAsJsonAsync(
+                "/api/platform/auth/login",
+                new LoginCommand(adminEmail, "Adm1nPass!99"));
+            Assert.Equal(HttpStatusCode.OK, adminLogin.StatusCode);
+
+            using var createStoreAResp = await adminClient.PostAsJsonAsync(
+                "/api/platform/stores",
+                new CreateStoreCommand("Roast A", $"roast-a-{suffix}", StoreType.Physical, "JOD", "Asia/Amman", true, true, "Amman", "Dock A"));
+            Assert.Equal(HttpStatusCode.Created, createStoreAResp.StatusCode);
+            var storeA = await createStoreAResp.Content.ReadFromJsonAsync<PlatformStoreDto>(JsonOptions);
+            storeAId = storeA!.Id;
+            Assert.Equal(StoreStatus.PendingApproval, storeA.Status);
+
+            using var createStoreBResp = await adminClient.PostAsJsonAsync(
+                "/api/platform/stores",
+                new CreateStoreCommand("Roast B", $"roast-b-{suffix}", StoreType.OnlineOnly, "JOD", "Asia/Amman", true, false, null, "Dock B"));
+            Assert.Equal(HttpStatusCode.Created, createStoreBResp.StatusCode);
+            var storeB = await createStoreBResp.Content.ReadFromJsonAsync<PlatformStoreDto>(JsonOptions);
+            storeBId = storeB!.Id;
+            Assert.Equal(StoreStatus.PendingApproval, storeB.Status);
+
+            using var approveBResp = await adminClient.PostAsync($"/api/platform/stores/{storeB.Id}/approve", null);
+            Assert.Equal(HttpStatusCode.NoContent, approveBResp.StatusCode);
+
+            using var approveResp = await adminClient.PostAsync($"/api/platform/stores/{storeA.Id}/approve", null);
+            Assert.Equal(HttpStatusCode.NoContent, approveResp.StatusCode);
+
+            var merchantEmail = $"merch-{suffix}@example.com";
+            using var createMerchResp = await adminClient.PostAsJsonAsync(
+                $"/api/platform/stores/{storeA.Id}/merchant-owner",
+                new CreateMerchantUserCommand(merchantEmail, "Merchant A", "MerchPass!1"));
+            Assert.Equal(HttpStatusCode.Created, createMerchResp.StatusCode);
+
+            // 2. Merchant A logs in, creates Zone, Category, Product (OnHand = 10)
+            using var merchantClient = _fixture.CreateHttpsClient();
+            merchantClient.DefaultRequestHeaders.Add("X-CSRF", "1");
+
+            using var merchLogin = await merchantClient.PostAsJsonAsync(
+                $"/api/stores/{storeA.Slug}/auth/login",
+                new LoginCommand(merchantEmail, "MerchPass!1"));
+            Assert.Equal(HttpStatusCode.OK, merchLogin.StatusCode);
+
+            // Cross-store BOLA: Merchant A cannot write to Store B -> 403 Forbidden
+            using var bolaResp = await merchantClient.PostAsJsonAsync(
+                $"/api/stores/{storeB!.Slug}/merchant/categories",
+                new CreateCategoryCommand("Hijack", "hijack", 1, true));
+            Assert.Equal(HttpStatusCode.Forbidden, bolaResp.StatusCode);
+
+            using var zoneResp = await merchantClient.PostAsJsonAsync(
+                $"/api/stores/{storeA.Slug}/merchant/delivery-zones",
+                new CreateDeliveryZoneCommand("Abdoun", 2.500m, true));
+            Assert.Equal(HttpStatusCode.Created, zoneResp.StatusCode);
+            var zone = await zoneResp.Content.ReadFromJsonAsync<MerchantDeliveryZoneDto>(JsonOptions);
+
+            using var catResp = await merchantClient.PostAsJsonAsync(
+                $"/api/stores/{storeA.Slug}/merchant/categories",
+                new CreateCategoryCommand("Coffee", "coffee", 1, true));
+            Assert.Equal(HttpStatusCode.Created, catResp.StatusCode);
+            var category = await catResp.Content.ReadFromJsonAsync<MerchantCategoryDto>(JsonOptions);
+
+            using var prodResp = await merchantClient.PostAsJsonAsync(
+                $"/api/stores/{storeA.Slug}/merchant/products",
+                new CreateProductCommand(category!.Id, "Kenya AA", "Bright", $"KAA-{suffix}", 12.000m, ProductStatus.Published, 10));
+            Assert.Equal(HttpStatusCode.Created, prodResp.StatusCode);
+            var product = await prodResp.Content.ReadFromJsonAsync<MerchantProductDto>(JsonOptions);
+
+            // 3. Customer registers in Store A, adds 2 units to Cart, and checks out with Idempotency-Key
+            using var customerClient = _fixture.CreateHttpsClient();
+            customerClient.DefaultRequestHeaders.Add("X-CSRF", "1");
+
+            using var custReg = await customerClient.PostAsJsonAsync(
+                $"/api/stores/{storeA.Slug}/auth/register",
+                new RegisterCustomerCommand($"cust2-{suffix}@example.com", "Customer Two", "CustPass!1"));
+            Assert.Equal(HttpStatusCode.Created, custReg.StatusCode);
+
+            using var cartResp = await customerClient.PutAsJsonAsync(
+                $"/api/stores/{storeA.Slug}/cart/items",
+                new UpsertCartItemCommand(product!.Id, 2));
+            Assert.Equal(HttpStatusCode.OK, cartResp.StatusCode);
+
+            var checkoutReq = new HttpRequestMessage(HttpMethod.Post, $"/api/stores/{storeA.Slug}/checkout");
+            checkoutReq.Headers.Add("Idempotency-Key", $"idem-{suffix}");
+            checkoutReq.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Delivery, zone!.Id, "Abdoun St 5"));
+
+            using var checkoutResp = await customerClient.SendAsync(checkoutReq);
+            Assert.Equal(HttpStatusCode.Created, checkoutResp.StatusCode);
+            var order = await checkoutResp.Content.ReadFromJsonAsync<OrderDto>(JsonOptions);
+            Assert.NotNull(order);
+            Assert.Equal(24.000m, order!.Subtotal);
+            Assert.Equal(2.500m, order.DeliveryFee);
+            Assert.Equal(26.500m, order.Total);
+            Assert.Equal(OrderStatus.Pending, order.OrderStatus);
+
+            // Replay same Idempotency-Key & payload -> 200 OK with same OrderId
+            var replayReq = new HttpRequestMessage(HttpMethod.Post, $"/api/stores/{storeA.Slug}/checkout");
+            replayReq.Headers.Add("Idempotency-Key", $"idem-{suffix}");
+            replayReq.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Delivery, zone.Id, "Abdoun St 5"));
+            using var replayResp = await customerClient.SendAsync(replayReq);
+            Assert.Equal(HttpStatusCode.OK, replayResp.StatusCode);
+            var replayed = await replayResp.Content.ReadFromJsonAsync<OrderDto>(JsonOptions);
+            Assert.Equal(order.Id, replayed!.Id);
+
+            // Reuse same Idempotency-Key with DIFFERENT payload -> 422 Unprocessable Entity
+            var mismatchReq = new HttpRequestMessage(HttpMethod.Post, $"/api/stores/{storeA.Slug}/checkout");
+            mismatchReq.Headers.Add("Idempotency-Key", $"idem-{suffix}");
+            mismatchReq.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Delivery, zone.Id, "Different St 99"));
+            using var mismatchResp = await customerClient.SendAsync(mismatchReq);
+            Assert.Equal(HttpStatusCode.UnprocessableEntity, mismatchResp.StatusCode);
+
+            // 4. Merchant confirms order -> Customer self-cancellation is blocked (409 Conflict, OD-002)
+            using var confirmResp = await merchantClient.PostAsync($"/api/stores/{storeA.Slug}/merchant/orders/{order.Id}/confirm", null);
+            Assert.Equal(HttpStatusCode.OK, confirmResp.StatusCode);
+
+            using var cancelAfterConfirm = await customerClient.PostAsync($"/api/stores/{storeA.Slug}/orders/{order.Id}/cancel", null);
+            Assert.Equal(HttpStatusCode.Conflict, cancelAfterConfirm.StatusCode);
+
+            // 5. Merchant advances fulfillment to Delivered and collects COD payment -> Order Completed & Inventory committed
+            using var prepResp = await merchantClient.PostAsJsonAsync(
+                $"/api/stores/{storeA.Slug}/merchant/orders/{order.Id}/fulfillment",
+                new { NextStatus = FulfillmentStatus.Preparing });
+            Assert.Equal(HttpStatusCode.OK, prepResp.StatusCode);
+
+            using var outResp = await merchantClient.PostAsJsonAsync(
+                $"/api/stores/{storeA.Slug}/merchant/orders/{order.Id}/fulfillment",
+                new { NextStatus = FulfillmentStatus.OutForDelivery });
+            Assert.Equal(HttpStatusCode.OK, outResp.StatusCode);
+
+            using var delivResp = await merchantClient.PostAsJsonAsync(
+                $"/api/stores/{storeA.Slug}/merchant/orders/{order.Id}/fulfillment",
+                new { NextStatus = FulfillmentStatus.Delivered });
+            Assert.Equal(HttpStatusCode.OK, delivResp.StatusCode);
+
+            using var collectResp = await merchantClient.PostAsync(
+                $"/api/stores/{storeA.Slug}/merchant/orders/{order.Id}/collect-payment",
+                null);
+            Assert.Equal(HttpStatusCode.OK, collectResp.StatusCode);
+            var completed = await collectResp.Content.ReadFromJsonAsync<OrderDto>(JsonOptions);
+            Assert.Equal(OrderStatus.Completed, completed!.OrderStatus);
+            Assert.Equal(PaymentStatus.Collected, completed.PaymentStatus);
+
+            await using (var db = _fixture.CreateDbContext())
+            {
+                var inv = await db.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == product.Id);
+                Assert.Equal(8, inv.OnHand);
+                Assert.Equal(0, inv.Reserved);
+            }
+
+            // 6. OD-001 15-minute reservation expiry sweep cancels Pending order and releases reservation
+            using var cart2Resp = await customerClient.PutAsJsonAsync(
+                $"/api/stores/{storeA.Slug}/cart/items",
+                new UpsertCartItemCommand(product.Id, 3));
+            Assert.Equal(HttpStatusCode.OK, cart2Resp.StatusCode);
+
+            var checkout2Req = new HttpRequestMessage(HttpMethod.Post, $"/api/stores/{storeA.Slug}/checkout");
+            checkout2Req.Headers.Add("Idempotency-Key", $"idem2-{suffix}");
+            checkout2Req.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Pickup, null, null));
+            using var checkout2Resp = await customerClient.SendAsync(checkout2Req);
+            Assert.Equal(HttpStatusCode.Created, checkout2Resp.StatusCode);
+            var pendingOrder = await checkout2Resp.Content.ReadFromJsonAsync<OrderDto>(JsonOptions);
+
+            await using var scope = _fixture.CreateAsyncScope();
+            var orderService = scope.ServiceProvider.GetRequiredService<IOrderService>();
+            var released = await orderService.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow.AddMinutes(16), CancellationToken.None);
+            Assert.True(released >= 1);
+
+            await using (var db = _fixture.CreateDbContext())
+            {
+                var expiredOrder = await db.Orders.AsNoTracking().SingleAsync(o => o.Id == pendingOrder!.Id);
+                Assert.Equal(OrderStatus.Cancelled, expiredOrder.OrderStatus);
+
+                var inv = await db.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == product.Id);
+                Assert.Equal(8, inv.OnHand);
+                Assert.Equal(0, inv.Reserved);
+            }
+        }
+        finally
+        {
+            if (storeAId != Guid.Empty || storeBId != Guid.Empty)
+            {
+                await _fixture.DeleteStoresAsync(new[] { storeAId, storeBId }.Where(id => id != Guid.Empty).ToArray());
+            }
+
+            await using var db = _fixture.CreateDbContext();
+            await db.SessionTickets.Where(t => t.UserId == adminId).ExecuteDeleteAsync();
+            await db.AppUsers.Where(u => u.Id == adminId).ExecuteDeleteAsync();
+        }
+    }
+}
