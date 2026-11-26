@@ -90,13 +90,19 @@ public sealed class ScopedUserStore
         return base.CreateAsync(user, cancellationToken);
     }
 
-    public override Task<IdentityResult> UpdateAsync(
+    public override async Task<IdentityResult> UpdateAsync(
         RetailFlowIdentityUser user,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(user);
         EnsureUserMatchesCurrentScope(user);
-        return base.UpdateAsync(user, cancellationToken);
+        var result = await base.UpdateAsync(user, cancellationToken);
+        if (!result.Succeeded)
+        {
+            Context.Entry(user).State = EntityState.Detached;
+        }
+
+        return result;
     }
 
     public override Task<IdentityResult> DeleteAsync(

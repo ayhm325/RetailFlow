@@ -495,6 +495,28 @@ public sealed class AuthService : IAuthService
         var storedHash = user.PasswordHash ?? string.Empty;
         var checkResult = await _signInManager.CheckPasswordSignInAsync(user, command.Password, lockoutOnFailure: true);
 
+        // If a concurrent login transparently upgraded a legacy hash mid-flight, UserManager's UpdatePasswordHash
+        // hits optimistic concurrency (ConcurrencyFailure) and returns Failed. Reload once and retry if PasswordHash changed.
+        if (!checkResult.Succeeded && !checkResult.IsLockedOut && !checkResult.IsNotAllowed)
+        {
+            var latestHash = await _dbContext.Users
+                .AsNoTracking()
+                .Where(u => u.Id == user.Id)
+                .Select(u => u.PasswordHash)
+                .SingleOrDefaultAsync(cancellationToken);
+
+            if (!string.Equals(latestHash, storedHash, StringComparison.Ordinal))
+            {
+                var freshUser = await _userManager.FindByIdAsync(user.Id.ToString());
+                if (freshUser is not null)
+                {
+                    user = freshUser;
+                    storedHash = user.PasswordHash ?? string.Empty;
+                    checkResult = await _signInManager.CheckPasswordSignInAsync(user, command.Password, lockoutOnFailure: true);
+                }
+            }
+        }
+
         if (checkResult.IsLockedOut)
         {
             return new AuthSignInResult(AuthSignInOutcome.LockedOut);
