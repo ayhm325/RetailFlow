@@ -64,7 +64,8 @@ public sealed class DataProtectionHardeningTests : IClassFixture<CatalogSqlTestF
                     {
                         ["AllowedHosts"] = "retail.example.com",
                         ["RETAILFLOW_CONNECTION"] = _fixture.ConnectionString,
-                        ["ConnectionStrings:RetailFlow"] = _fixture.ConnectionString
+                        ["ConnectionStrings:RetailFlow"] = _fixture.ConnectionString,
+                        ["Email:RequireConfiguredInProduction"] = "false"
                     };
 
                     foreach (var kvp in settings)
@@ -290,7 +291,8 @@ public sealed class DataProtectionHardeningTests : IClassFixture<CatalogSqlTestF
                         ["AllowedHosts"] = "retail.example.com",
                         ["RETAILFLOW_CONNECTION"] = _fixture.ConnectionString,
                         ["ConnectionStrings:RetailFlow"] = _fixture.ConnectionString,
-                        ["DataProtection:RequireCertificateInProduction"] = "false"
+                        ["DataProtection:RequireCertificateInProduction"] = "false",
+                        ["Email:RequireConfiguredInProduction"] = "false"
                     });
                     // Higher-priority configuration source re-enforces true
                     config.AddInMemoryCollection(new Dictionary<string, string?>

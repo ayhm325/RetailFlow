@@ -43,7 +43,8 @@ public sealed class CheckoutErrorClassificationTests : IClassFixture<CatalogSqlT
                         ["AllowedHosts"] = "retail.example.com",
                         ["RETAILFLOW_CONNECTION"] = _fixture.ConnectionString,
                         ["ConnectionStrings:RetailFlow"] = _fixture.ConnectionString,
-                        ["DataProtection:RequireCertificateInProduction"] = "false"
+                        ["DataProtection:RequireCertificateInProduction"] = "false",
+                        ["Email:RequireConfiguredInProduction"] = "false"
                     });
                 });
 

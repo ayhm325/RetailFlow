@@ -1450,7 +1450,8 @@ public sealed class CatalogSqlTestFixture : IAsyncLifetime
                         ["AllowedHosts"] = "retail.example.com",
                         ["RETAILFLOW_CONNECTION"] = effectiveConnection,
                         ["ConnectionStrings:RetailFlow"] = effectiveConnection,
-                        ["DataProtection:RequireCertificateInProduction"] = "false"
+                        ["DataProtection:RequireCertificateInProduction"] = "false",
+                        ["Email:RequireConfiguredInProduction"] = "false"
                     });
                 });
             });
