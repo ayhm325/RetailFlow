@@ -1390,7 +1390,7 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
 public sealed class CatalogSqlTestFixture : IAsyncLifetime
 {
     private const string DefaultLocalConnectionString =
-        "Server=.;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=True";
+        "Server=.;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True";
 
     private WebApplicationFactory<Program>? _factory;
 

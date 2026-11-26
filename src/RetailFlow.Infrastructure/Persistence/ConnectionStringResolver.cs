@@ -7,7 +7,7 @@ internal static class ConnectionStringResolver
     internal const string DefaultLocalConnectionString =
         "Server=.;Database=RetailFlowProduct;" +
         "Trusted_Connection=True;Encrypt=True;" +
-        "TrustServerCertificate=True;MultipleActiveResultSets=True";
+        "TrustServerCertificate=True";
 
     internal static string ResolveRuntime(
         IConfiguration configuration,

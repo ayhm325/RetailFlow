@@ -42,7 +42,7 @@ jobs:
             -p 1433:1433 \
             mcr.microsoft.com/mssql/server:2022-latest
 
-          CONN_PROD="Server=localhost,1433;Database=RetailFlowProduct;User Id=sa;Password=${PW};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
+          CONN_PROD="Server=localhost,1433;Database=RetailFlowProduct;User Id=sa;Password=${PW};Encrypt=True;TrustServerCertificate=True"
           CONN_SPIKE="Server=localhost,1433;Database=RetailFlowIdentitySpike;User Id=sa;Password=${PW};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True"
           echo "::add-mask::$CONN_PROD"
           echo "::add-mask::$CONN_SPIKE"
