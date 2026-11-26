@@ -15,19 +15,36 @@ public sealed class OrderService : IOrderService
         _dbContext = dbContext;
     }
 
-    public async Task<IReadOnlyList<OrderDto>> GetCustomerOrdersAsync(
+    public async Task<PagedOrdersResponse> GetCustomerOrdersAsync(
         Guid storeId,
         Guid customerId,
-        CancellationToken cancellationToken)
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
-        var orders = await _dbContext.Orders
+        var normalizedPage = Math.Max(1, page);
+        var normalizedPageSize = Math.Clamp(pageSize, 1, 50);
+
+        var baseQuery = _dbContext.Orders
             .AsNoTracking()
+            .Where(o => o.StoreId == storeId && o.CustomerId == customerId);
+
+        var totalCount = await baseQuery.CountAsync(cancellationToken);
+        var totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)normalizedPageSize);
+
+        var orders = await baseQuery
             .Include(o => o.Items)
-            .Where(o => o.StoreId == storeId && o.CustomerId == customerId)
             .OrderByDescending(o => o.CreatedAtUtc)
+            .Skip((normalizedPage - 1) * normalizedPageSize)
+            .Take(normalizedPageSize)
             .ToListAsync(cancellationToken);
 
-        return orders.Select(Map).ToList();
+        return new PagedOrdersResponse(
+            normalizedPage,
+            normalizedPageSize,
+            totalCount,
+            totalPages,
+            orders.Select(Map).ToList());
     }
 
     public async Task<OrderDto?> GetCustomerOrderByIdAsync(
@@ -68,16 +85,35 @@ public sealed class OrderService : IOrderService
         return Map(order);
     }
 
-    public async Task<IReadOnlyList<OrderDto>> GetMerchantOrdersAsync(Guid storeId, CancellationToken cancellationToken)
+    public async Task<PagedOrdersResponse> GetMerchantOrdersAsync(
+        Guid storeId,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default)
     {
-        var orders = await _dbContext.Orders
+        var normalizedPage = Math.Max(1, page);
+        var normalizedPageSize = Math.Clamp(pageSize, 1, 50);
+
+        var baseQuery = _dbContext.Orders
             .AsNoTracking()
+            .Where(o => o.StoreId == storeId);
+
+        var totalCount = await baseQuery.CountAsync(cancellationToken);
+        var totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)normalizedPageSize);
+
+        var orders = await baseQuery
             .Include(o => o.Items)
-            .Where(o => o.StoreId == storeId)
             .OrderByDescending(o => o.CreatedAtUtc)
+            .Skip((normalizedPage - 1) * normalizedPageSize)
+            .Take(normalizedPageSize)
             .ToListAsync(cancellationToken);
 
-        return orders.Select(Map).ToList();
+        return new PagedOrdersResponse(
+            normalizedPage,
+            normalizedPageSize,
+            totalCount,
+            totalPages,
+            orders.Select(Map).ToList());
     }
 
     public async Task<OrderDto?> ConfirmOrderAsync(

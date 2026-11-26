@@ -104,6 +104,34 @@ public sealed class AuthService : IAuthService
         return Map(user);
     }
 
+    public async Task<Guid?> EnsurePlatformAdminAsync(
+        string email,
+        string displayName,
+        string password,
+        CancellationToken cancellationToken)
+    {
+        var hasPlatformAdmin = await _dbContext.AppUsers
+            .AsNoTracking()
+            .AnyAsync(u => u.Role == AppRole.PlatformAdmin, cancellationToken);
+
+        if (hasPlatformAdmin)
+        {
+            return null;
+        }
+
+        var hash = PasswordHasherService.Hash(password);
+        var admin = AppUser.CreatePlatformAdmin(
+            Guid.NewGuid(),
+            email,
+            displayName,
+            hash,
+            DateTimeOffset.UtcNow);
+
+        _dbContext.AppUsers.Add(admin);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return admin.Id;
+    }
+
     private static AuthenticatedUserDto Map(AppUser user) =>
         new(user.Id, user.StoreId, user.Email, user.DisplayName, user.Role);
 }

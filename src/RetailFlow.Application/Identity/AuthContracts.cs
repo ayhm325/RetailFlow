@@ -35,4 +35,10 @@ public interface IAuthService
     Task<AuthenticatedUserDto?> AuthenticatePlatformAdminAsync(
         LoginCommand command,
         CancellationToken cancellationToken);
+
+    Task<Guid?> EnsurePlatformAdminAsync(
+        string email,
+        string displayName,
+        string password,
+        CancellationToken cancellationToken);
 }

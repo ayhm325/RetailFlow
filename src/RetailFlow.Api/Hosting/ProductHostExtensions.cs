@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.AspNetCore.HostFiltering;
 using Microsoft.AspNetCore.Mvc;
@@ -10,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Net.Http.Headers;
 using RetailFlow.Api.Auth;
 using RetailFlow.Domain.Identity;
+using RetailFlow.Infrastructure.Persistence;
 
 namespace RetailFlow.Api.Hosting;
 
@@ -30,9 +32,14 @@ public static class ProductHostExtensions
         services.AddProblemDetails();
         services.AddOpenApi();
 
+        services.AddDataProtection()
+            .SetApplicationName("RetailFlow")
+            .PersistKeysToDbContext<RetailFlowDbContext>();
+
         services.AddSingleton<ITicketStore, SqlSessionTicketStore>();
         services.AddScoped<RetailFlowCookieEvents>();
         services.AddHostedService<MaintenanceBackgroundService>();
+        services.AddHostedService<PlatformBootstrapHostedService>();
         services
             .AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
             .AddCookie(options =>

@@ -303,7 +303,26 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
                 var inv = await db.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == product.Id);
                 Assert.Equal(8, inv.OnHand);
                 Assert.Equal(0, inv.Reserved);
+
+                // GAP-004: DataProtectionKeys persisted in SQL Server
+                Assert.True(await db.DataProtectionKeys.AsNoTracking().AnyAsync());
             }
+
+            // 7. GAP-014: Customer & Merchant order lists support bounded pagination
+            var custOrdersPage = await customerClient.GetFromJsonAsync<PagedOrdersResponse>(
+                $"/api/stores/{storeA.Slug}/orders?page=1&pageSize=1",
+                JsonOptions);
+            Assert.NotNull(custOrdersPage);
+            Assert.Equal(2, custOrdersPage!.TotalCount);
+            Assert.Equal(2, custOrdersPage.TotalPages);
+            Assert.Single(custOrdersPage.Items);
+
+            var merchOrdersPage = await merchantClient.GetFromJsonAsync<PagedOrdersResponse>(
+                $"/api/stores/{storeA.Slug}/merchant/orders?page=1&pageSize=1",
+                JsonOptions);
+            Assert.NotNull(merchOrdersPage);
+            Assert.Equal(2, merchOrdersPage!.TotalCount);
+            Assert.Single(merchOrdersPage.Items);
         }
         finally
         {

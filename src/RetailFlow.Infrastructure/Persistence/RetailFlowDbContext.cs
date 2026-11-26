@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 
 using RetailFlow.Domain.Catalog;
@@ -10,7 +11,7 @@ using RetailFlow.Domain.Stores;
 
 namespace RetailFlow.Infrastructure.Persistence;
 
-public sealed class RetailFlowDbContext : DbContext
+public sealed class RetailFlowDbContext : DbContext, IDataProtectionKeyContext
 {
     public RetailFlowDbContext(DbContextOptions<RetailFlowDbContext> options)
         : base(options)
@@ -48,6 +49,8 @@ public sealed class RetailFlowDbContext : DbContext
     public DbSet<AppUser> AppUsers => Set<AppUser>();
 
     public DbSet<SessionTicket> SessionTickets => Set<SessionTicket>();
+
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

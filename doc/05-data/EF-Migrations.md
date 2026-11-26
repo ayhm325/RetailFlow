@@ -11,6 +11,7 @@
 | `20261125232250_AddStoreBrandingAddressesAndDeliveryZones` | حقول branding/contact وعناوين StoreSettings وجدول DeliveryZones |
 | `20261125234754_AddCartOrdersAndCheckoutIdempotency` | Cart/CartItems/CheckoutRequests/Orders/OrderItems/OrderStatusHistories |
 | `20261125234930_AddIdentityAndSessionTickets` | AppUsers وSessionTickets |
+| `20261126085623_AddDataProtectionKeys` | DataProtectionKeys (`IDataProtectionKeyContext`) |
 
 كل migration لها Designer file، ويوجد `RetailFlowDbContextModelSnapshot.cs`.
 

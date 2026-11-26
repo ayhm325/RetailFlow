@@ -22,6 +22,25 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("Microsoft.AspNetCore.DataProtection.EntityFrameworkCore.DataProtectionKey", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("FriendlyName")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Xml")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("DataProtectionKeys");
+                });
+
             modelBuilder.Entity("RetailFlow.Domain.Catalog.Category", b =>
                 {
                     b.Property<Guid>("Id")
@@ -453,7 +472,6 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("RetailFlow.Domain.Orders.CartItem", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("CartId")
@@ -531,7 +549,6 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("RetailFlow.Domain.Orders.Order", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("CancellationReason")
@@ -631,7 +648,6 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("RetailFlow.Domain.Orders.OrderItem", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("LineTotal")
@@ -678,7 +694,6 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
             modelBuilder.Entity("RetailFlow.Domain.Orders.OrderStatusHistory", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ActorRole")

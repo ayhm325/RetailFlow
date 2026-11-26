@@ -48,6 +48,7 @@ public static class AuthEndpoints
         RegisterCustomerCommand command,
         IStoreRequestContextAccessor storeContextAccessor,
         IAuthService authService,
+        ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
@@ -56,6 +57,8 @@ public static class AuthEndpoints
 
         var user = await authService.RegisterCustomerAsync(store.StoreId, command, cancellationToken);
         await SignInAsync(httpContext, user);
+        loggerFactory.CreateLogger("RetailFlow.Audit.Auth")
+            .LogInformation("Audit: CustomerRegistered StoreId={StoreId} UserId={UserId}", store.StoreId, user.UserId);
         return TypedResults.Created($"/api/stores/{store.StoreSlug}/auth/me", user);
     }
 
@@ -63,15 +66,18 @@ public static class AuthEndpoints
         LoginCommand command,
         IStoreRequestContextAccessor storeContextAccessor,
         IAuthService authService,
+        ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         var store = storeContextAccessor.Current
             ?? throw new InvalidOperationException("Store context was not resolved.");
 
+        var logger = loggerFactory.CreateLogger("RetailFlow.Audit.Auth");
         var user = await authService.AuthenticateStoreUserAsync(store.StoreId, command, cancellationToken);
         if (user is null)
         {
+            logger.LogWarning("Audit: StoreLoginFailed StoreId={StoreId}", store.StoreId);
             return TypedResults.Problem(
                 statusCode: StatusCodes.Status401Unauthorized,
                 title: "Invalid credentials",
@@ -79,18 +85,22 @@ public static class AuthEndpoints
         }
 
         await SignInAsync(httpContext, user);
+        logger.LogInformation("Audit: StoreLoginSucceeded StoreId={StoreId} UserId={UserId} Role={Role}", store.StoreId, user.UserId, user.Role);
         return TypedResults.Ok(user);
     }
 
     private static async Task<IResult> LoginPlatformAdminAsync(
         LoginCommand command,
         IAuthService authService,
+        ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
+        var logger = loggerFactory.CreateLogger("RetailFlow.Audit.Auth");
         var user = await authService.AuthenticatePlatformAdminAsync(command, cancellationToken);
         if (user is null)
         {
+            logger.LogWarning("Audit: PlatformAdminLoginFailed");
             return TypedResults.Problem(
                 statusCode: StatusCodes.Status401Unauthorized,
                 title: "Invalid credentials",
@@ -98,6 +108,7 @@ public static class AuthEndpoints
         }
 
         await SignInAsync(httpContext, user);
+        logger.LogInformation("Audit: PlatformAdminLoginSucceeded UserId={UserId}", user.UserId);
         return TypedResults.Ok(user);
     }
 
