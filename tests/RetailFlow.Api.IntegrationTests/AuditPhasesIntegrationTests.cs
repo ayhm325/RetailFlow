@@ -19,6 +19,7 @@ using RetailFlow.Infrastructure.Persistence;
 
 namespace RetailFlow.Api.IntegrationTests;
 
+[Collection("DataProtectionSql")]
 public sealed class AuditPhasesIntegrationTests : IClassFixture<CatalogSqlTestFixture>
 {
     private static readonly Currency Jod = Currency.Create("JOD", "400", 3);

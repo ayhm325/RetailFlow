@@ -301,6 +301,7 @@ public sealed class OrderService : IOrderService
                 if (_releaseHook is not null)
                 {
                     await _releaseHook.OnBeforeSaveOrderReleaseAsync(order.Id, attempt, cancellationToken);
+                    cancellationToken.ThrowIfCancellationRequested();
                 }
 
                 await unitDb.SaveChangesAsync(cancellationToken);

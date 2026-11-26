@@ -40,7 +40,9 @@ public sealed class MaintenanceBatchConcurrencyTests : IClassFixture<CatalogSqlT
         int extraReservedA = 0)
     {
         var suffix = Guid.NewGuid().ToString("N")[..8];
-        var oldTime = DateTimeOffset.UtcNow.AddMinutes(-30);
+        // Created 5m ago -> ReservationExpiresAtUtc is +10m in the future, so parallel MaintenanceBackgroundService
+        // instances using TimeProvider.System never steal these test orders; tests sweep with +20m.
+        var oldTime = DateTimeOffset.UtcNow.AddMinutes(-5);
         var store = Store.Create(Guid.NewGuid(), "Maint Shop", $"maint-{suffix}", StoreType.Physical, StoreStatus.Active, oldTime);
         var settings = StoreSettings.Create(Guid.NewGuid(), store, Jod, "Asia/Amman", true, true);
         var cat = Category.Create(Guid.NewGuid(), store.Id, "Cat", "cat", true, 1);
@@ -100,7 +102,7 @@ public sealed class MaintenanceBatchConcurrencyTests : IClassFixture<CatalogSqlT
                 TimeProvider.System,
                 hook);
 
-            var released = await service.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+            var released = await service.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow.AddMinutes(20), CancellationToken.None);
             Assert.Equal(2, released);
 
             await using var verifyDb = _fixture.CreateDbContext();
@@ -163,7 +165,7 @@ public sealed class MaintenanceBatchConcurrencyTests : IClassFixture<CatalogSqlT
                 TimeProvider.System,
                 hook2);
 
-            var now = DateTimeOffset.UtcNow;
+            var now = DateTimeOffset.UtcNow.AddMinutes(20);
             var t1 = s1.ReleaseExpiredReservationsAsync(now, CancellationToken.None);
             var t2 = s2.ReleaseExpiredReservationsAsync(now, CancellationToken.None);
 
@@ -209,7 +211,7 @@ public sealed class MaintenanceBatchConcurrencyTests : IClassFixture<CatalogSqlT
                 TimeProvider.System,
                 hook);
 
-            var released = await service.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+            var released = await service.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow.AddMinutes(20), CancellationToken.None);
             Assert.Equal(1, released);
 
             await using var verifyDb = _fixture.CreateDbContext();
@@ -240,7 +242,7 @@ public sealed class MaintenanceBatchConcurrencyTests : IClassFixture<CatalogSqlT
                     // Competing worker cancels Order A and releases its 2 units (leaving extraReservedA = 2 untouched)
                     await using var winnerScope = _fixture.CreateAsyncScope();
                     var winnerService = winnerScope.ServiceProvider.GetRequiredService<IOrderService>();
-                    await winnerService.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow, ct);
+                    await winnerService.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow.AddMinutes(20), ct);
                 }
             });
 
@@ -252,7 +254,7 @@ public sealed class MaintenanceBatchConcurrencyTests : IClassFixture<CatalogSqlT
                 TimeProvider.System,
                 hook);
 
-            var releasedByLoser = await losingService.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+            var releasedByLoser = await losingService.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow.AddMinutes(20), CancellationToken.None);
             Assert.Equal(0, releasedByLoser);
 
             await using var verifyDb = _fixture.CreateDbContext();
@@ -263,7 +265,7 @@ public sealed class MaintenanceBatchConcurrencyTests : IClassFixture<CatalogSqlT
             Assert.Equal(0, (await verifyDb.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prodB.Id)).Reserved);
 
             // Test E: Subsequent sweep does nothing
-            var secondSweep = await losingService.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+            var secondSweep = await losingService.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow.AddMinutes(20), CancellationToken.None);
             Assert.Equal(0, secondSweep);
             Assert.Equal(2, (await verifyDb.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prodA.Id)).Reserved);
         }
@@ -299,7 +301,7 @@ public sealed class MaintenanceBatchConcurrencyTests : IClassFixture<CatalogSqlT
                 hook);
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                () => service.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow, cts.Token));
+                () => service.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow.AddMinutes(20), cts.Token));
 
             await using var verifyDb = _fixture.CreateDbContext();
             Assert.Equal(OrderStatus.Pending, (await verifyDb.Orders.AsNoTracking().SingleAsync(o => o.Id == orderA.Id)).OrderStatus);

@@ -15,6 +15,7 @@ using RetailFlow.Infrastructure.Persistence;
 
 namespace RetailFlow.Api.IntegrationTests;
 
+[Collection("DataProtectionSql")]
 public sealed class DataProtectionHardeningTests : IClassFixture<CatalogSqlTestFixture>
 {
     private readonly CatalogSqlTestFixture _fixture;
