@@ -176,7 +176,7 @@ public sealed class PlatformAdminMfaHardeningTests : IClassFixture<CatalogSqlTes
     public async Task TestA_ProductionWithoutRequireAdminMfa_EnforcesMandatoryMfa()
     {
         await using var factory = CreateFactory(Environments.Production);
-        var (adminId, email) = await CreatePlatformAdminAsync(factory, "ProdMfa!123");
+        var (adminId, email) = await CreatePlatformAdminAsync(factory, "ProdMfaPassphrase!123");
 
         try
         {
@@ -192,7 +192,7 @@ public sealed class PlatformAdminMfaHardeningTests : IClassFixture<CatalogSqlTes
 
             using var loginResp = await client.PostAsJsonAsync(
                 "/api/platform/auth/login",
-                new LoginCommand(email, "ProdMfa!123"));
+                new LoginCommand(email, "ProdMfaPassphrase!123"));
             Assert.Equal(HttpStatusCode.OK, loginResp.StatusCode);
             var dto = await loginResp.Content.ReadFromJsonAsync<AuthenticatedUserDto>();
             Assert.NotNull(dto);
@@ -386,7 +386,7 @@ public sealed class PlatformAdminMfaHardeningTests : IClassFixture<CatalogSqlTes
             var custEmail = $"cust-{Guid.NewGuid():N}@retailflow.test";
             using var regResp = await custClient.PostAsJsonAsync(
                 $"/api/stores/{storeSlug}/auth/register",
-                new RegisterCustomerCommand(custEmail, "Cust One", "CustPass!123"));
+                new RegisterCustomerCommand(custEmail, "Cust One", "CustPassphrase!123"));
             Assert.Equal(HttpStatusCode.Created, regResp.StatusCode);
             customerId = (await regResp.Content.ReadFromJsonAsync<AuthenticatedUserDto>())!.UserId;
 

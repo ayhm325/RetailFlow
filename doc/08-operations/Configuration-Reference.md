@@ -36,6 +36,7 @@
 | `DataProtection:PreviousCertificates` | قائمة شهادات سابقة (`CertificatePath` / `CertificatePassword` / `CertificateThumbprint`) لفك تشفير المفاتيح التاريخية أثناء تدوير الشهادة عبر `UnprotectKeysWithAnyCertificate` |
 | `DataProtection:DefaultKeyLifetimeDays` | عمر المفتاح الافتراضي بالأيام (الافتراضي `90`، مقيد بين `7` و`365`) |
 | `DataProtection:RequireCertificateInProduction` | الافتراضي `true`؛ يفشل startup (fail-closed) في Production إذا غابت شهادة Data Protection أو كانت غير صالحة |
+| سياسة كلمات المرور (`DependencyInjection.cs` / `RetailFlowPasswordValidator.cs`) | الحد الأدنى `15` حرفاً والحد الأقصى `1024` حرفاً، تطبيع Unicode NFC، حظر كلمات المرور الشائعة/الأنماط المتكررة، قفل الحساب بعد `5` محاولات لمدة `15` دقيقة |
 
 ## 5. Cookie/session
 

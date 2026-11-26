@@ -123,7 +123,7 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
 
             using var reg = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/register",
-                new RegisterCustomerCommand(email, "MFA User", "Str0ngPass!1"));
+                new RegisterCustomerCommand(email, "MFA User", "Str0ngPassphrase!1"));
             Assert.Equal(HttpStatusCode.Created, reg.StatusCode);
             var userDto = await reg.Content.ReadFromJsonAsync<AuthenticatedUserDto>();
             Assert.NotNull(userDto);
@@ -137,7 +137,7 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
             // 2. First setup with valid password succeeds
             using var setupResp = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/2fa/setup",
-                new BeginTwoFactorSetupCommand("Str0ngPass!1"));
+                new BeginTwoFactorSetupCommand("Str0ngPassphrase!1"));
             Assert.Equal(HttpStatusCode.OK, setupResp.StatusCode);
             var setup = await setupResp.Content.ReadFromJsonAsync<TwoFactorSetupDto>();
             Assert.NotNull(setup);
@@ -162,7 +162,7 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
             // 5. Repeated /2fa/setup on enrolled account is REJECTED (never leaks existing secret)
             using var repeatSetup = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/2fa/setup",
-                new BeginTwoFactorSetupCommand("Str0ngPass!1"));
+                new BeginTwoFactorSetupCommand("Str0ngPassphrase!1"));
             Assert.Equal(HttpStatusCode.BadRequest, repeatSetup.StatusCode);
 
             // 6. Verify AuthenticatorKey is encrypted at rest in AspNetUserTokens (dp:v1: prefix)
@@ -188,8 +188,8 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
             var sharedRecoveryCode = recovery1.RecoveryCodes[0];
 
             var concurrentResults = await Task.WhenAll(
-                c1.PostAsJsonAsync($"/api/stores/{store.Slug}/auth/login", new LoginCommand(email, "Str0ngPass!1", RecoveryCode: sharedRecoveryCode)),
-                c2.PostAsJsonAsync($"/api/stores/{store.Slug}/auth/login", new LoginCommand(email, "Str0ngPass!1", RecoveryCode: sharedRecoveryCode)));
+                c1.PostAsJsonAsync($"/api/stores/{store.Slug}/auth/login", new LoginCommand(email, "Str0ngPassphrase!1", RecoveryCode: sharedRecoveryCode)),
+                c2.PostAsJsonAsync($"/api/stores/{store.Slug}/auth/login", new LoginCommand(email, "Str0ngPassphrase!1", RecoveryCode: sharedRecoveryCode)));
 
             Assert.Equal(1, concurrentResults.Count(r => r.StatusCode == HttpStatusCode.OK));
             Assert.Equal(1, concurrentResults.Count(r => r.StatusCode == HttpStatusCode.Unauthorized));
@@ -210,13 +210,13 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
             {
                 using var badTotp = await bruteClient.PostAsJsonAsync(
                     $"/api/stores/{store.Slug}/auth/login",
-                    new LoginCommand(email, "Str0ngPass!1", TwoFactorCode: "999999"));
+                    new LoginCommand(email, "Str0ngPassphrase!1", TwoFactorCode: "999999"));
                 Assert.Equal(HttpStatusCode.Unauthorized, badTotp.StatusCode);
             }
 
             using var fifthBadTotp = await bruteClient.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/login",
-                new LoginCommand(email, "Str0ngPass!1", TwoFactorCode: "999999"));
+                new LoginCommand(email, "Str0ngPassphrase!1", TwoFactorCode: "999999"));
             Assert.Equal(HttpStatusCode.Locked, fifthBadTotp.StatusCode);
 
             // Clear MFA lockout for replacement & disable verification
@@ -232,12 +232,12 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
             // 10. Authenticator Replacement requires Step-up (using recovery code since current step was consumed)
             using var replaceSetupBad = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/2fa/replace/setup",
-                new BeginTwoFactorReplacementCommand("Str0ngPass!1", CurrentTwoFactorCode: "000000"));
+                new BeginTwoFactorReplacementCommand("Str0ngPassphrase!1", CurrentTwoFactorCode: "000000"));
             Assert.Equal(HttpStatusCode.BadRequest, replaceSetupBad.StatusCode);
 
             using var replaceSetupOk = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/2fa/replace/setup",
-                new BeginTwoFactorReplacementCommand("Str0ngPass!1", RecoveryCode: recovery1.RecoveryCodes[1]));
+                new BeginTwoFactorReplacementCommand("Str0ngPassphrase!1", RecoveryCode: recovery1.RecoveryCodes[1]));
             Assert.Equal(HttpStatusCode.OK, replaceSetupOk.StatusCode);
             var replaceDto = await replaceSetupOk.Content.ReadFromJsonAsync<TwoFactorSetupDto>();
             Assert.NotNull(replaceDto);
@@ -259,23 +259,23 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
             // Old recovery code from recovery1 no longer works
             using var oldRecoveryLogin = await bruteClient.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/login",
-                new LoginCommand(email, "Str0ngPass!1", RecoveryCode: recovery1.RecoveryCodes[2]));
+                new LoginCommand(email, "Str0ngPassphrase!1", RecoveryCode: recovery1.RecoveryCodes[2]));
             Assert.Equal(HttpStatusCode.Unauthorized, oldRecoveryLogin.StatusCode);
 
             // Login with new recovery2 code succeeds, and Step-up Disable MFA revokes session
             using var newLogin = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/login",
-                new LoginCommand(email, "Str0ngPass!1", RecoveryCode: recovery2!.RecoveryCodes[0]));
+                new LoginCommand(email, "Str0ngPassphrase!1", RecoveryCode: recovery2!.RecoveryCodes[0]));
             Assert.Equal(HttpStatusCode.OK, newLogin.StatusCode);
 
             using var disableBad = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/2fa/disable",
-                new DisableTwoFactorCommand("Str0ngPass!1", TwoFactorCode: "000000"));
+                new DisableTwoFactorCommand("Str0ngPassphrase!1", TwoFactorCode: "000000"));
             Assert.Equal(HttpStatusCode.BadRequest, disableBad.StatusCode);
 
             using var disableOk = await client.PostAsJsonAsync(
                 $"/api/stores/{store.Slug}/auth/2fa/disable",
-                new DisableTwoFactorCommand("Str0ngPass!1", RecoveryCode: recovery2.RecoveryCodes[1]));
+                new DisableTwoFactorCommand("Str0ngPassphrase!1", RecoveryCode: recovery2.RecoveryCodes[1]));
             Assert.Equal(HttpStatusCode.NoContent, disableOk.StatusCode);
 
             using var postDisableMe = await client.GetAsync($"/api/stores/{store.Slug}/auth/me");
@@ -316,8 +316,8 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
             using var clientB = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://localhost"), HandleCookies = true });
             clientB.DefaultRequestHeaders.Add("X-CSRF", "1");
 
-            await clientA.PostAsJsonAsync($"/api/stores/{storeA.Slug}/auth/register", new RegisterCustomerCommand(sharedEmail, "User A", "OldPassA!1"));
-            await clientB.PostAsJsonAsync($"/api/stores/{storeB.Slug}/auth/register", new RegisterCustomerCommand(sharedEmail, "User B", "OldPassB!1"));
+            await clientA.PostAsJsonAsync($"/api/stores/{storeA.Slug}/auth/register", new RegisterCustomerCommand(sharedEmail, "User A", "OldPassphraseA!1"));
+            await clientB.PostAsJsonAsync($"/api/stores/{storeB.Slug}/auth/register", new RegisterCustomerCommand(sharedEmail, "User B", "OldPassphraseB!1"));
 
             // Unknown email returns same 202 Accepted without sending email
             using var unknownForgot = await clientA.PostAsJsonAsync(
@@ -341,13 +341,13 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
             // Cross-tenant isolation: Store A's reset token CANNOT reset Store B's account
             using var crossReset = await clientB.PostAsJsonAsync(
                 $"/api/stores/{storeB.Slug}/auth/reset-password",
-                new ResetPasswordCommand(sharedEmail, token!, "CrossPass!9"));
+                new ResetPasswordCommand(sharedEmail, token!, "CrossPassphrase!9"));
             Assert.Equal(HttpStatusCode.BadRequest, crossReset.StatusCode);
 
             // Store A reset succeeds, revokes Store A session, and sends security notification
             using var validReset = await clientA.PostAsJsonAsync(
                 $"/api/stores/{storeA.Slug}/auth/reset-password",
-                new ResetPasswordCommand(sharedEmail, token!, "NewPassA!2"));
+                new ResetPasswordCommand(sharedEmail, token!, "NewPassphraseA!2"));
             Assert.Equal(HttpStatusCode.NoContent, validReset.StatusCode);
 
             using var revokedSession = await clientA.GetAsync($"/api/stores/{storeA.Slug}/auth/me");
@@ -357,13 +357,13 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
             // Token cannot be reused
             using var reuseReset = await clientA.PostAsJsonAsync(
                 $"/api/stores/{storeA.Slug}/auth/reset-password",
-                new ResetPasswordCommand(sharedEmail, token!, "AnotherPass!3"));
+                new ResetPasswordCommand(sharedEmail, token!, "AnotherPassphrase!3"));
             Assert.Equal(HttpStatusCode.BadRequest, reuseReset.StatusCode);
 
             // Store B's password remains untouched
             using var loginB = await clientB.PostAsJsonAsync(
                 $"/api/stores/{storeB.Slug}/auth/login",
-                new LoginCommand(sharedEmail, "OldPassB!1"));
+                new LoginCommand(sharedEmail, "OldPassphraseB!1"));
             Assert.Equal(HttpStatusCode.OK, loginB.StatusCode);
         }
         finally
@@ -409,7 +409,7 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
                 IsActive = true,
                 CreatedAtUtc = DateTimeOffset.UtcNow
             };
-            Assert.True((await userManager.CreateAsync(admin, "Adm1nPass!99")).Succeeded);
+            Assert.True((await userManager.CreateAsync(admin, "Adm1nPassphrase!99")).Succeeded);
             Assert.True((await userManager.AddToRoleAsync(admin, IdentityRoleNames.PlatformAdmin)).Succeeded);
         }
 
@@ -421,7 +421,7 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
             // 1. Login without MFA returns MfaRequiredForPlatformAccess = true
             using var loginResp = await client.PostAsJsonAsync(
                 "/api/platform/auth/login",
-                new LoginCommand(adminEmail, "Adm1nPass!99"));
+                new LoginCommand(adminEmail, "Adm1nPassphrase!99"));
             Assert.Equal(HttpStatusCode.OK, loginResp.StatusCode);
             var loginDto = await loginResp.Content.ReadFromJsonAsync<AuthenticatedUserDto>();
             Assert.NotNull(loginDto);
@@ -436,7 +436,7 @@ public sealed class IdentitySecurityHardeningTests : IClassFixture<CatalogSqlTes
             // 3. Restricted enrollment endpoints ARE accessible
             using var setupResp = await client.PostAsJsonAsync(
                 "/api/platform/auth/2fa/setup",
-                new BeginTwoFactorSetupCommand("Adm1nPass!99"));
+                new BeginTwoFactorSetupCommand("Adm1nPassphrase!99"));
             Assert.Equal(HttpStatusCode.OK, setupResp.StatusCode);
             var setup = await setupResp.Content.ReadFromJsonAsync<TwoFactorSetupDto>();
             var secret = ExtractSecretFromUri(setup!.AuthenticatorUri);

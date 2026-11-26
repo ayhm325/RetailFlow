@@ -395,7 +395,7 @@ public sealed class CheckoutLeaseAndCookieScopeTests : IClassFixture<CatalogSqlT
                 IsActive = true,
                 CreatedAtUtc = now
             };
-            Assert.True((await userManager.CreateAsync(admin, "Adm1nPass!99")).Succeeded);
+            Assert.True((await userManager.CreateAsync(admin, "Adm1nPassphrase!99")).Succeeded);
             Assert.True((await userManager.AddToRoleAsync(admin, IdentityRoleNames.PlatformAdmin)).Succeeded);
         }
 
@@ -407,7 +407,7 @@ public sealed class CheckoutLeaseAndCookieScopeTests : IClassFixture<CatalogSqlT
 
             using var reg = await client.PostAsJsonAsync(
                 $"/api/stores/{storeA.Slug}/auth/register",
-                new RegisterCustomerCommand(email, "Cookie User", "Str0ngPass!1"));
+                new RegisterCustomerCommand(email, "Cookie User", "Str0ngPassphrase!1"));
             Assert.Equal(HttpStatusCode.Created, reg.StatusCode);
             var userDto = await reg.Content.ReadFromJsonAsync<AuthenticatedUserDto>();
             Assert.NotNull(userDto);
@@ -445,7 +445,7 @@ public sealed class CheckoutLeaseAndCookieScopeTests : IClassFixture<CatalogSqlT
             // Test G: PlatformAdmin cookie on /health/live and /health/ready works without scope failure
             using var adminClient = _fixture.CreateHttpsClient();
             adminClient.DefaultRequestHeaders.Add("X-CSRF", "1");
-            using var adminLogin = await adminClient.PostAsJsonAsync("/api/platform/auth/login", new LoginCommand(adminEmail, "Adm1nPass!99"));
+            using var adminLogin = await adminClient.PostAsJsonAsync("/api/platform/auth/login", new LoginCommand(adminEmail, "Adm1nPassphrase!99"));
             Assert.Equal(HttpStatusCode.OK, adminLogin.StatusCode);
             Assert.Equal(HttpStatusCode.OK, (await adminClient.GetAsync("/health/live")).StatusCode);
             Assert.Equal(HttpStatusCode.OK, (await adminClient.GetAsync("/health/ready")).StatusCode);
@@ -489,7 +489,7 @@ public sealed class CheckoutLeaseAndCookieScopeTests : IClassFixture<CatalogSqlT
                 AllowAutoRedirect = false,
                 HandleCookies = true
             });
-            using var unscopedLogin = await unscopedClient.PostAsJsonAsync("/api/platform/auth/login", new LoginCommand(adminEmail, "Adm1nPass!99"));
+            using var unscopedLogin = await unscopedClient.PostAsJsonAsync("/api/platform/auth/login", new LoginCommand(adminEmail, "Adm1nPassphrase!99"));
             Assert.Equal(HttpStatusCode.OK, unscopedLogin.StatusCode);
 
             using var unscopedProtected = await unscopedClient.GetAsync("/test-unscoped-protected");

@@ -261,7 +261,7 @@ public sealed class AuditPhasesIntegrationTests : IClassFixture<CatalogSqlTestFi
             // Skip modifying pre-existing admins if another test left one; ensure idempotency returns null
             await using var scope = _fixture.CreateAsyncScope();
             var auth = scope.ServiceProvider.GetRequiredService<IAuthService>();
-            var skipped = await auth.EnsurePlatformAdminAsync($"b-{suffix}@test.local", "Admin", "Str0ngPass!1", CancellationToken.None);
+            var skipped = await auth.EnsurePlatformAdminAsync($"b-{suffix}@test.local", "Admin", "Str0ngPassphrase!1", CancellationToken.None);
             Assert.Null(skipped);
             return;
         }
@@ -275,8 +275,8 @@ public sealed class AuditPhasesIntegrationTests : IClassFixture<CatalogSqlTestFi
             var auth2 = scope2.ServiceProvider.GetRequiredService<IAuthService>();
 
             var ids = await Task.WhenAll(
-                auth1.EnsurePlatformAdminAsync($"boot1-{suffix}@test.local", "Admin 1", "Str0ngPass!1", CancellationToken.None),
-                auth2.EnsurePlatformAdminAsync($"boot2-{suffix}@test.local", "Admin 2", "Str0ngPass!1", CancellationToken.None));
+                auth1.EnsurePlatformAdminAsync($"boot1-{suffix}@test.local", "Admin 1", "Str0ngPassphrase!1", CancellationToken.None),
+                auth2.EnsurePlatformAdminAsync($"boot2-{suffix}@test.local", "Admin 2", "Str0ngPassphrase!1", CancellationToken.None));
 
             var created = ids.Where(id => id.HasValue).Select(id => id!.Value).ToList();
             Assert.True(created.Count <= 1);

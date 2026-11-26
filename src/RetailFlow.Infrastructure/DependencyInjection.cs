@@ -65,11 +65,12 @@ public static class DependencyInjection
             .AddIdentityCore<RetailFlowIdentityUser>(options =>
             {
                 options.User.RequireUniqueEmail = false;
-                options.Password.RequiredLength = 8;
+                options.Password.RequiredLength = 15;
                 options.Password.RequireDigit = false;
                 options.Password.RequireLowercase = false;
                 options.Password.RequireUppercase = false;
                 options.Password.RequireNonAlphanumeric = false;
+                options.Password.RequiredUniqueChars = 1;
                 options.Lockout.AllowedForNewUsers = true;
                 options.Lockout.MaxFailedAccessAttempts = 5;
                 options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
@@ -78,6 +79,7 @@ public static class DependencyInjection
             .AddRoles<RetailFlowIdentityRole>()
             .AddEntityFrameworkStores<RetailFlowDbContext>()
             .AddUserStore<ScopedUserStore>()
+            .AddPasswordValidator<RetailFlowPasswordValidator>()
             .AddClaimsPrincipalFactory<RetailFlowClaimsPrincipalFactory>()
             .AddSignInManager()
             .AddDefaultTokenProviders();
