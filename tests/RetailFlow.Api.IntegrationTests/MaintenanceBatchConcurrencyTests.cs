@@ -306,6 +306,148 @@ public sealed class MaintenanceBatchConcurrencyTests : IClassFixture<CatalogSqlT
             await using var verifyDb = _fixture.CreateDbContext();
             Assert.Equal(OrderStatus.Pending, (await verifyDb.Orders.AsNoTracking().SingleAsync(o => o.Id == orderA.Id)).OrderStatus);
             Assert.Equal(2, (await verifyDb.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prodA.Id)).Reserved);
+            Assert.Equal(1, await verifyDb.Set<OrderStatusHistory>().AsNoTracking().CountAsync(h => h.OrderId == orderA.Id));
+        }
+        finally
+        {
+            await _fixture.DeleteStoresAsync(store.Id);
+        }
+    }
+
+    [Fact]
+    public async Task TestG_CancellationBeforeProcessing_ThrowsOperationCanceledWithoutTouchingOrders()
+    {
+        var (store, prodA, _, orderA, _) = await SeedTwoExpiredOrdersAsync();
+        try
+        {
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            await using var scope = _fixture.CreateAsyncScope();
+            var service = new OrderService(
+                scope.ServiceProvider.GetRequiredService<RetailFlowDbContext>(),
+                scope.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
+                scope.ServiceProvider.GetRequiredService<ILogger<OrderService>>(),
+                TimeProvider.System);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => service.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow.AddMinutes(20), cts.Token));
+
+            await using var verifyDb = _fixture.CreateDbContext();
+            Assert.Equal(OrderStatus.Pending, (await verifyDb.Orders.AsNoTracking().SingleAsync(o => o.Id == orderA.Id)).OrderStatus);
+            Assert.Equal(2, (await verifyDb.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prodA.Id)).Reserved);
+        }
+        finally
+        {
+            await _fixture.DeleteStoresAsync(store.Id);
+        }
+    }
+
+    private sealed class CancelAfterSaveChangesInterceptor(CancellationTokenSource cts)
+        : Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesInterceptor
+    {
+        public override ValueTask<int> SavedChangesAsync(
+            Microsoft.EntityFrameworkCore.Diagnostics.SaveChangesCompletedEventData eventData,
+            int result,
+            CancellationToken cancellationToken = default)
+        {
+            cts.Cancel();
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class InterceptedScopeFactory(
+        IServiceScopeFactory inner,
+        string connectionString,
+        Microsoft.EntityFrameworkCore.Diagnostics.IInterceptor interceptor) : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope()
+        {
+            var services = new ServiceCollection();
+            services.AddDbContext<RetailFlowDbContext>(o => o.UseSqlServer(connectionString).AddInterceptors(interceptor));
+            var sp = services.BuildServiceProvider();
+            return new OwnedScope(sp, inner.CreateScope());
+        }
+
+        private sealed class OwnedScope(ServiceProvider sp, IServiceScope innerScope) : IServiceScope
+        {
+            public IServiceProvider ServiceProvider => sp;
+            public void Dispose()
+            {
+                innerScope.Dispose();
+                sp.Dispose();
+            }
+        }
+    }
+
+    [Fact]
+    public async Task TestH_CancellationAfterSaveChangesBeforeCommit_RollsBackAtomically()
+    {
+        var (store, prodA, _, orderA, _) = await SeedTwoExpiredOrdersAsync();
+        try
+        {
+            using var cts = new CancellationTokenSource();
+            var interceptor = new CancelAfterSaveChangesInterceptor(cts);
+
+            await using var scope = _fixture.CreateAsyncScope();
+            var interceptedFactory = new InterceptedScopeFactory(
+                scope.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
+                _fixture.ConnectionString,
+                interceptor);
+
+            var service = new OrderService(
+                scope.ServiceProvider.GetRequiredService<RetailFlowDbContext>(),
+                interceptedFactory,
+                scope.ServiceProvider.GetRequiredService<ILogger<OrderService>>(),
+                TimeProvider.System);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => service.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow.AddMinutes(20), cts.Token));
+
+            await using var verifyDb = _fixture.CreateDbContext();
+            Assert.Equal(OrderStatus.Pending, (await verifyDb.Orders.AsNoTracking().SingleAsync(o => o.Id == orderA.Id)).OrderStatus);
+            Assert.Equal(2, (await verifyDb.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prodA.Id)).Reserved);
+            Assert.Equal(1, await verifyDb.Set<OrderStatusHistory>().AsNoTracking().CountAsync(h => h.OrderId == orderA.Id));
+        }
+        finally
+        {
+            await _fixture.DeleteStoresAsync(store.Id);
+        }
+    }
+
+    [Fact]
+    public async Task TestI_CancellationBetweenOrdersInBatch_PreservesCommittedFirstAndLeavesSecondUntouched()
+    {
+        var (store, prodA, prodB, orderA, orderB) = await SeedTwoExpiredOrdersAsync();
+        try
+        {
+            using var cts = new CancellationTokenSource();
+            var hook = new DelegateOrderReleaseHook((orderId, _, _) =>
+            {
+                if (orderId == orderB.Id)
+                {
+                    cts.Cancel();
+                }
+
+                return Task.CompletedTask;
+            });
+
+            await using var scope = _fixture.CreateAsyncScope();
+            var service = new OrderService(
+                scope.ServiceProvider.GetRequiredService<RetailFlowDbContext>(),
+                scope.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
+                scope.ServiceProvider.GetRequiredService<ILogger<OrderService>>(),
+                TimeProvider.System,
+                hook);
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => service.ReleaseExpiredReservationsAsync(DateTimeOffset.UtcNow.AddMinutes(20), cts.Token));
+
+            await using var verifyDb = _fixture.CreateDbContext();
+            Assert.Equal(OrderStatus.Cancelled, (await verifyDb.Orders.AsNoTracking().SingleAsync(o => o.Id == orderA.Id)).OrderStatus);
+            Assert.Equal(0, (await verifyDb.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prodA.Id)).Reserved);
+            Assert.Equal(OrderStatus.Pending, (await verifyDb.Orders.AsNoTracking().SingleAsync(o => o.Id == orderB.Id)).OrderStatus);
+            Assert.Equal(3, (await verifyDb.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prodB.Id)).Reserved);
         }
         finally
         {

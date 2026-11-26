@@ -213,6 +213,8 @@ public sealed class OrderService : IOrderService
 
     public async Task<int> ReleaseExpiredReservationsAsync(DateTimeOffset utcNow, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
         var releasedCount = 0;
         var skippedOrderIds = new HashSet<Guid>();
 
@@ -305,6 +307,7 @@ public sealed class OrderService : IOrderService
                 }
 
                 await unitDb.SaveChangesAsync(cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
                 await tx.CommitAsync(cancellationToken);
 
                 _logger.LogInformation(
