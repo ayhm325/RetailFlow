@@ -15,8 +15,8 @@
 | OBS-013 | Cart | Customer cart endpoints | `CartService`, Cart/CartItem | Carts/CartItems | `CartConcurrencyTests`, `EndToEndCommerceAuthIntegrationTests` |
 | OBS-014 | Checkout/idempotency | Customer `/checkout` | `CheckoutService`, `CheckoutRequest` | CheckoutRequests/Orders | `CheckoutErrorClassificationTests`, `CheckoutLeaseAndCookieScopeTests`, `AuditPhasesIntegrationTests` |
 | OBS-015 | Stock reservation & maintenance | checkout/order + `MaintenanceBackgroundService` | `InventoryItem`, `OrderService` | InventoryItems/Orders | `MaintenanceBatchConcurrencyTests`, `EndToEndCommerceAuthIntegrationTests` |
-| OBS-016 | Customer orders | Customer order routes | `OrderService`, `Order` | Orders/Items/History | Full commerce integration scenario |
-| OBS-017 | Merchant order actions | Merchant order routes | `OrderService`, `Order` | Orders/Items/History/Inventory | Full commerce integration scenario |
+| OBS-016 | Customer orders | Customer order routes | `OrderService`, `Order`, `OrderStateConflictException`, `OrderConcurrencyConflictException`, `RetailFlowExceptionHandler` | Orders/Items/History | `EndToEndCommerceAuthIntegrationTests`, `OrderLifecycleConflictTests`, `OrderDomainTests` |
+| OBS-017 | Merchant order actions | Merchant order routes | `OrderService`, `Order`, `OrderStateConflictException`, `OrderConcurrencyConflictException`, `RetailFlowExceptionHandler` | Orders/Items/History/Inventory | `EndToEndCommerceAuthIntegrationTests`, `OrderLifecycleConflictTests`, `OrderDomainTests` |
 | OBS-018 | Health/OpenAPI | Host endpoints | `DatabaseReadinessHealthCheck` | SQL connection | `ProductHostIntegrationTests`, `PublicStoreCatalogIntegrationTests` |
 | OBS-019 | Security controls | Host middleware | `ProductHostExtensions` | n/a | `OwaspApiSecurityIntegrationTests`, ProductHost tests |
 

@@ -160,7 +160,7 @@ public sealed class Order
     {
         if (OrderStatus != OrderStatus.Pending)
         {
-            throw new InvalidOperationException($"Cannot confirm order from status '{OrderStatus}'.");
+            throw new OrderStateConflictException($"Cannot confirm order from status '{OrderStatus}'.");
         }
 
         var prevOrder = OrderStatus;
@@ -172,7 +172,7 @@ public sealed class Order
     {
         if (OrderStatus != OrderStatus.Pending)
         {
-            throw new InvalidOperationException($"Cannot reject order from status '{OrderStatus}'.");
+            throw new OrderStateConflictException($"Cannot reject order from status '{OrderStatus}'.");
         }
 
         if (string.IsNullOrWhiteSpace(reason))
@@ -201,7 +201,7 @@ public sealed class Order
 
         if (OrderStatus != OrderStatus.Pending)
         {
-            throw new InvalidOperationException($"Customer self-cancellation is only allowed in Pending status (current: '{OrderStatus}').");
+            throw new OrderStateConflictException($"Customer self-cancellation is only allowed in Pending status (current: '{OrderStatus}').");
         }
 
         var prevOrder = OrderStatus;
@@ -217,12 +217,12 @@ public sealed class Order
     {
         if (OrderStatus != OrderStatus.Pending && OrderStatus != OrderStatus.Confirmed)
         {
-            throw new InvalidOperationException($"Cannot cancel order from status '{OrderStatus}'.");
+            throw new OrderStateConflictException($"Cannot cancel order from status '{OrderStatus}'.");
         }
 
         if (FulfillmentStatus is FulfillmentStatus.Delivered or FulfillmentStatus.PickedUp)
         {
-            throw new InvalidOperationException("Cannot cancel an order that has already been delivered or picked up.");
+            throw new OrderStateConflictException("Cannot cancel an order that has already been delivered or picked up.");
         }
 
         var prevOrder = OrderStatus;
@@ -238,7 +238,7 @@ public sealed class Order
     {
         if (OrderStatus != OrderStatus.Confirmed)
         {
-            throw new InvalidOperationException($"Fulfillment can only advance when OrderStatus is Confirmed (current: '{OrderStatus}').");
+            throw new OrderStateConflictException($"Fulfillment can only advance when OrderStatus is Confirmed (current: '{OrderStatus}').");
         }
 
         var valid = (FulfillmentMode, FulfillmentStatus, nextStatus) switch
@@ -254,7 +254,7 @@ public sealed class Order
 
         if (!valid)
         {
-            throw new InvalidOperationException(
+            throw new OrderStateConflictException(
                 $"Invalid fulfillment transition '{FulfillmentStatus}' -> '{nextStatus}' for mode '{FulfillmentMode}'.");
         }
 
@@ -267,18 +267,18 @@ public sealed class Order
     {
         if (OrderStatus != OrderStatus.Confirmed)
         {
-            throw new InvalidOperationException($"Cannot collect payment when OrderStatus is '{OrderStatus}'.");
+            throw new OrderStateConflictException($"Cannot collect payment when OrderStatus is '{OrderStatus}'.");
         }
 
         if (FulfillmentStatus is not (FulfillmentStatus.Delivered or FulfillmentStatus.PickedUp))
         {
-            throw new InvalidOperationException(
+            throw new OrderStateConflictException(
                 $"COD payment can only be collected after Delivered or PickedUp (current: '{FulfillmentStatus}').");
         }
 
         if (PaymentStatus != PaymentStatus.Pending)
         {
-            throw new InvalidOperationException($"Payment is already '{PaymentStatus}'.");
+            throw new OrderStateConflictException($"Payment is already '{PaymentStatus}'.");
         }
 
         var prevOrder = OrderStatus;
