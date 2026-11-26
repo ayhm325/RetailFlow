@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using System.Threading.RateLimiting;
+using System.Security.Cryptography.X509Certificates;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -32,9 +33,17 @@ public static class ProductHostExtensions
         services.AddProblemDetails();
         services.AddOpenApi();
 
-        services.AddDataProtection()
+        var dataProtection = services.AddDataProtection()
             .SetApplicationName("RetailFlow")
             .PersistKeysToDbContext<RetailFlowDbContext>();
+
+        var certPath = configuration["DataProtection:CertificatePath"];
+        var certPassword = configuration["DataProtection:CertificatePassword"];
+        if (!string.IsNullOrWhiteSpace(certPath))
+        {
+            var certificate = X509CertificateLoader.LoadPkcs12FromFile(certPath, certPassword);
+            dataProtection.ProtectKeysWithCertificate(certificate);
+        }
 
         services.AddSingleton<ITicketStore, SqlSessionTicketStore>();
         services.AddScoped<RetailFlowCookieEvents>();

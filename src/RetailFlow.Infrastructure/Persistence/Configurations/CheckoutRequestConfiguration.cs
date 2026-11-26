@@ -19,9 +19,13 @@ internal sealed class CheckoutRequestConfiguration : IEntityTypeConfiguration<Ch
         builder.Property(x => x.IdempotencyKey).HasMaxLength(128).IsRequired();
         builder.Property(x => x.RequestHash).HasColumnType("char(64)").IsRequired();
         builder.Property(x => x.Status).HasConversion<int>().IsRequired();
+        builder.Property(x => x.ClaimToken).IsRequired();
         builder.Property(x => x.OrderId);
         builder.Property(x => x.ResponseStatusCode);
         builder.Property(x => x.CreatedAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
+        builder.Property(x => x.LastAttemptAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
+        builder.Property(x => x.LeaseExpiresAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
+        builder.Property(x => x.CompletedAtUtc).HasColumnType("datetimeoffset(3)");
         builder.Property(x => x.ExpiresAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
 
         builder.HasIndex(x => new { x.StoreId, x.CustomerId, x.IdempotencyKey })

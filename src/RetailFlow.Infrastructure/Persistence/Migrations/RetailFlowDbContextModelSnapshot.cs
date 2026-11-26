@@ -504,6 +504,12 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid>("ClaimToken")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("CompletedAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
                     b.Property<DateTimeOffset>("CreatedAtUtc")
                         .HasColumnType("datetimeoffset(3)");
 
@@ -517,6 +523,12 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTimeOffset>("LastAttemptAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<DateTimeOffset>("LeaseExpiresAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
 
                     b.Property<Guid?>("OrderId")
                         .HasColumnType("uniqueidentifier");

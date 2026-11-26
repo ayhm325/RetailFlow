@@ -1,10 +1,14 @@
 namespace RetailFlow.Domain.Orders;
 
 /// <summary>
-/// Atomic Checkout Idempotency record per ADR-0006 (Accepted 2026-11-26).
+/// Atomic Checkout Idempotency record per ADR-0006 (Accepted 2026-11-26),
+/// separating short Processing Lease (LeaseExpiresAtUtc + ClaimToken) from 24h Idempotency Retention (ExpiresAtUtc).
 /// </summary>
 public sealed class CheckoutRequest
 {
+    public static readonly TimeSpan DefaultLeaseDuration = TimeSpan.FromSeconds(60);
+    public static readonly TimeSpan DefaultRetentionDuration = TimeSpan.FromHours(24);
+
     private CheckoutRequest()
     {
         IdempotencyKey = string.Empty;
@@ -17,9 +21,13 @@ public sealed class CheckoutRequest
     public string IdempotencyKey { get; private set; }
     public string RequestHash { get; private set; }
     public CheckoutRequestStatus Status { get; private set; }
+    public Guid ClaimToken { get; private set; }
     public Guid? OrderId { get; private set; }
     public int? ResponseStatusCode { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
+    public DateTimeOffset LastAttemptAtUtc { get; private set; }
+    public DateTimeOffset LeaseExpiresAtUtc { get; private set; }
+    public DateTimeOffset? CompletedAtUtc { get; private set; }
     public DateTimeOffset ExpiresAtUtc { get; private set; }
 
     public static CheckoutRequest Claim(
@@ -28,7 +36,8 @@ public sealed class CheckoutRequest
         Guid customerId,
         string idempotencyKey,
         string requestHash,
-        DateTimeOffset createdAtUtc)
+        DateTimeOffset createdAtUtc,
+        Guid? claimToken = null)
     {
         if (id == Guid.Empty) throw new ArgumentException("CheckoutRequest id cannot be empty.", nameof(id));
         if (storeId == Guid.Empty) throw new ArgumentException("StoreId cannot be empty.", nameof(storeId));
@@ -51,16 +60,20 @@ public sealed class CheckoutRequest
             IdempotencyKey = idempotencyKey.Trim(),
             RequestHash = requestHash,
             Status = CheckoutRequestStatus.InProgress,
+            ClaimToken = claimToken ?? Guid.NewGuid(),
             CreatedAtUtc = createdAtUtc,
-            ExpiresAtUtc = createdAtUtc.AddHours(24)
+            LastAttemptAtUtc = createdAtUtc,
+            LeaseExpiresAtUtc = createdAtUtc.Add(DefaultLeaseDuration),
+            ExpiresAtUtc = createdAtUtc.Add(DefaultRetentionDuration)
         };
     }
 
-    public void MarkCompleted(Guid orderId, int responseStatusCode)
+    public void MarkCompleted(Guid orderId, int responseStatusCode, DateTimeOffset? completedAtUtc = null)
     {
         OrderId = orderId;
         ResponseStatusCode = responseStatusCode;
         Status = CheckoutRequestStatus.Completed;
+        CompletedAtUtc = completedAtUtc ?? DateTimeOffset.UtcNow;
     }
 
     public void MarkFailed(int responseStatusCode)

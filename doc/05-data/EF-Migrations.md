@@ -12,6 +12,7 @@
 | `20261125234754_AddCartOrdersAndCheckoutIdempotency` | Cart/CartItems/CheckoutRequests/Orders/OrderItems/OrderStatusHistories |
 | `20261125234930_AddIdentityAndSessionTickets` | AppUsers وSessionTickets |
 | `20261126085623_AddDataProtectionKeys` | DataProtectionKeys (`IDataProtectionKeyContext`) |
+| `20261126092137_AddCheckoutRequestLeaseAndRecoveryFields` | CheckoutRequests (`ClaimToken`, `LeaseExpiresAtUtc`, `LastAttemptAtUtc`, `CompletedAtUtc`) |
 
 كل migration لها Designer file، ويوجد `RetailFlowDbContextModelSnapshot.cs`.
 

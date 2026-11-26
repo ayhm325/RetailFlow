@@ -8,11 +8,16 @@ namespace RetailFlow.Infrastructure.Orders;
 
 public sealed class OrderService : IOrderService
 {
-    private readonly RetailFlowDbContext _dbContext;
+    public const int MaxPageSize = 50;
+    private const int ReservationSweepBatchSize = 50;
 
-    public OrderService(RetailFlowDbContext dbContext)
+    private readonly RetailFlowDbContext _dbContext;
+    private readonly TimeProvider _timeProvider;
+
+    public OrderService(RetailFlowDbContext dbContext, TimeProvider? timeProvider = null)
     {
         _dbContext = dbContext;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<PagedOrdersResponse> GetCustomerOrdersAsync(
@@ -22,29 +27,11 @@ public sealed class OrderService : IOrderService
         int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        var normalizedPage = Math.Max(1, page);
-        var normalizedPageSize = Math.Clamp(pageSize, 1, 50);
-
         var baseQuery = _dbContext.Orders
             .AsNoTracking()
             .Where(o => o.StoreId == storeId && o.CustomerId == customerId);
 
-        var totalCount = await baseQuery.CountAsync(cancellationToken);
-        var totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)normalizedPageSize);
-
-        var orders = await baseQuery
-            .Include(o => o.Items)
-            .OrderByDescending(o => o.CreatedAtUtc)
-            .Skip((normalizedPage - 1) * normalizedPageSize)
-            .Take(normalizedPageSize)
-            .ToListAsync(cancellationToken);
-
-        return new PagedOrdersResponse(
-            normalizedPage,
-            normalizedPageSize,
-            totalCount,
-            totalPages,
-            orders.Select(Map).ToList());
+        return await ExecutePagedOrderQueryAsync(baseQuery, page, pageSize, cancellationToken);
     }
 
     public async Task<OrderDto?> GetCustomerOrderByIdAsync(
@@ -79,7 +66,7 @@ public sealed class OrderService : IOrderService
             return null;
         }
 
-        order.CancelByCustomer(customerId, reason, DateTimeOffset.UtcNow);
+        order.CancelByCustomer(customerId, reason, _timeProvider.GetUtcNow());
         await ReleaseOrderReservationsAsync(order, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
@@ -92,29 +79,11 @@ public sealed class OrderService : IOrderService
         int pageSize = 20,
         CancellationToken cancellationToken = default)
     {
-        var normalizedPage = Math.Max(1, page);
-        var normalizedPageSize = Math.Clamp(pageSize, 1, 50);
-
         var baseQuery = _dbContext.Orders
             .AsNoTracking()
             .Where(o => o.StoreId == storeId);
 
-        var totalCount = await baseQuery.CountAsync(cancellationToken);
-        var totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)normalizedPageSize);
-
-        var orders = await baseQuery
-            .Include(o => o.Items)
-            .OrderByDescending(o => o.CreatedAtUtc)
-            .Skip((normalizedPage - 1) * normalizedPageSize)
-            .Take(normalizedPageSize)
-            .ToListAsync(cancellationToken);
-
-        return new PagedOrdersResponse(
-            normalizedPage,
-            normalizedPageSize,
-            totalCount,
-            totalPages,
-            orders.Select(Map).ToList());
+        return await ExecutePagedOrderQueryAsync(baseQuery, page, pageSize, cancellationToken);
     }
 
     public async Task<OrderDto?> ConfirmOrderAsync(
@@ -134,7 +103,7 @@ public sealed class OrderService : IOrderService
             return null;
         }
 
-        order.Confirm(actorUserId, "MerchantOwner", DateTimeOffset.UtcNow);
+        order.Confirm(actorUserId, "MerchantOwner", _timeProvider.GetUtcNow());
         await _dbContext.SaveChangesAsync(cancellationToken);
         return Map(order);
     }
@@ -157,7 +126,7 @@ public sealed class OrderService : IOrderService
             return null;
         }
 
-        order.Reject(actorUserId, "MerchantOwner", reason, DateTimeOffset.UtcNow);
+        order.Reject(actorUserId, "MerchantOwner", reason, _timeProvider.GetUtcNow());
         await ReleaseOrderReservationsAsync(order, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
@@ -182,7 +151,7 @@ public sealed class OrderService : IOrderService
             return null;
         }
 
-        order.AdvanceFulfillment(actorUserId, "MerchantOwner", nextStatus, DateTimeOffset.UtcNow);
+        order.AdvanceFulfillment(actorUserId, "MerchantOwner", nextStatus, _timeProvider.GetUtcNow());
         await _dbContext.SaveChangesAsync(cancellationToken);
         return Map(order);
     }
@@ -204,7 +173,7 @@ public sealed class OrderService : IOrderService
             return null;
         }
 
-        order.CollectCodPayment(actorUserId, "MerchantOwner", DateTimeOffset.UtcNow);
+        order.CollectCodPayment(actorUserId, "MerchantOwner", _timeProvider.GetUtcNow());
         await CommitOrderReservationsAsync(order, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
@@ -213,43 +182,91 @@ public sealed class OrderService : IOrderService
 
     public async Task<int> ReleaseExpiredReservationsAsync(DateTimeOffset utcNow, CancellationToken cancellationToken)
     {
-        var expiredOrderIds = await _dbContext.Orders
-            .AsNoTracking()
-            .Where(o => o.OrderStatus == OrderStatus.Pending && o.ReservationExpiresAtUtc <= utcNow)
-            .Select(o => o.Id)
-            .ToListAsync(cancellationToken);
-
         var releasedCount = 0;
-        foreach (var orderId in expiredOrderIds)
+
+        while (!cancellationToken.IsCancellationRequested)
         {
             _dbContext.ChangeTracker.Clear();
 
-            var order = await _dbContext.Orders
+            var batch = await _dbContext.Orders
                 .Include(o => o.Items)
                 .Include(o => o.History)
                 .AsSplitQuery()
-                .SingleOrDefaultAsync(o => o.Id == orderId && o.OrderStatus == OrderStatus.Pending, cancellationToken);
+                .Where(o => o.OrderStatus == OrderStatus.Pending && o.ReservationExpiresAtUtc <= utcNow)
+                .OrderBy(o => o.ReservationExpiresAtUtc)
+                .ThenBy(o => o.Id)
+                .Take(ReservationSweepBatchSize)
+                .ToListAsync(cancellationToken);
 
-            if (order is null)
+            if (batch.Count == 0)
             {
-                continue;
+                break;
             }
 
-            try
+            var batchHadConflict = false;
+            foreach (var order in batch)
             {
-                order.CancelByMerchantOrTimeout(null, "System", "Reservation expired (15-minute timeout)", utcNow);
-                await ReleaseOrderReservationsAsync(order, cancellationToken);
-                await _dbContext.SaveChangesAsync(cancellationToken);
-                releasedCount++;
+                try
+                {
+                    order.CancelByMerchantOrTimeout(null, "System", "Reservation expired (15-minute timeout)", utcNow);
+                    await ReleaseOrderReservationsAsync(order, cancellationToken);
+                    await _dbContext.SaveChangesAsync(cancellationToken);
+                    releasedCount++;
+                }
+                catch (DbUpdateConcurrencyException)
+                {
+                    // Another worker instance concurrently updated/released this order; clear tracker and skip.
+                    batchHadConflict = true;
+                    _dbContext.ChangeTracker.Clear();
+                }
             }
-            catch (DbUpdateConcurrencyException)
+
+            if (batch.Count < ReservationSweepBatchSize && !batchHadConflict)
             {
-                // Another worker instance concurrently updated/released this order; safe to skip.
-                _dbContext.ChangeTracker.Clear();
+                break;
             }
         }
 
         return releasedCount;
+    }
+
+    private static async Task<PagedOrdersResponse> ExecutePagedOrderQueryAsync(
+        IQueryable<Order> baseQuery,
+        int page,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        var normalizedPage = Math.Max(1, page);
+        var normalizedPageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+
+        var totalCount = await baseQuery.CountAsync(cancellationToken);
+        var totalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)normalizedPageSize);
+
+        var skipLong = (long)(normalizedPage - 1) * normalizedPageSize;
+        if (skipLong > int.MaxValue || skipLong >= totalCount)
+        {
+            return new PagedOrdersResponse(
+                normalizedPage,
+                normalizedPageSize,
+                totalCount,
+                totalPages,
+                Array.Empty<OrderDto>());
+        }
+
+        var orders = await baseQuery
+            .Include(o => o.Items)
+            .OrderByDescending(o => o.CreatedAtUtc)
+            .ThenByDescending(o => o.Id)
+            .Skip((int)skipLong)
+            .Take(normalizedPageSize)
+            .ToListAsync(cancellationToken);
+
+        return new PagedOrdersResponse(
+            normalizedPage,
+            normalizedPageSize,
+            totalCount,
+            totalPages,
+            orders.Select(Map).ToList());
     }
 
     private async Task ReleaseOrderReservationsAsync(Order order, CancellationToken cancellationToken)
