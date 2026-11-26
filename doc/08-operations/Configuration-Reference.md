@@ -6,7 +6,7 @@
 |---|---|---|
 | `RETAILFLOW_CONNECTION` | connection string الأساسي | الأولوية في Runtime عبر IConfiguration |
 | `ConnectionStrings:RetailFlow` | بديل connection string | يستخدم إذا لم يُحدد المفتاح السابق |
-| Development fallback | local SQL Server | `Server=.;Database=RetailFlowProduct;Trusted_Connection=True;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=True` |
+| Development fallback | local SQL Server | `Server=.;Database=RetailFlowProduct;Trusted_Connection=True;Encrypt=True;TrustServerCertificate=True` |
 
 في Production إذا لم يُحدد أي من المفتاحين يفشل التحقق عند startup عبر options validation.
 

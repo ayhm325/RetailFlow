@@ -1,3 +1,4 @@
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -13,9 +14,14 @@ using RetailFlow.Infrastructure.Persistence;
 
 namespace RetailFlow.Infrastructure.Orders;
 
+internal interface ICheckoutFinalizationHook
+{
+    Task OnBeforeFinalizationAsync(Guid claimId, Guid claimToken, CancellationToken cancellationToken);
+}
+
 /// <summary>
 /// Implements atomic Checkout Idempotency per ADR-0006 (Accepted) with Processing Lease recovery,
-/// Read-After-Error verification, and 15-minute inventory reservation per OD-001.
+/// SQL-enforced stale-lease ownership fencing, Read-After-Error verification, and 15-minute inventory reservation per OD-001.
 /// </summary>
 public sealed class CheckoutService : ICheckoutService
 {
@@ -23,17 +29,29 @@ public sealed class CheckoutService : ICheckoutService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<CheckoutService> _logger;
+    private readonly ICheckoutFinalizationHook? _finalizationHook;
 
     public CheckoutService(
         RetailFlowDbContext dbContext,
         IServiceScopeFactory scopeFactory,
         ILogger<CheckoutService> logger,
         TimeProvider? timeProvider = null)
+        : this(dbContext, scopeFactory, logger, timeProvider, null)
+    {
+    }
+
+    internal CheckoutService(
+        RetailFlowDbContext dbContext,
+        IServiceScopeFactory scopeFactory,
+        ILogger<CheckoutService> logger,
+        TimeProvider? timeProvider,
+        ICheckoutFinalizationHook? finalizationHook)
     {
         _dbContext = dbContext;
         _scopeFactory = scopeFactory;
         _logger = logger;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _finalizationHook = finalizationHook;
     }
 
     public async Task<CheckoutResult> CheckoutAsync(
@@ -267,9 +285,52 @@ public sealed class CheckoutService : ICheckoutService
 
             _dbContext.Orders.Add(order);
             _dbContext.CartItems.RemoveRange(cart.Items);
-            claim.MarkCompleted(order.Id, 201, now);
+
+            // Detach the tracked claim so EF Core never issues an unfenced UPDATE CheckoutRequests WHERE Id = @id.
+            _dbContext.Entry(claim).State = EntityState.Detached;
+
+            if (_finalizationHook is not null)
+            {
+                await _finalizationHook.OnBeforeFinalizationAsync(claim.Id, claimToken, cancellationToken);
+            }
+
+            await using var tx = await _dbContext.Database.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+
+            // Database-enforced lease ownership fence inside the same transaction as Order/Inventory/Cart mutations.
+            var completionNow = _timeProvider.GetUtcNow();
+            var fencedRows = await _dbContext.CheckoutRequests
+                .Where(r =>
+                    r.Id == claim.Id &&
+                    r.ClaimToken == claimToken &&
+                    r.Status == CheckoutRequestStatus.InProgress &&
+                    r.LeaseExpiresAtUtc > completionNow)
+                .ExecuteUpdateAsync(
+                    s => s
+                        .SetProperty(r => r.OrderId, order.Id)
+                        .SetProperty(r => r.ResponseStatusCode, 201)
+                        .SetProperty(r => r.Status, CheckoutRequestStatus.Completed)
+                        .SetProperty(r => r.CompletedAtUtc, completionNow),
+                    cancellationToken);
+
+            if (fencedRows == 0)
+            {
+                await tx.RollbackAsync(cancellationToken);
+                _dbContext.ChangeTracker.Clear();
+
+                var committed = await TryReadCompletedOrderInNewScopeAsync(storeId, claim.Id, cancellationToken);
+                if (committed is not null)
+                {
+                    return new CheckoutResult(CheckoutOutcomeStatus.Replayed, committed);
+                }
+
+                return new CheckoutResult(
+                    CheckoutOutcomeStatus.ConcurrentInFlight,
+                    null,
+                    "Checkout lease expired or was reclaimed by another request.");
+            }
 
             await _dbContext.SaveChangesAsync(cancellationToken);
+            await tx.CommitAsync(cancellationToken);
 
             return new CheckoutResult(CheckoutOutcomeStatus.Created, OrderService.Map(order));
         }

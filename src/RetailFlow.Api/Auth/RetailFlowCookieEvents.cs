@@ -2,6 +2,7 @@ using System.Security.Claims;
 
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 
 using RetailFlow.Infrastructure.Identity;
@@ -9,7 +10,9 @@ using RetailFlow.Infrastructure.Identity;
 namespace RetailFlow.Api.Auth;
 
 /// <summary>
-/// Validates Identity SecurityStamp and RetailFlow-specific IsActive/StoreId invariants on every authenticated cookie request.
+/// Validates Identity SecurityStamp and RetailFlow-specific IsActive/StoreId invariants on scoped requests.
+/// Public routes without an IdentityLookupScope skip tenant-scoped UserStore lookups while preserving the SessionTicket;
+/// protected routes without an established scope fail closed.
 /// </summary>
 public sealed class RetailFlowCookieEvents : CookieAuthenticationEvents
 {
@@ -35,18 +38,32 @@ public sealed class RetailFlowCookieEvents : CookieAuthenticationEvents
         }
 
         var currentScope = _scopeAccessor.Current;
+        if (currentScope is null)
+        {
+            var requiresAuthorization = context.HttpContext.GetEndpoint()?.Metadata.GetMetadata<IAuthorizeData>() is not null;
+            if (requiresAuthorization)
+            {
+                // Fail closed: never allow a protected endpoint without an established tenant/platform scope.
+                context.RejectPrincipal();
+            }
+
+            // General public route (/health/*, static assets, SPA fallback): skip unscoped UserStore lookup
+            // without destroying the user's SessionTicket.
+            return;
+        }
+
         var storeIdClaim = context.Principal!.FindFirstValue("store_id");
         var hasStoreClaim = Guid.TryParse(storeIdClaim, out var claimStoreId);
 
         // If a valid Store A cookie is sent to a Store B route, do not destroy Store A's SessionTicket;
         // let Authorization / TenantClaimMatchEndpointFilter return 403 Forbidden.
-        if (currentScope?.ScopeType == IdentityScopeType.Store &&
+        if (currentScope.ScopeType == IdentityScopeType.Store &&
             (!hasStoreClaim || claimStoreId != currentScope.StoreId))
         {
             return;
         }
 
-        if (currentScope?.ScopeType == IdentityScopeType.Platform && hasStoreClaim)
+        if (currentScope.ScopeType == IdentityScopeType.Platform && hasStoreClaim)
         {
             return;
         }

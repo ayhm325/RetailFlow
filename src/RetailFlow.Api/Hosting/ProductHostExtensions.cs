@@ -71,14 +71,16 @@ public static class ProductHostExtensions
                 options.SlidingExpiration = true;
                 options.ExpireTimeSpan = TimeSpan.FromHours(12);
                 options.EventsType = typeof(RetailFlowCookieEvents);
-            });
+            })
+            .AddCookie(IdentityConstants.ExternalScheme)
+            .AddCookie(IdentityConstants.TwoFactorRememberMeScheme);
 
         services.AddOptions<CookieAuthenticationOptions>(IdentityConstants.ApplicationScheme)
             .Configure<ITicketStore>((options, ticketStore) => options.SessionStore = ticketStore);
 
         services.Configure<SecurityStampValidatorOptions>(options =>
         {
-            options.ValidationInterval = TimeSpan.FromMinutes(1);
+            options.ValidationInterval = TimeSpan.Zero;
         });
 
         services.AddAuthorizationBuilder()
