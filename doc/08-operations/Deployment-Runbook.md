@@ -23,7 +23,7 @@
 - [ ] ضبط connection string من secret store.
 - [ ] ضبط `AllowedHosts` بقيم hosts دقيقة.
 - [ ] ضبط HTTPS/TLS وforwarded headers وفق proxy موثوق.
-- [ ] تحديد Data Protection key ring persistence/share بين instances.
+- [ ] تحديد Data Protection key ring persistence/share بين instances (`PersistKeysToDbContext`) وتزويد شهادة `DataProtection:CertificatePath` (مع `CertificatePassword` و`CertificateThumbprint`) لأن `RequireCertificateInProduction` يفرض الفشل المغلق افتراضياً (`true`)، واستخدام `PreviousCertificates` عند تدوير الشهادات.
 - [ ] تحديد سياسة database access أقل صلاحية.
 - [ ] التحقق من rate limits وtimeouts وrequest body limits.
 - [ ] التحقق من health endpoints من deployment environment.

@@ -35,23 +35,7 @@ public static class ProductHostExtensions
         services.AddProblemDetails();
         services.AddOpenApi();
 
-        var dataProtection = services.AddDataProtection()
-            .SetApplicationName("RetailFlow")
-            .PersistKeysToDbContext<RetailFlowDbContext>();
-
-        var certPath = configuration["DataProtection:CertificatePath"];
-        var certPassword = configuration["DataProtection:CertificatePassword"];
-        var requireCertInProd = configuration.GetValue<bool>("DataProtection:RequireCertificateInProduction");
-        if (!string.IsNullOrWhiteSpace(certPath))
-        {
-            var certificate = X509CertificateLoader.LoadPkcs12FromFile(certPath, certPassword);
-            dataProtection.ProtectKeysWithCertificate(certificate);
-        }
-        else if (environment.IsProduction() && requireCertInProd)
-        {
-            throw new InvalidOperationException(
-                "DataProtection:CertificatePath must be configured in Production when RequireCertificateInProduction is enabled.");
-        }
+        services.AddRetailFlowDataProtection(configuration, environment);
 
         services.Configure<PlatformSecurityOptions>(configuration.GetSection("PlatformSecurity"));
 

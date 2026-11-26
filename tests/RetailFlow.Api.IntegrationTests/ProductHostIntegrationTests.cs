@@ -148,7 +148,8 @@ public sealed class ProductHostIntegrationTests
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = ProductionHost,
-                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;"
+                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;",
+                        ["DataProtection:RequireCertificateInProduction"] = "false"
                     });
                 });
             });
@@ -179,7 +180,8 @@ public sealed class ProductHostIntegrationTests
                     config.AddInMemoryCollection(new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = ProductionHost,
-                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;"
+                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;",
+                        ["DataProtection:RequireCertificateInProduction"] = "false"
                     });
                 });
                 builder.ConfigureServices(services =>
@@ -368,7 +370,8 @@ public sealed class ProductHostIntegrationTests
                 {
                     var values = new Dictionary<string, string?>
                     {
-                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;"
+                        ["ConnectionStrings:RetailFlow"] = "Server=localhost;Database=RetailFlowProduct;Trusted_Connection=True;TrustServerCertificate=True;",
+                        ["DataProtection:RequireCertificateInProduction"] = "false"
                     };
                     if (allowedHosts is not null)
                     {
