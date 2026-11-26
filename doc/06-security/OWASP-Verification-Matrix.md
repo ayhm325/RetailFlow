@@ -4,9 +4,9 @@
 
 | مجال التحقق | الدليل الحالي | الحالة التوثيقية | العمل المطلوب |
 |---|---|---|---|
-| Authentication | Cookie auth, password hashing, login endpoints | Partial | راجع password policy/rehash/lockout/MFA/bootstrap |
-| Session management | `__Host-` secure HttpOnly Lax cookie + SQL ticket store | Partial | تحقق من key persistence, rotation, absolute timeout, revoked accounts, cleanup |
-| Authorization | role policies + tenant claim match filters | Partial | مراجعة كل endpoint/ID access وPlatform boundaries |
+| Authentication | Cookie auth, PBKDF2-HMAC-SHA512 (`RetailFlowPasswordHasher`), `PlatformAdmin` mandatory TOTP MFA (`RequireAdminMfa=true`), replay protection, lockout (`5`/`15m`), single-use recovery codes | Verified (Code + SQL Tests; TOTP only) | تقييم إضافة WebAuthn/Passkeys لمقاومة Phishing (NIST AAL2) وتفعيل SMTP الإنتاجي |
+| Session management | `__Host-` secure HttpOnly Lax cookie + `SqlSessionTicketStore` (idle/absolute timeout) + per-session `amr=mfa` + `ValidationInterval=Zero` + server-side ticket revocation | Verified (SQL Tests) | إضافة background cleanup للـ expired `SessionTickets` ومراقبة الأداء |
+| Authorization | `PlatformAdmin` (`mfa_enrolled=true`, `amr=mfa`) vs `PlatformAdminEnrollment`, role policies, tenant `store_id` claim match filters | Verified (Covered Routes) | مراجعة دورية لأي endpoints جديدة وإتمام اختبارات BOLA لكل nested ID |
 | BOLA / API1 | tenant-scoped service queries + integration tests | Tested for covered cases | وسّع الاختبارات لكل route وnested identifier |
 | CSRF | `X-CSRF: 1` on authenticated unsafe methods | Partial / Review Required | استخدم token/Origin defense مضبوطاً، اختبر login and cross-site requests |
 | API resource consumption / API4 | global fixed-window rate limiter | Partial | سياسات أكثر دقة للـ auth/checkout/search وbody/size limits |

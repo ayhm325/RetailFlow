@@ -45,9 +45,9 @@ public sealed class PlatformAdminMfaHardeningTests : IClassFixture<CatalogSqlTes
                         ["AllowedHosts"] = "retail.example.com",
                         ["RETAILFLOW_CONNECTION"] = _fixture.ConnectionString,
                         ["ConnectionStrings:RetailFlow"] = _fixture.ConnectionString,
-                        ["DataProtection:RequireCertificateInProduction"] = "false",
                         ["Email:RequireConfiguredInProduction"] = "false"
                     };
+                    TestDataProtectionCertHelper.ApplyTestCertificate(values);
 
                     if (overrides is not null)
                     {
@@ -451,6 +451,167 @@ public sealed class PlatformAdminMfaHardeningTests : IClassFixture<CatalogSqlTes
                 await CleanupUserAsync(customerId);
             }
             await _fixture.DeleteStoresAsync(store.Id);
+        }
+    }
+
+    [Fact]
+    public async Task TestF_G_ParallelPasswordOnlySessions_And_MultiInstance_DoNotUpgradeSessionAssurance()
+    {
+        await using var instanceA = CreateFactory(Environments.Production);
+        await using var instanceB = CreateFactory(Environments.Production);
+        const string password = "ParallelMfaPass!2026";
+        var (adminId, email) = await CreatePlatformAdminAsync(instanceA, password);
+        var createdStoreIds = new List<Guid>();
+
+        try
+        {
+            using var clientA = instanceA.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://retail.example.com"), HandleCookies = true });
+            using var clientB = instanceB.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://retail.example.com"), HandleCookies = true });
+            clientA.DefaultRequestHeaders.Add("X-CSRF", "1");
+            clientB.DefaultRequestHeaders.Add("X-CSRF", "1");
+
+            // 1. Both Client A (Instance A) and Client B (Instance B) perform password-only login (enrollment-only sessions)
+            using var loginA = await clientA.PostAsJsonAsync("/api/platform/auth/login", new LoginCommand(email, password));
+            using var loginB = await clientB.PostAsJsonAsync("/api/platform/auth/login", new LoginCommand(email, password));
+            Assert.Equal(HttpStatusCode.OK, loginA.StatusCode);
+            Assert.Equal(HttpStatusCode.OK, loginB.StatusCode);
+            Assert.True((await loginA.Content.ReadFromJsonAsync<AuthenticatedUserDto>())!.MfaRequiredForPlatformAccess);
+            Assert.True((await loginB.Content.ReadFromJsonAsync<AuthenticatedUserDto>())!.MfaRequiredForPlatformAccess);
+
+            // Both sessions are blocked from admin endpoints
+            using var preA = await clientA.PostAsJsonAsync("/api/platform/stores", new CreateStoreCommand("PreA", $"prea-{Guid.NewGuid():N}"[..10], StoreType.OnlineOnly, "JOD", "Asia/Amman", true, false));
+            using var preB = await clientB.PostAsJsonAsync("/api/platform/stores", new CreateStoreCommand("PreB", $"preb-{Guid.NewGuid():N}"[..10], StoreType.OnlineOnly, "JOD", "Asia/Amman", true, false));
+            Assert.Equal(HttpStatusCode.Forbidden, preA.StatusCode);
+            Assert.Equal(HttpStatusCode.Forbidden, preB.StatusCode);
+
+            await using (var db = _fixture.CreateDbContext())
+            {
+                Assert.Equal(2, await db.SessionTickets.CountAsync(t => t.UserId == adminId));
+            }
+
+            // 2. Client A completes MFA setup & enable on Instance A
+            using var setupResp = await clientA.PostAsJsonAsync("/api/platform/auth/2fa/setup", new BeginTwoFactorSetupCommand(password));
+            Assert.Equal(HttpStatusCode.OK, setupResp.StatusCode);
+            var setup = await setupResp.Content.ReadFromJsonAsync<TwoFactorSetupDto>();
+            var secret = ExtractSecretFromUri(setup!.AuthenticatorUri);
+            var code = ComputeTotp(secret, DateTimeOffset.UtcNow);
+
+            using var enableResp = await clientA.PostAsJsonAsync("/api/platform/auth/2fa/enable", new EnableTwoFactorCommand(code));
+            Assert.Equal(HttpStatusCode.OK, enableResp.StatusCode);
+
+            // 3. Only Client A's new MFA-verified ticket should remain in SQL Server; Client B's ticket is revoked
+            await using (var db = _fixture.CreateDbContext())
+            {
+                Assert.Equal(1, await db.SessionTickets.CountAsync(t => t.UserId == adminId));
+            }
+
+            // 4. Client A succeeds on Instance A
+            using var adminA = await clientA.PostAsJsonAsync("/api/platform/stores", new CreateStoreCommand("PostA", $"posta-{Guid.NewGuid():N}"[..10], StoreType.OnlineOnly, "JOD", "Asia/Amman", true, false));
+            Assert.Equal(HttpStatusCode.Created, adminA.StatusCode);
+            createdStoreIds.Add((await adminA.Content.ReadFromJsonAsync<PlatformStoreDto>())!.Id);
+
+            // 5. Client B (stale password-only cookie on Instance B) MUST NOT gain MFA assurance or admin access
+            using var adminB = await clientB.PostAsJsonAsync("/api/platform/stores", new CreateStoreCommand("PostB", $"postb-{Guid.NewGuid():N}"[..10], StoreType.OnlineOnly, "JOD", "Asia/Amman", true, false));
+            Assert.Equal(HttpStatusCode.Unauthorized, adminB.StatusCode);
+
+            // 6. Reverse check: Client A's MFA cookie also works on Instance B (shared SQL SessionTickets + DP keys)
+            var mfaCookiePair = enableResp.Headers.GetValues("Set-Cookie")
+                .First(h => h.StartsWith("__Host-RetailFlow.Session=", StringComparison.Ordinal))
+                .Split(';', 2)[0];
+            using var crossInstanceClient = instanceB.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://retail.example.com"), HandleCookies = false });
+            crossInstanceClient.DefaultRequestHeaders.Add("X-CSRF", "1");
+            crossInstanceClient.DefaultRequestHeaders.Add("Cookie", mfaCookiePair);
+            using var crossAdminResp = await crossInstanceClient.PostAsJsonAsync(
+                "/api/platform/stores",
+                new CreateStoreCommand("CrossB", $"crsb-{Guid.NewGuid():N}"[..10], StoreType.OnlineOnly, "JOD", "Asia/Amman", true, false));
+            Assert.Equal(HttpStatusCode.Created, crossAdminResp.StatusCode);
+            createdStoreIds.Add((await crossAdminResp.Content.ReadFromJsonAsync<PlatformStoreDto>())!.Id);
+        }
+        finally
+        {
+            if (createdStoreIds.Count > 0)
+            {
+                await _fixture.DeleteStoresAsync(createdStoreIds.ToArray());
+            }
+            await CleanupUserAsync(adminId);
+        }
+    }
+
+    [Fact]
+    public async Task TestL_M_FactorReplacement_And_PlatformAuthorizationRouteInventory()
+    {
+        await using var factory = CreateFactory(Environments.Production);
+        const string password = "RouteInvPass!2026";
+        var (adminId, email) = await CreatePlatformAdminAsync(factory, password);
+        var targetStoreId = Guid.NewGuid();
+
+        try
+        {
+            using var client = factory.CreateClient(new WebApplicationFactoryClientOptions { BaseAddress = new Uri("https://retail.example.com"), HandleCookies = true });
+            client.DefaultRequestHeaders.Add("X-CSRF", "1");
+
+            using var loginResp = await client.PostAsJsonAsync("/api/platform/auth/login", new LoginCommand(email, password));
+            Assert.Equal(HttpStatusCode.OK, loginResp.StatusCode);
+
+            // Test M: Enrollment-only session is denied (403 Forbidden) on ALL privileged /api/platform/* routes
+            var privilegedRoutes = new (string Path, object Body)[]
+            {
+                ("/api/platform/stores", new CreateStoreCommand("Deny", $"deny-{Guid.NewGuid():N}"[..10], StoreType.OnlineOnly, "JOD", "Asia/Amman", true, false)),
+                ($"/api/platform/stores/{targetStoreId}/approve", new { }),
+                ($"/api/platform/stores/{targetStoreId}/reject", new { }),
+                ($"/api/platform/stores/{targetStoreId}/suspend", new { }),
+                ($"/api/platform/stores/{targetStoreId}/merchant-owner", new CreateMerchantUserCommand("mo@retailflow.test", "MO", "MerchantPass!123")),
+                ("/api/platform/auth/2fa/replace/setup", new BeginTwoFactorReplacementCommand(password, CurrentTwoFactorCode: "000000")),
+                ("/api/platform/auth/2fa/replace/confirm", new ConfirmTwoFactorReplacementCommand("000000")),
+                ("/api/platform/auth/2fa/disable", new DisableTwoFactorCommand(password, TwoFactorCode: "000000")),
+                ("/api/platform/auth/2fa/recovery-codes", new RegenerateRecoveryCodesCommand("000000"))
+            };
+
+            foreach (var (path, body) in privilegedRoutes)
+            {
+                using var resp = await client.PostAsJsonAsync(path, body);
+                Assert.Equal(HttpStatusCode.Forbidden, resp.StatusCode);
+            }
+
+            // Complete enrollment
+            using var setupResp = await client.PostAsJsonAsync("/api/platform/auth/2fa/setup", new BeginTwoFactorSetupCommand(password));
+            Assert.Equal(HttpStatusCode.OK, setupResp.StatusCode);
+            var secret1 = ExtractSecretFromUri((await setupResp.Content.ReadFromJsonAsync<TwoFactorSetupDto>())!.AuthenticatorUri);
+            var code1 = ComputeTotp(secret1, DateTimeOffset.UtcNow);
+            using var enableResp = await client.PostAsJsonAsync("/api/platform/auth/2fa/enable", new EnableTwoFactorCommand(code1));
+            Assert.Equal(HttpStatusCode.OK, enableResp.StatusCode);
+            var recovery1 = (await enableResp.Content.ReadFromJsonAsync<TwoFactorRecoveryCodesDto>())!;
+
+            // Test L: Factor Replacement requires step-up, invalid TOTP fails, valid replacement revokes sessions & old recovery codes
+            using var badReplace = await client.PostAsJsonAsync("/api/platform/auth/2fa/replace/setup", new BeginTwoFactorReplacementCommand(password, CurrentTwoFactorCode: "000000"));
+            Assert.Equal(HttpStatusCode.BadRequest, badReplace.StatusCode);
+
+            using var goodReplace = await client.PostAsJsonAsync("/api/platform/auth/2fa/replace/setup", new BeginTwoFactorReplacementCommand(password, RecoveryCode: recovery1.RecoveryCodes[0]));
+            Assert.Equal(HttpStatusCode.OK, goodReplace.StatusCode);
+            var secret2 = ExtractSecretFromUri((await goodReplace.Content.ReadFromJsonAsync<TwoFactorSetupDto>())!.AuthenticatorUri);
+            var code2 = ComputeTotp(secret2, DateTimeOffset.UtcNow);
+
+            using var confirmReplace = await client.PostAsJsonAsync("/api/platform/auth/2fa/replace/confirm", new ConfirmTwoFactorReplacementCommand(code2));
+            Assert.Equal(HttpStatusCode.OK, confirmReplace.StatusCode);
+            var recovery2 = (await confirmReplace.Content.ReadFromJsonAsync<TwoFactorRecoveryCodesDto>())!;
+            Assert.Equal(10, recovery2.RecoveryCodes.Count);
+
+            // Replacement signs out and revokes all SessionTickets
+            await using (var db = _fixture.CreateDbContext())
+            {
+                Assert.Equal(0, await db.SessionTickets.CountAsync(t => t.UserId == adminId));
+            }
+
+            using var afterReplace = await client.PostAsJsonAsync("/api/platform/stores", new CreateStoreCommand("AfterRep", $"rep-{Guid.NewGuid():N}"[..10], StoreType.OnlineOnly, "JOD", "Asia/Amman", true, false));
+            Assert.Equal(HttpStatusCode.Unauthorized, afterReplace.StatusCode);
+
+            // Old recovery code is no longer valid after replacement
+            using var loginOldRec = await client.PostAsJsonAsync("/api/platform/auth/login", new LoginCommand(email, password, RecoveryCode: recovery1.RecoveryCodes[1]));
+            Assert.Equal(HttpStatusCode.Unauthorized, loginOldRec.StatusCode);
+        }
+        finally
+        {
+            await CleanupUserAsync(adminId);
         }
     }
 }

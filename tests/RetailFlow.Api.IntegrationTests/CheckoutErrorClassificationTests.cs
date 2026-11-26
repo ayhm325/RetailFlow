@@ -38,14 +38,15 @@ public sealed class CheckoutErrorClassificationTests : IClassFixture<CatalogSqlT
                 builder.UseEnvironment(Environments.Production);
                 builder.ConfigureAppConfiguration((_, config) =>
                 {
-                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    var values = new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = "retail.example.com",
                         ["RETAILFLOW_CONNECTION"] = _fixture.ConnectionString,
                         ["ConnectionStrings:RetailFlow"] = _fixture.ConnectionString,
-                        ["DataProtection:RequireCertificateInProduction"] = "false",
                         ["Email:RequireConfiguredInProduction"] = "false"
-                    });
+                    };
+                    TestDataProtectionCertHelper.ApplyTestCertificate(values);
+                    config.AddInMemoryCollection(values);
                 });
 
                 if (configureServices is not null)

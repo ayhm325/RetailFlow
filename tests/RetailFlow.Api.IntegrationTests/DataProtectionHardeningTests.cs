@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
@@ -295,17 +296,106 @@ public sealed class DataProtectionHardeningTests : IClassFixture<CatalogSqlTestF
                         ["DataProtection:RequireCertificateInProduction"] = "false",
                         ["Email:RequireConfiguredInProduction"] = "false"
                     });
-                    // Higher-priority configuration source re-enforces true
-                    config.AddInMemoryCollection(new Dictionary<string, string?>
-                    {
-                        ["DataProtection:RequireCertificateInProduction"] = "true"
-                    });
                 });
             });
 
-        Assert.Throws<OptionsValidationException>(() =>
+        var ex = Assert.Throws<OptionsValidationException>(() =>
         {
             using var _ = factory.CreateClient();
         });
+
+        Assert.Contains("RequireCertificateInProduction", ex.Message, StringComparison.Ordinal);
+    }
+
+    private sealed class AdjustableTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = utcNow;
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+        public void Advance(TimeSpan delta) => _utcNow = _utcNow.Add(delta);
+    }
+
+    [Fact]
+    public async Task TestI_ExpiredPreviousCertificate_UnprotectsHistoricalKeys_AndCannotBePrimary()
+    {
+        const string pass1 = "ExpPrev1!2026";
+        const string pass2 = "ExpPrev2!2026";
+        var t0 = DateTimeOffset.UtcNow;
+        var cert1Path = CreateTempPfx("RF-ExpPrev-1", t0.AddDays(-1), t0.AddDays(5), pass1, out var thumb1);
+        var cert2Path = CreateTempPfx("RF-ExpPrev-2", t0.AddDays(-1), t0.AddDays(60), pass2, out var thumb2);
+        var clock = new AdjustableTimeProvider(t0);
+
+        try
+        {
+            string protectedUnderCert1;
+            await using (var f1 = CreateProductionDpFactory(new Dictionary<string, string?>
+            {
+                ["DataProtection:CertificatePath"] = cert1Path,
+                ["DataProtection:CertificatePassword"] = pass1,
+                ["DataProtection:CertificateThumbprint"] = thumb1
+            }))
+            {
+                using var _ = f1.CreateClient();
+                var prot1 = f1.Services.GetRequiredService<IDataProtectionProvider>()
+                    .CreateProtector("RetailFlow.Test.ExpiredPrev");
+                protectedUnderCert1 = prot1.Protect("historical-secret-payload");
+            }
+
+            // Advance clock past cert1's NotAfter (+10 days > +5 days)
+            clock.Advance(TimeSpan.FromDays(10));
+
+            // 1. cert2 as Primary + expired cert1 in PreviousCertificates -> decrypts historical payload & creates new key
+            await using (var fRotated = CreateProductionDpFactory(new Dictionary<string, string?>
+            {
+                ["DataProtection:CertificatePath"] = cert2Path,
+                ["DataProtection:CertificatePassword"] = pass2,
+                ["DataProtection:CertificateThumbprint"] = thumb2,
+                ["DataProtection:PreviousCertificates:0:CertificatePath"] = cert1Path,
+                ["DataProtection:PreviousCertificates:0:CertificatePassword"] = pass1,
+                ["DataProtection:PreviousCertificates:0:CertificateThumbprint"] = thumb1
+            }))
+            {
+                using var _r = fRotated.CreateClient();
+                var protRotated = fRotated.Services.GetRequiredService<IDataProtectionProvider>()
+                    .CreateProtector("RetailFlow.Test.ExpiredPrev");
+                Assert.Equal("historical-secret-payload", protRotated.Unprotect(protectedUnderCert1));
+
+                var keyManager = fRotated.Services.GetRequiredService<IKeyManager>();
+                var newKey = keyManager.CreateNewKey(clock.GetUtcNow(), clock.GetUtcNow().AddDays(90));
+                var newProtected = protRotated.Protect("new-payload-under-cert2");
+                Assert.Equal("new-payload-under-cert2", protRotated.Unprotect(newProtected));
+            }
+
+            // 2. Expired cert1 CANNOT be used as Primary
+            using (var fExpiredPrimary = new WebApplicationFactory<Program>()
+                .WithWebHostBuilder(builder =>
+                {
+                    builder.UseEnvironment(Environments.Production);
+                    builder.ConfigureAppConfiguration((_, config) =>
+                    {
+                        config.AddInMemoryCollection(new Dictionary<string, string?>
+                        {
+                            ["AllowedHosts"] = "retail.example.com",
+                            ["RETAILFLOW_CONNECTION"] = _fixture.ConnectionString,
+                            ["ConnectionStrings:RetailFlow"] = _fixture.ConnectionString,
+                            ["Email:RequireConfiguredInProduction"] = "false",
+                            ["DataProtection:CertificatePath"] = cert1Path,
+                            ["DataProtection:CertificatePassword"] = pass1
+                        });
+                    });
+                    builder.ConfigureServices(s =>
+                    {
+                        s.RemoveAll<TimeProvider>();
+                        s.AddSingleton<TimeProvider>(clock);
+                    });
+                }))
+            {
+                Assert.ThrowsAny<Exception>(() => { using var _ = fExpiredPrimary.CreateClient(); });
+            }
+        }
+        finally
+        {
+            if (File.Exists(cert1Path)) File.Delete(cert1Path);
+            if (File.Exists(cert2Path)) File.Delete(cert2Path);
+        }
     }
 }

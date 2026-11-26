@@ -39,9 +39,9 @@ public sealed class EmailHardeningTests : IClassFixture<CatalogSqlTestFixture>
                     {
                         ["AllowedHosts"] = "retail.example.com",
                         ["RETAILFLOW_CONNECTION"] = _fixture.ConnectionString,
-                        ["ConnectionStrings:RetailFlow"] = _fixture.ConnectionString,
-                        ["DataProtection:RequireCertificateInProduction"] = "false"
+                        ["ConnectionStrings:RetailFlow"] = _fixture.ConnectionString
                     };
+                    TestDataProtectionCertHelper.ApplyTestCertificate(values);
 
                     foreach (var kvp in overrides)
                     {
@@ -172,18 +172,19 @@ public sealed class EmailHardeningTests : IClassFixture<CatalogSqlTestFixture>
                 builder.UseEnvironment(Environments.Production);
                 builder.ConfigureAppConfiguration((_, config) =>
                 {
-                    config.AddInMemoryCollection(new Dictionary<string, string?>
+                    var values = new Dictionary<string, string?>
                     {
                         ["AllowedHosts"] = "retail.example.com;evil.attacker",
                         ["RETAILFLOW_CONNECTION"] = _fixture.ConnectionString,
                         ["ConnectionStrings:RetailFlow"] = _fixture.ConnectionString,
-                        ["DataProtection:RequireCertificateInProduction"] = "false",
                         ["Email:SmtpHost"] = "smtp.retail.example.com",
                         ["Email:SmtpPort"] = "587",
                         ["Email:EnableSsl"] = "true",
                         ["Email:FromAddress"] = "noreply@retail.example.com",
                         ["Email:PublicBaseUrl"] = "https://shop.retail.example.com"
-                    });
+                    };
+                    TestDataProtectionCertHelper.ApplyTestCertificate(values);
+                    config.AddInMemoryCollection(values);
                 });
                 builder.ConfigureServices(services =>
                 {

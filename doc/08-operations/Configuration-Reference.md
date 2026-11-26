@@ -31,11 +31,11 @@
 | `Email:PublicBaseUrl` | الأصل الموثوق لبناء روابط استعادة كلمة المرور وتوثيق البريد (يجب أن يكون `https://` فقط في `Production` بدون بيانات اعتماد أو query/fragment) |
 | `Email:SmtpHost` / `SmtpPort` / `EnableSsl` / `Username` / `Password` / `FromAddress` / `TimeoutSeconds` | إعدادات SMTP للإرسال الفعلي في الإنتاج؛ يجب أن يكون `EnableSsl = true` في `Production` (`TimeoutSeconds` بين `1` و`120`، الافتراضي `15`) |
 | `Email:RequireConfiguredInProduction` | الافتراضي `true`؛ يفشل startup (fail-closed) في `Production` إذا غابت إعدادات SMTP أو `PublicBaseUrl` أو كان `EnableSsl = false` |
-| `PlatformSecurity:RequireAdminMfa` | الافتراضي `true`؛ يمنع `PlatformAdmin` غير المسجّل أو غير المتحقق بـ MFA من `/api/platform/stores/*`، ويرفض بدء التشغيل في `Production` إذا عُيّن إلى `false` عبر `PlatformSecurityOptionsValidator` |
+| `PlatformSecurity:RequireAdminMfa` | الافتراضي `true`؛ يمنع `PlatformAdmin` غير المسجّل أو غير المتحقق بـ MFA من `/api/platform/stores/*` وعمليات إدارة MFA الحساسة، ويرفض بدء التشغيل في `Production` إذا عُيّن إلى `false` عبر `PlatformSecurityOptionsValidator`. يصدر `amr=mfa` على مستوى الجلسة فقط بعد تحقق TOTP/Recovery Code (ولا يُمنح تلقائياً من `TwoFactorEnabled` في `RetailFlowClaimsPrincipalFactory`)، ويُبطَل أي `SessionTicket` آخر عند تفعيل MFA أو استبدالها أو تعطيلها أو إعادة توليد Recovery Codes (`ValidationInterval = TimeSpan.Zero` + `OnRefreshingPrincipal`). ملاحظة أمنية: TOTP وحده غير مقاوم للتصيد (Phishing-resistant) دون Passkeys/FIDO2 |
 | `DataProtection:CertificatePath` / `CertificatePassword` / `CertificateThumbprint` | شهادة X.509 (PKCS#12 مع مفتاح خاص وصلاحية سارية ومطابقة thumbprint اختيارية) لتشفير مفاتيح Data Protection في SQL Server (`DataProtectionSetup.cs`) |
-| `DataProtection:PreviousCertificates` | قائمة شهادات سابقة (`CertificatePath` / `CertificatePassword` / `CertificateThumbprint`) لفك تشفير المفاتيح التاريخية أثناء تدوير الشهادة عبر `UnprotectKeysWithAnyCertificate` |
+| `DataProtection:PreviousCertificates` | قائمة شهادات سابقة (`CertificatePath` / `CertificatePassword` / `CertificateThumbprint`) لفك تشفير المفاتيح التاريخية أثناء تدوير الشهادة عبر `RetailFlowCertificateResolver` (`ICertificateResolver`) |
 | `DataProtection:DefaultKeyLifetimeDays` | عمر المفتاح الافتراضي بالأيام (الافتراضي `90`، مقيد بين `7` و`365`) |
-| `DataProtection:RequireCertificateInProduction` | الافتراضي `true`؛ يفشل startup (fail-closed) في Production إذا غابت شهادة Data Protection أو كانت غير صالحة |
+| `DataProtection:RequireCertificateInProduction` | الافتراضي `true`؛ شهادة X.509 إلزامية في `Production` ولا يمكن تعطيلها (`false` يفشل `ValidateOnStart`) |
 | سياسة كلمات المرور (`DependencyInjection.cs` / `RetailFlowPasswordValidator.cs`) | الحد الأدنى `15` حرفاً والحد الأقصى `1024` حرفاً، تطبيع Unicode NFC، حظر كلمات المرور الشائعة/الأنماط المتكررة، قفل الحساب بعد `5` محاولات لمدة `15` دقيقة |
 
 ## 5. Cookie/session

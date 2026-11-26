@@ -128,7 +128,8 @@ public sealed class RetailFlowCookieEvents : CookieAuthenticationEvents
         if (_platformSecurityOptions.Value.RequireAdminMfa &&
             context.Principal.IsInRole(nameof(AppRole.PlatformAdmin)) &&
             originalPrincipalHadMfa &&
-            (!user.TwoFactorEnabled || user.MfaEnrollmentStatus != MfaEnrollmentStatus.Enabled))
+            (!user.TwoFactorEnabled ||
+             user.MfaEnrollmentStatus is not (MfaEnrollmentStatus.Enabled or MfaEnrollmentStatus.ReplacementPending)))
         {
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);

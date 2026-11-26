@@ -17,6 +17,7 @@ namespace RetailFlow.Api.Auth;
 public sealed class SqlSessionTicketStore : ITicketStore
 {
     public const string AbsoluteExpirationPropertyKey = "rf_abs_exp";
+    public const string RevokeOtherSessionsPropertyKey = "rf_revoke_other_sessions";
 
     private static readonly TimeSpan PlatformAdminIdleLifetime = TimeSpan.FromHours(1);
     private static readonly TimeSpan PlatformAdminAbsoluteLifetime = TimeSpan.FromHours(8);
@@ -116,8 +117,18 @@ public sealed class SqlSessionTicketStore : ITicketStore
         ticket.Properties.Items[AbsoluteExpirationPropertyKey] =
             existing.AbsoluteExpiresAtUtc.ToString("O", CultureInfo.InvariantCulture);
 
+        var revokeOthers = ticket.Properties.Items.Remove(RevokeOtherSessionsPropertyKey);
+
         var serialized = TicketSerializer.Default.Serialize(ticket);
         existing.Renew(serialized, clampedExpiresAt, now);
+
+        if (revokeOthers && existing.UserId != Guid.Empty)
+        {
+            await db.SessionTickets
+                .Where(t => t.UserId == existing.UserId && t.Key != key)
+                .ExecuteDeleteAsync();
+        }
+
         await db.SaveChangesAsync();
     }
 
