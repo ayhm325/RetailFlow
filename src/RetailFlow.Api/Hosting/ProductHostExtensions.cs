@@ -38,6 +38,9 @@ public static class ProductHostExtensions
         services.AddRetailFlowDataProtection(configuration, environment);
 
         services.Configure<PlatformSecurityOptions>(configuration.GetSection("PlatformSecurity"));
+        services.AddSingleton<IValidateOptions<PlatformSecurityOptions>>(
+            _ => new PlatformSecurityOptionsValidator(environment));
+        services.AddOptions<PlatformSecurityOptions>().ValidateOnStart();
 
         services.AddSingleton<ITicketStore, SqlSessionTicketStore>();
         services.AddScoped<RetailFlowCookieEvents>();
@@ -489,5 +492,20 @@ public static class ProductHostExtensions
         public int PermitLimit { get; set; } = 120;
         public int AuthPermitLimit { get; set; } = 20;
         public int WindowSeconds { get; set; } = 60;
+    }
+
+    private sealed class PlatformSecurityOptionsValidator(IHostEnvironment environment)
+        : IValidateOptions<PlatformSecurityOptions>
+    {
+        public ValidateOptionsResult Validate(string? name, PlatformSecurityOptions options)
+        {
+            if (environment.IsProduction() && !options.RequireAdminMfa)
+            {
+                return ValidateOptionsResult.Fail(
+                    "PlatformSecurity:RequireAdminMfa must be enabled in Production and cannot be disabled.");
+            }
+
+            return ValidateOptionsResult.Success;
+        }
     }
 }

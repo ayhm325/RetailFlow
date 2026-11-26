@@ -4,7 +4,9 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.Extensions.Options;
 
+using RetailFlow.Domain.Identity;
 using RetailFlow.Infrastructure.Identity;
 
 namespace RetailFlow.Api.Auth;
@@ -18,13 +20,16 @@ public sealed class RetailFlowCookieEvents : CookieAuthenticationEvents
 {
     private readonly UserManager<RetailFlowIdentityUser> _userManager;
     private readonly IIdentityLookupScopeAccessor _scopeAccessor;
+    private readonly IOptions<PlatformSecurityOptions> _platformSecurityOptions;
 
     public RetailFlowCookieEvents(
         UserManager<RetailFlowIdentityUser> userManager,
-        IIdentityLookupScopeAccessor scopeAccessor)
+        IIdentityLookupScopeAccessor scopeAccessor,
+        IOptions<PlatformSecurityOptions> platformSecurityOptions)
     {
         _userManager = userManager;
         _scopeAccessor = scopeAccessor;
+        _platformSecurityOptions = platformSecurityOptions;
     }
 
     public override async Task ValidatePrincipal(CookieValidatePrincipalContext context)
@@ -68,6 +73,10 @@ public sealed class RetailFlowCookieEvents : CookieAuthenticationEvents
             return;
         }
 
+        var originalPrincipalHadMfa =
+            string.Equals(context.Principal!.FindFirstValue("amr"), "mfa", StringComparison.Ordinal) ||
+            string.Equals(context.Principal!.FindFirstValue("mfa_enrolled"), "true", StringComparison.Ordinal);
+
         await SecurityStampValidator.ValidatePrincipalAsync(context);
         if (context.Principal is null)
         {
@@ -85,6 +94,16 @@ public sealed class RetailFlowCookieEvents : CookieAuthenticationEvents
         }
 
         if (hasStoreClaim && user.StoreId != claimStoreId)
+        {
+            context.RejectPrincipal();
+            await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
+            return;
+        }
+
+        if (_platformSecurityOptions.Value.RequireAdminMfa &&
+            context.Principal.IsInRole(nameof(AppRole.PlatformAdmin)) &&
+            originalPrincipalHadMfa &&
+            (!user.TwoFactorEnabled || user.MfaEnrollmentStatus != MfaEnrollmentStatus.Enabled))
         {
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);

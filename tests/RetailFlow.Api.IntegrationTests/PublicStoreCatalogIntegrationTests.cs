@@ -1408,7 +1408,8 @@ public sealed class CatalogSqlTestFixture : IAsyncLifetime
                     {
                         ["AllowedHosts"] = "localhost",
                         ["RETAILFLOW_CONNECTION"] = ConnectionString,
-                        ["ConnectionStrings:RetailFlow"] = ConnectionString
+                        ["ConnectionStrings:RetailFlow"] = ConnectionString,
+                        ["PlatformSecurity:RequireAdminMfa"] = "false"
                     });
                 });
             });

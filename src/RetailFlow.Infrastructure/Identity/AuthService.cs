@@ -908,6 +908,15 @@ public sealed class AuthService : IAuthService
                         now,
                         cancellationToken);
                 }
+
+                if (twoFactorPassed)
+                {
+                    _logger.LogInformation("Audit: MfaVerificationSucceeded UserId={UserId} Method=Totp", user.Id);
+                }
+                else
+                {
+                    _logger.LogWarning("Audit: MfaVerificationFailed UserId={UserId} Method=Totp", user.Id);
+                }
             }
             else if (!string.IsNullOrWhiteSpace(command.RecoveryCode))
             {
@@ -916,9 +925,14 @@ public sealed class AuthService : IAuthService
                     command.RecoveryCode.Replace(" ", string.Empty, StringComparison.Ordinal));
                 twoFactorPassed = redeemResult.Succeeded;
 
-                if (!twoFactorPassed)
+                if (twoFactorPassed)
+                {
+                    _logger.LogInformation("Audit: MfaRecoveryCodeUsed UserId={UserId}", user.Id);
+                }
+                else
                 {
                     await RecordMfaFailureAsync(user, now, cancellationToken);
+                    _logger.LogWarning("Audit: MfaVerificationFailed UserId={UserId} Method=RecoveryCode", user.Id);
                 }
             }
 

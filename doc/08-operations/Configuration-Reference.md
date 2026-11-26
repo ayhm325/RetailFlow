@@ -31,7 +31,7 @@
 | `Email:PublicBaseUrl` | الأصل الموثوق لبناء روابط استعادة كلمة المرور وتوثيق البريد |
 | `Email:SmtpHost` / `SmtpPort` / `EnableSsl` / `Username` / `Password` / `FromAddress` | إعدادات SMTP للإرسال الفعلي في الإنتاج |
 | `Email:RequireConfiguredInProduction` | يفشل عند startup خارج Development إذا غابت إعدادات SMTP أو `PublicBaseUrl` |
-| `PlatformSecurity:RequireAdminMfa` | عند `true`، يمنع `PlatformAdmin` غير المسجّل في MFA من `/api/platform/stores/*` حتى إكمال التسجيل والدخول بـ TOTP |
+| `PlatformSecurity:RequireAdminMfa` | الافتراضي `true`؛ يمنع `PlatformAdmin` غير المسجّل أو غير المتحقق بـ MFA من `/api/platform/stores/*`، ويرفض بدء التشغيل في `Production` إذا عُيّن إلى `false` عبر `PlatformSecurityOptionsValidator` |
 | `DataProtection:CertificatePath` / `CertificatePassword` / `CertificateThumbprint` | شهادة X.509 (PKCS#12 مع مفتاح خاص وصلاحية سارية ومطابقة thumbprint اختيارية) لتشفير مفاتيح Data Protection في SQL Server (`DataProtectionSetup.cs`) |
 | `DataProtection:PreviousCertificates` | قائمة شهادات سابقة (`CertificatePath` / `CertificatePassword` / `CertificateThumbprint`) لفك تشفير المفاتيح التاريخية أثناء تدوير الشهادة عبر `UnprotectKeysWithAnyCertificate` |
 | `DataProtection:DefaultKeyLifetimeDays` | عمر المفتاح الافتراضي بالأيام (الافتراضي `90`، مقيد بين `7` و`365`) |
