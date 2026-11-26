@@ -396,6 +396,14 @@ public static class ProductHostExtensions
 
     private static bool IsSameOriginIfPresent(HttpRequest request)
     {
+        var secFetchSite = request.Headers["Sec-Fetch-Site"].FirstOrDefault();
+        if (!string.IsNullOrWhiteSpace(secFetchSite) &&
+            !string.Equals(secFetchSite, "same-origin", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(secFetchSite, "none", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
         var headerValue = request.Headers.Origin.FirstOrDefault();
         if (string.IsNullOrWhiteSpace(headerValue))
         {

@@ -11,7 +11,9 @@ using RetailFlow.Application.Orders;
 using RetailFlow.Application.Stores;
 using RetailFlow.Domain.Catalog;
 using RetailFlow.Domain.Currencies;
+using RetailFlow.Domain.Fulfillment;
 using RetailFlow.Domain.Identity;
+using RetailFlow.Domain.Inventory;
 using RetailFlow.Domain.Orders;
 using RetailFlow.Domain.Stores;
 
@@ -78,6 +80,14 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
             evilOriginReq.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Delivery, null, "Amman"));
             using var evilOriginResp = await client.SendAsync(evilOriginReq);
             Assert.Equal(HttpStatusCode.Forbidden, evilOriginResp.StatusCode);
+
+            // 4b. Sec-Fetch-Site: cross-site WITHOUT Origin/Referer -> 403 ProblemDetails
+            var crossSiteFetchReq = new HttpRequestMessage(HttpMethod.Post, $"/api/stores/{store.Slug}/checkout");
+            crossSiteFetchReq.Headers.Add("X-CSRF", "1");
+            crossSiteFetchReq.Headers.Add("Sec-Fetch-Site", "cross-site");
+            crossSiteFetchReq.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Delivery, null, "Amman"));
+            using var crossSiteFetchResp = await client.SendAsync(crossSiteFetchReq);
+            Assert.Equal(HttpStatusCode.Forbidden, crossSiteFetchResp.StatusCode);
 
             // 5. Deactivating AppUser invalidates active cookie session (GAP-008)
             await using (var db = _fixture.CreateDbContext())
@@ -334,6 +344,136 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
             await using var db = _fixture.CreateDbContext();
             await db.SessionTickets.Where(t => t.UserId == adminId).ExecuteDeleteAsync();
             await db.AppUsers.Where(u => u.Id == adminId).ExecuteDeleteAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Checkout_PartialInventoryFailure_RollsBackAllReservationsAtomically_AndHidesInternalDetails()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var store = Store.Create(Guid.NewGuid(), "Atomic Shop", $"atomic-{suffix}", StoreType.OnlineOnly, StoreStatus.Active, DateTimeOffset.UtcNow);
+        var settings = StoreSettings.Create(Guid.NewGuid(), store, Jod, "Asia/Amman", true, false);
+        var zone = DeliveryZone.Create(Guid.NewGuid(), store.Id, "Amman", 2.000m, settings, Jod, DateTimeOffset.UtcNow);
+        var cat = Category.Create(Guid.NewGuid(), store.Id, "Cat", "cat", true, 1);
+        var prod1 = Product.Create(Guid.NewGuid(), store.Id, cat.Id, "Item One", 5.000m, settings, Jod, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var prod2 = Product.Create(Guid.NewGuid(), store.Id, cat.Id, "Item Two", 8.000m, settings, Jod, ProductStatus.Published, DateTimeOffset.UtcNow);
+        var inv1 = InventoryItem.Create(Guid.NewGuid(), store.Id, prod1.Id, onHand: 5, reserved: 0);
+        var inv2 = InventoryItem.Create(Guid.NewGuid(), store.Id, prod2.Id, onHand: 1, reserved: 0);
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            db.Stores.Add(store);
+            db.StoreSettings.Add(settings);
+            db.DeliveryZones.Add(zone);
+            db.Categories.Add(cat);
+            db.Products.AddRange(prod1, prod2);
+            db.InventoryItems.AddRange(inv1, inv2);
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            using var client = _fixture.CreateHttpsClient();
+            client.DefaultRequestHeaders.Add("X-CSRF", "1");
+
+            using var reg = await client.PostAsJsonAsync(
+                $"/api/stores/{store.Slug}/auth/register",
+                new RegisterCustomerCommand($"atomic-{suffix}@example.com", "Atomic User", "Str0ngPass!1"));
+            Assert.Equal(HttpStatusCode.Created, reg.StatusCode);
+
+            await client.PutAsJsonAsync($"/api/stores/{store.Slug}/cart/items", new UpsertCartItemCommand(prod1.Id, 2));
+            await client.PutAsJsonAsync($"/api/stores/{store.Slug}/cart/items", new UpsertCartItemCommand(prod2.Id, 2));
+
+            var req = new HttpRequestMessage(HttpMethod.Post, $"/api/stores/{store.Slug}/checkout");
+            req.Headers.Add("Idempotency-Key", $"atomic-idem-{suffix}");
+            req.Content = JsonContent.Create(new CheckoutCommand(FulfillmentMode.Delivery, zone.Id, "Amman"));
+
+            using var resp = await client.SendAsync(req);
+            Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+            var body = await resp.Content.ReadAsStringAsync();
+            Assert.DoesNotContain("Insufficient available inventory", body, StringComparison.OrdinalIgnoreCase);
+
+            await using var db = _fixture.CreateDbContext();
+            var dbInv1 = await db.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prod1.Id);
+            var dbInv2 = await db.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prod2.Id);
+            Assert.Equal(0, dbInv1.Reserved);
+            Assert.Equal(0, dbInv2.Reserved);
+        }
+        finally
+        {
+            await _fixture.DeleteStoresAsync(store.Id);
+        }
+    }
+
+    [Fact]
+    public async Task MaintenanceBackgroundService_ConcurrentMultiInstanceSweep_ReleasesExpiredDataAtMostOnce()
+    {
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var oldTime = DateTimeOffset.UtcNow.AddMinutes(-20);
+        var store = Store.Create(Guid.NewGuid(), "Maint Shop", $"maint-{suffix}", StoreType.Physical, StoreStatus.Active, oldTime);
+        var settings = StoreSettings.Create(Guid.NewGuid(), store, Jod, "Asia/Amman", true, true);
+        var cat = Category.Create(Guid.NewGuid(), store.Id, "Cat", "cat", true, 1);
+        var prod = Product.Create(Guid.NewGuid(), store.Id, cat.Id, "Item", 5.000m, settings, Jod, ProductStatus.Published, oldTime);
+        var inv = InventoryItem.Create(Guid.NewGuid(), store.Id, prod.Id, onHand: 5, reserved: 2);
+        var customerId = Guid.NewGuid();
+        var orderId = Guid.NewGuid();
+        var order = Order.Create(
+            orderId,
+            store,
+            settings,
+            Jod,
+            customerId,
+            $"ORD-{suffix}",
+            FulfillmentMode.Pickup,
+            [OrderItem.Create(Guid.NewGuid(), store.Id, orderId, prod.Id, prod.Name, prod.Sku, prod.Price, 2, Jod)],
+            0m,
+            null,
+            null,
+            null,
+            oldTime);
+
+        var expiredClaim = CheckoutRequest.Claim(Guid.NewGuid(), store.Id, customerId, $"exp-key-{suffix}", new string('A', 64), DateTimeOffset.UtcNow.AddHours(-25));
+        var expiredTicket = SessionTicket.Create($"exp-ticket-{suffix}", customerId, store.Id, [1, 2, 3], DateTimeOffset.UtcNow.AddMinutes(-5), oldTime);
+
+        await using (var db = _fixture.CreateDbContext())
+        {
+            db.Stores.Add(store);
+            db.StoreSettings.Add(settings);
+            db.Categories.Add(cat);
+            db.Products.Add(prod);
+            db.InventoryItems.Add(inv);
+            db.Orders.Add(order);
+            db.CheckoutRequests.Add(expiredClaim);
+            db.SessionTickets.Add(expiredTicket);
+            await db.SaveChangesAsync();
+        }
+
+        try
+        {
+            await using var scope1 = _fixture.CreateAsyncScope();
+            await using var scope2 = _fixture.CreateAsyncScope();
+            var worker1 = new RetailFlow.Api.Hosting.MaintenanceBackgroundService(
+                scope1.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<RetailFlow.Api.Hosting.MaintenanceBackgroundService>.Instance);
+            var worker2 = new RetailFlow.Api.Hosting.MaintenanceBackgroundService(
+                scope2.ServiceProvider.GetRequiredService<IServiceScopeFactory>(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<RetailFlow.Api.Hosting.MaintenanceBackgroundService>.Instance);
+
+            await Task.WhenAll(
+                worker1.RunMaintenanceSweepAsync(CancellationToken.None),
+                worker2.RunMaintenanceSweepAsync(CancellationToken.None));
+
+            await using var db = _fixture.CreateDbContext();
+            var updatedOrder = await db.Orders.AsNoTracking().SingleAsync(o => o.Id == orderId);
+            var updatedInv = await db.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prod.Id);
+            Assert.Equal(OrderStatus.Cancelled, updatedOrder.OrderStatus);
+            Assert.Equal(0, updatedInv.Reserved);
+            Assert.False(await db.CheckoutRequests.AsNoTracking().AnyAsync(r => r.Id == expiredClaim.Id));
+            Assert.False(await db.SessionTickets.AsNoTracking().AnyAsync(t => t.Key == expiredTicket.Key));
+        }
+        finally
+        {
+            await _fixture.DeleteStoresAsync(store.Id);
         }
     }
 }

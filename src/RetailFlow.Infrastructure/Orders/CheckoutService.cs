@@ -3,6 +3,7 @@ using System.Text;
 
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 using RetailFlow.Application.Orders;
 using RetailFlow.Domain.Catalog;
@@ -17,10 +18,12 @@ namespace RetailFlow.Infrastructure.Orders;
 public sealed class CheckoutService : ICheckoutService
 {
     private readonly RetailFlowDbContext _dbContext;
+    private readonly ILogger<CheckoutService> _logger;
 
-    public CheckoutService(RetailFlowDbContext dbContext)
+    public CheckoutService(RetailFlowDbContext dbContext, ILogger<CheckoutService> logger)
     {
         _dbContext = dbContext;
+        _logger = logger;
     }
 
     public async Task<CheckoutResult> CheckoutAsync(
@@ -246,9 +249,26 @@ public sealed class CheckoutService : ICheckoutService
         }
         catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or DbUpdateConcurrencyException)
         {
-            claim.MarkFailed(409);
-            await _dbContext.SaveChangesAsync(cancellationToken);
-            return new CheckoutResult(CheckoutOutcomeStatus.ValidationFailed, null, ex.Message);
+            _logger.LogWarning(
+                ex,
+                "Checkout failed for StoreId={StoreId} ClaimId={ClaimId}; rolling back uncommitted inventory/order changes.",
+                storeId,
+                claim.Id);
+
+            // Critical: clear all tracked entities (e.g., partially reserved InventoryItems) before persisting Failed claim status.
+            _dbContext.ChangeTracker.Clear();
+            var trackedClaim = await _dbContext.CheckoutRequests
+                .SingleOrDefaultAsync(r => r.Id == claim.Id, cancellationToken);
+            if (trackedClaim is not null)
+            {
+                trackedClaim.MarkFailed(409);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+            }
+
+            return new CheckoutResult(
+                CheckoutOutcomeStatus.ValidationFailed,
+                null,
+                "Checkout could not be completed because item availability or order preconditions changed. Please review your cart and retry.");
         }
     }
 

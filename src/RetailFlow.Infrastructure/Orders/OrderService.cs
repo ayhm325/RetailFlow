@@ -71,6 +71,7 @@ public sealed class OrderService : IOrderService
         var order = await _dbContext.Orders
             .Include(o => o.Items)
             .Include(o => o.History)
+            .AsSplitQuery()
             .SingleOrDefaultAsync(o => o.StoreId == storeId && o.CustomerId == customerId && o.Id == orderId, cancellationToken);
 
         if (order is null)
@@ -125,6 +126,7 @@ public sealed class OrderService : IOrderService
         var order = await _dbContext.Orders
             .Include(o => o.Items)
             .Include(o => o.History)
+            .AsSplitQuery()
             .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
 
         if (order is null)
@@ -147,6 +149,7 @@ public sealed class OrderService : IOrderService
         var order = await _dbContext.Orders
             .Include(o => o.Items)
             .Include(o => o.History)
+            .AsSplitQuery()
             .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
 
         if (order is null)
@@ -171,6 +174,7 @@ public sealed class OrderService : IOrderService
         var order = await _dbContext.Orders
             .Include(o => o.Items)
             .Include(o => o.History)
+            .AsSplitQuery()
             .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
 
         if (order is null)
@@ -192,6 +196,7 @@ public sealed class OrderService : IOrderService
         var order = await _dbContext.Orders
             .Include(o => o.Items)
             .Include(o => o.History)
+            .AsSplitQuery()
             .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
 
         if (order is null)
@@ -208,24 +213,43 @@ public sealed class OrderService : IOrderService
 
     public async Task<int> ReleaseExpiredReservationsAsync(DateTimeOffset utcNow, CancellationToken cancellationToken)
     {
-        var expiredOrders = await _dbContext.Orders
-            .Include(o => o.Items)
-            .Include(o => o.History)
+        var expiredOrderIds = await _dbContext.Orders
+            .AsNoTracking()
             .Where(o => o.OrderStatus == OrderStatus.Pending && o.ReservationExpiresAtUtc <= utcNow)
+            .Select(o => o.Id)
             .ToListAsync(cancellationToken);
 
-        foreach (var order in expiredOrders)
+        var releasedCount = 0;
+        foreach (var orderId in expiredOrderIds)
         {
-            order.CancelByMerchantOrTimeout(null, "System", "Reservation expired (15-minute timeout)", utcNow);
-            await ReleaseOrderReservationsAsync(order, cancellationToken);
+            _dbContext.ChangeTracker.Clear();
+
+            var order = await _dbContext.Orders
+                .Include(o => o.Items)
+                .Include(o => o.History)
+                .AsSplitQuery()
+                .SingleOrDefaultAsync(o => o.Id == orderId && o.OrderStatus == OrderStatus.Pending, cancellationToken);
+
+            if (order is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                order.CancelByMerchantOrTimeout(null, "System", "Reservation expired (15-minute timeout)", utcNow);
+                await ReleaseOrderReservationsAsync(order, cancellationToken);
+                await _dbContext.SaveChangesAsync(cancellationToken);
+                releasedCount++;
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                // Another worker instance concurrently updated/released this order; safe to skip.
+                _dbContext.ChangeTracker.Clear();
+            }
         }
 
-        if (expiredOrders.Count > 0)
-        {
-            await _dbContext.SaveChangesAsync(cancellationToken);
-        }
-
-        return expiredOrders.Count;
+        return releasedCount;
     }
 
     private async Task ReleaseOrderReservationsAsync(Order order, CancellationToken cancellationToken)
