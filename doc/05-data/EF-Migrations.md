@@ -14,7 +14,9 @@
 | `20261126085623_AddDataProtectionKeys` | DataProtectionKeys (`IDataProtectionKeyContext`) |
 | `20261126092137_AddCheckoutRequestLeaseAndRecoveryFields` | CheckoutRequests (`ClaimToken`, `LeaseExpiresAtUtc`, `LastAttemptAtUtc`, `CompletedAtUtc`) |
 | `20261126094533_AdoptAspNetCoreIdentity` | تحويل `AppUsers` إلى `AspNetUsers` مع الحفاظ على `Guid` وبيانات المستخدمين، وإضافة `AspNetRoles`, `AspNetUserRoles`, `AspNetUserClaims`, `AspNetUserLogins`, `AspNetUserTokens`, `AspNetRoleClaims` وتحويل الأدوار (`1/2/3`) |
-| `20261126101145_AddIdentityMfaHardeningFields` | حقول حالة MFA في `AspNetUsers` (`MfaEnrollmentStatus`, `MfaPendingExpiresAtUtc`, `ProtectedPendingAuthenticatorKey`, `MfaFailedAttempts`, `MfaLockoutEndUtc`, `LastUsedTotpTimeStep`) |
+| `20261126101201_AddIdentityMfaHardeningFields` | حقول حالة MFA في `AspNetUsers` (`MfaEnrollmentStatus`, `MfaPendingExpiresAtUtc`, `ProtectedPendingAuthenticatorKey`, `MfaFailedAttempts`, `MfaLockoutEndUtc`, `LastUsedTotpTimeStep`) |
+| `20261126112151_AddCartAndCartItemRowVersion` | إضافة أعمدة `RowVersion` على `Carts` و`CartItems` للتزامن التفاؤلي |
+| `20261126113905_AddSessionTicketAbsoluteLifetime` | إضافة `CreatedAtUtc` و`AbsoluteExpiresAtUtc` وفهرس انتهاء مطلق على `SessionTickets` |
 
 كل migration لها Designer file، ويوجد `RetailFlowDbContextModelSnapshot.cs`.
 

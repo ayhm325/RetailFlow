@@ -1,23 +1,27 @@
 #!/usr/bin/env python3
-"""Validate the static structure of RetailFlow's AI operating memory.
+"""Validate the static structure of RetailFlow's documentation and agent instructions.
 This script does not validate project code, run tests, or prove an agent loaded instructions.
 """
 from pathlib import Path
-import csv, sys
+import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = [
     "AGENTS.md",
-    "docs/engineering/README.md",
-    "docs/engineering/control/CURRENT-STATE.md",
-    "docs/engineering/control/ACTIVE-WORK.md",
-    "docs/engineering/control/AI-HANDOFF.md",
-    "docs/engineering/control/WORK-LOG.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+    ".github/copilot-instructions.md",
+    "doc/README.md",
+    "doc/00-governance/Documentation-Standard.md",
+    "doc/00-governance/Repository-Baseline.md",
+    "doc/02-architecture/adr/README.md",
+    "doc/02-architecture/adr/ADR-TEMPLATE.md",
+    "doc/09-traceability/Feature-Code-Test-Matrix.md",
+    "doc/10-open-items/Production-Gaps-and-Decision-Backlog.md",
+    "doc/11-references/Standards-and-References.md",
     ".agents/rules/00-operating-contract.md",
     ".agents/skills/start-session/SKILL.md",
     ".agents/skills/close-task/SKILL.md",
-    "docs/engineering/decisions/ADR_TEMPLATE.md",
-    "docs/engineering/references/official-sources.md",
 ]
 errors = []
 for item in REQUIRED:
@@ -47,19 +51,6 @@ for d in sorted(p for p in skills_dir.iterdir() if p.is_dir()):
         c = skill.read_text(encoding="utf-8")
         if not c.startswith("---\n") or "name:" not in c.split("---\n", 2)[1] or "description:" not in c.split("---\n", 2)[1]:
             errors.append(f"Skill missing required metadata: {skill.relative_to(ROOT)}")
-
-# Validate imported audit CSV structure and unique finding IDs.
-finding_csv = ROOT / "docs/engineering/audit/RetailFlow_Documentation_to_Code_Audit_Rev2.0/registers/findings.csv"
-if finding_csv.exists():
-    with finding_csv.open(encoding="utf-8-sig", newline="") as f:
-        rows = list(csv.DictReader(f))
-    ids = [r.get("Finding ID", "") for r in rows]
-    if len(ids) != len(set(ids)):
-        errors.append("Duplicate Finding ID values in imported findings.csv")
-    if not rows:
-        errors.append("Imported findings.csv is empty")
-else:
-    errors.append("Imported audit findings.csv not found")
 
 if errors:
     print("VALIDATION FAILED")

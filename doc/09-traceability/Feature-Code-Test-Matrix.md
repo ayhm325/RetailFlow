@@ -10,11 +10,11 @@
 | OBS-004..008 | Public catalog | `PublicCatalogEndpoints` | `PublicCatalogQueryService` | Store, Category, Product, Images, Inventory | `PublicStoreCatalogIntegrationTests` |
 | OBS-009 | Merchant store settings | `MerchantEndpoints` | `MerchantStoreService`, `StoreSettings` | Stores, Settings, DeliveryZones | `MerchantServices_...` |
 | OBS-010 | Catalog management | `MerchantEndpoints` | `MerchantCatalogService`, Category/Product | Category/Product/Image/Inventory | `MerchantServices_...`, platform lifecycle tests |
-| OBS-011 | Authentication | `AuthEndpoints` | `AuthService`, `PasswordHasherService` | AppUsers | `EndToEndCommerceAuthIntegrationTests` |
-| OBS-012 | Session ticket | Cookie handler | `SqlSessionTicketStore` | SessionTickets | End-to-end auth tests; deeper tests exist in SessionTransportSpike only |
-| OBS-013 | Cart | Customer cart endpoints | `CartService`, Cart/CartItem | Carts/CartItems | Full commerce integration scenario |
-| OBS-014 | Checkout/idempotency | Customer `/checkout` | `CheckoutService`, `CheckoutRequest` | CheckoutRequests/Orders | Full commerce integration scenario; detailed concurrency cases must be reviewed |
-| OBS-015 | Stock reservation | checkout/order operations | `InventoryItem`, `OrderService` | InventoryItems/Orders | Full commerce test covers named scenario; rowversion load stress not evidenced |
+| OBS-011 | Authentication & MFA | `AuthEndpoints` | `AuthService`, `RetailFlowPasswordHasher`, `TotpCryptoHelper` | `AspNetUsers`, `AspNetRoles`, `AspNetUserTokens` | `EndToEndCommerceAuthIntegrationTests`, `IdentitySecurityHardeningTests`, `PlatformAdminMfaHardeningTests`, `PasswordHasherTests`, `PasswordPolicyHardeningTests` |
+| OBS-012 | Session ticket & DP | Cookie handler, `DataProtectionSetup` | `SqlSessionTicketStore`, `RetailFlowCookieEvents` | `SessionTickets`, `DataProtectionKeys` | `SessionLifetimeHardeningTests`, `DataProtectionHardeningTests`, `IdentityAdoptionIntegrationTests` |
+| OBS-013 | Cart | Customer cart endpoints | `CartService`, Cart/CartItem | Carts/CartItems | `CartConcurrencyTests`, `EndToEndCommerceAuthIntegrationTests` |
+| OBS-014 | Checkout/idempotency | Customer `/checkout` | `CheckoutService`, `CheckoutRequest` | CheckoutRequests/Orders | `CheckoutErrorClassificationTests`, `CheckoutLeaseAndCookieScopeTests`, `AuditPhasesIntegrationTests` |
+| OBS-015 | Stock reservation & maintenance | checkout/order + `MaintenanceBackgroundService` | `InventoryItem`, `OrderService` | InventoryItems/Orders | `MaintenanceBatchConcurrencyTests`, `EndToEndCommerceAuthIntegrationTests` |
 | OBS-016 | Customer orders | Customer order routes | `OrderService`, `Order` | Orders/Items/History | Full commerce integration scenario |
 | OBS-017 | Merchant order actions | Merchant order routes | `OrderService`, `Order` | Orders/Items/History/Inventory | Full commerce integration scenario |
 | OBS-018 | Health/OpenAPI | Host endpoints | `DatabaseReadinessHealthCheck` | SQL connection | `ProductHostIntegrationTests`, `PublicStoreCatalogIntegrationTests` |

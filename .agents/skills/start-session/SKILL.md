@@ -4,10 +4,10 @@ description: Start or resume RetailFlow work safely. Load current state, verify 
 ---
 # Start a RetailFlow work session
 
-1. Read root `AGENTS.md`, `docs/engineering/README.md`, then `CURRENT-STATE.md`, `ACTIVE-WORK.md`, and `AI-HANDOFF.md`.
+1. Read root `AGENTS.md`, `doc/README.md`, `doc/00-governance/Repository-Baseline.md`, and `doc/10-open-items/Production-Gaps-and-Decision-Backlog.md`.
 2. Inspect Git status, current branch, HEAD SHA, remotes, and uncommitted changes. Do not reset, stash, checkout, or clean user changes.
-3. Inspect repository tree and relevant source/tests/docs. Confirm whether the control files' recorded baseline still matches HEAD.
-4. Read the relevant original source docs, Rev2.0 baseline chapter(s), ADR(s), audit findings, and registers. Do not load every chapter if unrelated.
+3. Inspect repository tree and relevant source/tests/docs. Confirm whether the baseline still matches HEAD.
+4. Read only the relevant `doc/` chapters and ADRs (`doc/02-architecture/adr/`) for your task scope. Do not load unrelated chapters.
 5. Identify conflicts among code, tests, ADRs, requirements, and current state. Record them as explicit blockers/questions.
 6. Present a concise session brief:
    - observed branch/commit/working-tree state;

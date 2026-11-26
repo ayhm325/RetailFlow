@@ -18,9 +18,14 @@ Product Host يستخدم ASP.NET Core Identity (`IdentityConstants.ApplicationS
 
 `ProductHostExtensions.cs`, `AuthEndpoints.cs`, `SqlSessionTicketStore.cs`, `IdentityConfiguration.cs`.
 
-## Consequences
+## Consequences & Current Implementation Reconciliation (2026-11-26)
 
-جلسات الخادم قابلة للإلغاء مركزياً عن طريق حذف ticket، لكن الخدمة الحالية لا تعرض إدارة جلسات المستخدم أو تنظيفاً دورياً للسجلات المنتهية ضمن Product Host.
+- جلسات الخادم قابلة للإلغاء مركزياً عبر `SqlSessionTicketStore` (`SessionTickets`).
+- **تحديث التنفيذ الفعلي (مقارنة بالوصف الأولي أعلاه):**
+  - يفرض `SqlSessionTicketStore` مهلة خمول (`IdleLifetime`) ومهلة مطلقة غير قابلة للتمديد (`AbsoluteExpiresAtUtc`) حسب الدور: `PlatformAdmin` (`1h`/`8h`)، `MerchantOwner` (`4h`/`24h`)، `Customer` (`12h`/`7d`)؛ مع إبقاء `CookieAuthenticationOptions.ExpireTimeSpan = 12 hours` كإطار عام.
+  - يقوم `MaintenanceBackgroundService` بحذف تذاكر الجلسات المنتهية دورياً كل دقيقة، ويُبطل `AuthService` + `SqlSessionTicketStore` الجلسات عند تغيير كلمة المرور أو تعطيل الحساب أو تغيير حالة MFA.
+  - لا تزال واجهة عرض/إلغاء الأجهزة النشطة للمستخدم غير موجودة.
+  - **ملاحظة برمجية مؤجلة:** تعليق `SqlSessionTicketStore.cs` يشير إلى `AUTH-ADR-01` غير موجود في سجل ADRs (المرجع الصحيح هو `ADR-004` / `ADR-006`).
 
 ## Alternatives not evaluated
 

@@ -1,6 +1,6 @@
 # خط أساس المستودع
 
-**المرجع:** `main` عند `b279883a664e5f515a1049fbf7055865d6f5b662`، تاريخ إعداد الحزمة 2026-11-26.
+**المرجع:** `main` عند `ef1cdfc2097653abedbac1f8e5f2deb1d80a8641`، تاريخ التحديث 2026-11-26.
 
 ## ملخص التكوين
 
@@ -22,14 +22,14 @@
 
 هذه أرقام ناتجة من شجرة Git recursive عند baseline المحدد، وليست قياساً لتغطية مراجعة سطرية:
 
-- 351 tracked blob files.
+- 303 tracked blob files (`git ls-files`).
 - 14 ملف مشروع `.csproj`: 6 ضمن المنتج والاختبارات الأساسية، و8 ضمن التجارب.
-- 64 ملف C# في `src/` خارج مجلدات migrations.
-- 11 ملف C# ضمن migrations/model snapshot في `src/`.
-- 6 ملفات C# للاختبارات الأساسية تحت `tests/`.
-- 49 ملفاً تحت `experiments/IdentitySpike/`.
-- 60 ملفاً تحت `experiments/SessionTransportSpike/`.
-- 171 ملف C# إجمالاً في المستودع.
+- 80 ملف C# في `src/` خارج مجلدات migrations.
+- 23 ملف C# ضمن migrations/model snapshot في `src/RetailFlow.Infrastructure/Persistence/Migrations/`.
+- 20 ملف C# ضمن `tests/` (`18` في `RetailFlow.Api.IntegrationTests` و`2` في `RetailFlow.Domain.UnitTests`).
+- 49 ملفاً متعقباً تحت `experiments/IdentitySpike/`.
+- 60 ملفاً متعقباً تحت `experiments/SessionTransportSpike/`.
+- 213 ملف C# إجمالاً في المستودع.
 
 ## بنية Product Host
 

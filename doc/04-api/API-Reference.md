@@ -41,8 +41,16 @@
 
 | Method | Path | الغرض | الحماية |
 |---|---|---|---|
-| POST | `/api/platform/auth/login` | دخول PlatformAdmin | Credentials |
-| POST | `/api/platform/auth/logout` | إنهاء جلسة PlatformAdmin | `PlatformAdmin` |
+| POST | `/api/platform/auth/login` | دخول PlatformAdmin (يدعم `TwoFactorCode` / `RecoveryCode`؛ أو يفتح جلسة تسجيل فقط عند غياب MFA) | Credentials + Auth rate limit |
+| POST | `/api/platform/auth/logout` | إنهاء جلسة PlatformAdmin | `PlatformAdminEnrollment` |
+| POST | `/api/platform/auth/forgot-password` | طلب رابط استعادة كلمة المرور (`202`) | Auth rate limit |
+| POST | `/api/platform/auth/reset-password` | إتمام استعادة كلمة المرور وإبطال الجلسات | Auth rate limit |
+| POST | `/api/platform/auth/2fa/setup` | بدء تسجيل TOTP الأولي (يتطلب `CurrentPassword`) | `PlatformAdminEnrollment` + Auth rate limit |
+| POST | `/api/platform/auth/2fa/enable` | تأكيد وتفعيل TOTP وإصدار 10 رموز استرداد | `PlatformAdminEnrollment` + Auth rate limit |
+| POST | `/api/platform/auth/2fa/replace/setup` | بدء استبدال Authenticator (يتطلب Step-up) | `PlatformAdmin` + Auth rate limit |
+| POST | `/api/platform/auth/2fa/replace/confirm` | تأكيد الاستبدال وإبطال الجلسات القديمة | `PlatformAdmin` + Auth rate limit |
+| POST | `/api/platform/auth/2fa/disable` | تعطيل TOTP (يتطلب Step-up) وإبطال الجلسات | `PlatformAdmin` + Auth rate limit |
+| POST | `/api/platform/auth/2fa/recovery-codes` | إعادة توليد رموز الاسترداد (يتطلب TOTP حالي) | `PlatformAdmin` + Auth rate limit |
 | POST | `/api/platform/stores` | إنشاء متجر | `PlatformAdmin` |
 | POST | `/api/platform/stores/{storeId}/approve` | اعتماد/إعادة تنشيط متجر | `PlatformAdmin` |
 | POST | `/api/platform/stores/{storeId}/reject` | رفض متجر PendingApproval | `PlatformAdmin` |
