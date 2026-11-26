@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Claims;
 
 using Microsoft.AspNetCore.Authentication;
@@ -21,25 +22,49 @@ public sealed class RetailFlowCookieEvents : CookieAuthenticationEvents
     private readonly UserManager<RetailFlowIdentityUser> _userManager;
     private readonly IIdentityLookupScopeAccessor _scopeAccessor;
     private readonly IOptions<PlatformSecurityOptions> _platformSecurityOptions;
+    private readonly TimeProvider _timeProvider;
+    private readonly ILogger<RetailFlowCookieEvents> _logger;
 
     public RetailFlowCookieEvents(
         UserManager<RetailFlowIdentityUser> userManager,
         IIdentityLookupScopeAccessor scopeAccessor,
-        IOptions<PlatformSecurityOptions> platformSecurityOptions)
+        IOptions<PlatformSecurityOptions> platformSecurityOptions,
+        TimeProvider timeProvider,
+        ILogger<RetailFlowCookieEvents> logger)
     {
         _userManager = userManager;
         _scopeAccessor = scopeAccessor;
         _platformSecurityOptions = platformSecurityOptions;
+        _timeProvider = timeProvider;
+        _logger = logger;
     }
 
     public override async Task ValidatePrincipal(CookieValidatePrincipalContext context)
     {
         var userIdClaim = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
-        if (!Guid.TryParse(userIdClaim, out _))
+        if (!Guid.TryParse(userIdClaim, out var parsedUserId))
         {
             context.RejectPrincipal();
             await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
             return;
+        }
+
+        var now = _timeProvider.GetUtcNow();
+        if (context.Properties.Items.TryGetValue(SqlSessionTicketStore.AbsoluteExpirationPropertyKey, out var absRaw) &&
+            DateTimeOffset.TryParse(absRaw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var absExpiresAt))
+        {
+            if (now >= absExpiresAt)
+            {
+                _logger.LogInformation("Audit: SessionAbsoluteTimeoutReached UserId={UserId}", parsedUserId);
+                context.RejectPrincipal();
+                await context.HttpContext.SignOutAsync(IdentityConstants.ApplicationScheme);
+                return;
+            }
+
+            if (context.Properties.ExpiresUtc.HasValue && context.Properties.ExpiresUtc.Value > absExpiresAt)
+            {
+                context.Properties.ExpiresUtc = absExpiresAt;
+            }
         }
 
         var currentScope = _scopeAccessor.Current;

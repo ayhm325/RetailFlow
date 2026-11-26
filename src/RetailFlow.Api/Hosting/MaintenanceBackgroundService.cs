@@ -68,7 +68,7 @@ public sealed class MaintenanceBackgroundService : BackgroundService
             {
                 var db = sp.GetRequiredService<RetailFlowDbContext>();
                 return await db.SessionTickets
-                    .Where(t => t.ExpiresAtUtc <= now)
+                    .Where(t => t.ExpiresAtUtc <= now || t.AbsoluteExpiresAtUtc <= now)
                     .ExecuteDeleteAsync(cancellationToken);
             },
             cancellationToken);

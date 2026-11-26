@@ -24,9 +24,9 @@
 | SameSite | Lax |
 | Path | `/` |
 | Domain | غير مضبوط في الكود المعاين، وهو مناسب لشرط `__Host-` |
-| SlidingExpiration | true |
-| ExpireTimeSpan | 12 hours |
-| Ticket storage | SQL Server عبر `ITicketStore` |
+| SlidingExpiration | true (مقيد بالمهلة المطلقة `AbsoluteExpiresAtUtc`) |
+| ExpireTimeSpan | idle/absolute حسب الدور: `PlatformAdmin` (`1h`/`8h`)، `MerchantOwner` (`4h`/`24h`)، `Customer` (`12h`/`7d`) |
+| Ticket storage | SQL Server عبر `SqlSessionTicketStore` (`CreatedAtUtc`, `AbsoluteExpiresAtUtc`, `ExpiresAtUtc`, `LastSeenAtUtc`) |
 
 لا تعني هذه القيم أن إدارة الجلسات كاملة؛ راجع فجوات rotation/revocation/cleanup/Data Protection في `10-open-items`.
 

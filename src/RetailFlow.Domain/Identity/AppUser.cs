@@ -36,6 +36,8 @@ public sealed class SessionTicket
     public byte[] Value { get; private set; }
     public DateTimeOffset ExpiresAtUtc { get; private set; }
     public DateTimeOffset LastSeenAtUtc { get; private set; }
+    public DateTimeOffset CreatedAtUtc { get; private set; }
+    public DateTimeOffset AbsoluteExpiresAtUtc { get; private set; }
 
     public static SessionTicket Create(
         string key,
@@ -43,7 +45,9 @@ public sealed class SessionTicket
         Guid? storeId,
         byte[] value,
         DateTimeOffset expiresAtUtc,
-        DateTimeOffset lastSeenAtUtc)
+        DateTimeOffset lastSeenAtUtc,
+        DateTimeOffset? createdAtUtc = null,
+        DateTimeOffset? absoluteExpiresAtUtc = null)
     {
         return new SessionTicket
         {
@@ -52,7 +56,9 @@ public sealed class SessionTicket
             StoreId = storeId,
             Value = value,
             ExpiresAtUtc = expiresAtUtc,
-            LastSeenAtUtc = lastSeenAtUtc
+            LastSeenAtUtc = lastSeenAtUtc,
+            CreatedAtUtc = createdAtUtc ?? lastSeenAtUtc,
+            AbsoluteExpiresAtUtc = absoluteExpiresAtUtc ?? expiresAtUtc
         };
     }
 
