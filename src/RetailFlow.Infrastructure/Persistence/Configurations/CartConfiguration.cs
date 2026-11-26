@@ -17,6 +17,7 @@ internal sealed class CartConfiguration : IEntityTypeConfiguration<Cart>
         builder.Property(x => x.StoreId).IsRequired();
         builder.Property(x => x.CustomerId).IsRequired();
         builder.Property(x => x.UpdatedAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
+        builder.Property(x => x.RowVersion).IsRowVersion().IsConcurrencyToken();
 
         builder.HasIndex(x => new { x.StoreId, x.CustomerId })
             .IsUnique()
@@ -48,6 +49,7 @@ internal sealed class CartItemConfiguration : IEntityTypeConfiguration<CartItem>
         builder.Property(x => x.CartId).IsRequired();
         builder.Property(x => x.ProductId).IsRequired();
         builder.Property(x => x.Quantity).IsRequired();
+        builder.Property(x => x.RowVersion).IsRowVersion().IsConcurrencyToken();
 
         builder.HasIndex(x => new { x.StoreId, x.CartId, x.ProductId })
             .IsUnique()

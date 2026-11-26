@@ -16,7 +16,8 @@ public sealed record CartDto(
     Guid CustomerId,
     string CurrencyCode,
     decimal Subtotal,
-    IReadOnlyList<CartItemDto> Items);
+    IReadOnlyList<CartItemDto> Items,
+    string Version = "");
 
 public sealed record UpsertCartItemCommand(Guid ProductId, int Quantity);
 
@@ -68,12 +69,23 @@ public sealed record OrderDto(
     DateTimeOffset ReservationExpiresAtUtc,
     IReadOnlyList<OrderItemDto> Items);
 
+public sealed class CartConcurrencyConflictException : Exception
+{
+    public bool IsPreconditionFailed { get; }
+
+    public CartConcurrencyConflictException(string message, bool isPreconditionFailed, Exception? innerException = null)
+        : base(message, innerException)
+    {
+        IsPreconditionFailed = isPreconditionFailed;
+    }
+}
+
 public interface ICartService
 {
     Task<CartDto> GetCartAsync(Guid storeId, Guid customerId, CancellationToken cancellationToken);
-    Task<CartDto> UpsertItemAsync(Guid storeId, Guid customerId, UpsertCartItemCommand command, CancellationToken cancellationToken);
-    Task<CartDto> RemoveItemAsync(Guid storeId, Guid customerId, Guid productId, CancellationToken cancellationToken);
-    Task ClearCartAsync(Guid storeId, Guid customerId, CancellationToken cancellationToken);
+    Task<CartDto> UpsertItemAsync(Guid storeId, Guid customerId, UpsertCartItemCommand command, CancellationToken cancellationToken, string? expectedVersion = null);
+    Task<CartDto> RemoveItemAsync(Guid storeId, Guid customerId, Guid productId, CancellationToken cancellationToken, string? expectedVersion = null);
+    Task ClearCartAsync(Guid storeId, Guid customerId, CancellationToken cancellationToken, string? expectedVersion = null);
 }
 
 public interface ICheckoutService

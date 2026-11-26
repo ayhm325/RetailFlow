@@ -80,10 +80,10 @@ Group: `/api/stores/{slug}`، يتطلب `Customer` وStore resolution ومطا�
 
 | Method | Path | الغرض |
 |---|---|---|
-| GET | `/cart` | قراءة Cart |
-| PUT | `/cart/items` | إضافة/تعديل كمية منتج |
-| DELETE | `/cart/items/{productId}` | حذف منتج من Cart |
-| DELETE | `/cart` | إفراغ Cart |
+| GET | `/cart` | قراءة Cart وإرجاع `Version` و`ETag` |
+| PUT | `/cart/items` | إضافة/تعديل كمية منتج مع دعم `If-Match` (`412`/`409` `cart_concurrency_conflict` عند التعارض) |
+| DELETE | `/cart/items/{productId}` | حذف منتج من Cart مع دعم `If-Match` |
+| DELETE | `/cart` | إفراغ Cart مع دعم `If-Match` |
 | POST | `/checkout` | تنفيذ Checkout مع `Idempotency-Key` |
 | GET | `/orders` | قائمة طلبات Customer الحالي |
 | GET | `/orders/{orderId}` | قراءة طلب يملكه Customer الحالي |
