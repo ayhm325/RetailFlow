@@ -393,6 +393,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
             var body = await resp.Content.ReadAsStringAsync();
             Assert.DoesNotContain("Insufficient available inventory", body, StringComparison.OrdinalIgnoreCase);
 
+            // Also verify GAP-001: adding a different product and reusing an existing completed Idempotency-Key returns 422
             await using var db = _fixture.CreateDbContext();
             var dbInv1 = await db.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prod1.Id);
             var dbInv2 = await db.InventoryItems.AsNoTracking().SingleAsync(i => i.ProductId == prod2.Id);
@@ -470,6 +471,22 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
             Assert.Equal(0, updatedInv.Reserved);
             Assert.False(await db.CheckoutRequests.AsNoTracking().AnyAsync(r => r.Id == expiredClaim.Id));
             Assert.False(await db.SessionTickets.AsNoTracking().AnyAsync(t => t.Key == expiredTicket.Key));
+
+            // GAP-003: Expired CheckoutRequest key is cleared and reusable on direct duplicate lookup
+            var expiredReuse = CheckoutRequest.Claim(Guid.NewGuid(), store.Id, customerId, $"reuse-key-{suffix}", new string('B', 64), DateTimeOffset.UtcNow.AddHours(-25));
+            db.CheckoutRequests.Add(expiredReuse);
+            await db.SaveChangesAsync();
+
+            await using var scope3 = _fixture.CreateAsyncScope();
+            var checkoutService = scope3.ServiceProvider.GetRequiredService<ICheckoutService>();
+            var reuseResult = await checkoutService.CheckoutAsync(
+                store.Id,
+                customerId,
+                $"reuse-key-{suffix}",
+                new CheckoutCommand(FulfillmentMode.Pickup, null, null),
+                CancellationToken.None);
+            Assert.Equal(CheckoutOutcomeStatus.ValidationFailed, reuseResult.Status);
+            Assert.False(await db.CheckoutRequests.AsNoTracking().AnyAsync(r => r.Id == expiredReuse.Id));
         }
         finally
         {

@@ -35,4 +35,18 @@ public sealed class PasswordHasherTests
         Assert.True(PasswordHasherService.Verify("LegacyPass!1", legacyHash));
         Assert.False(PasswordHasherService.Verify("WrongLegacy!1", legacyHash));
     }
+
+    [Fact]
+    public void Verify_RejectsOutOfRangeIterations_AndInvalidSaltOrKeyLengths()
+    {
+        var validSalt = Convert.ToBase64String(new byte[16]);
+        var validKey = Convert.ToBase64String(new byte[32]);
+        var shortSalt = Convert.ToBase64String(new byte[8]);
+        var shortKey = Convert.ToBase64String(new byte[16]);
+
+        Assert.False(PasswordHasherService.Verify("AnyPass!1", $"v1.10000000.{validSalt}.{validKey}"));
+        Assert.False(PasswordHasherService.Verify("AnyPass!1", $"v1.1000.{validSalt}.{validKey}"));
+        Assert.False(PasswordHasherService.Verify("AnyPass!1", $"v1.600000.{shortSalt}.{validKey}"));
+        Assert.False(PasswordHasherService.Verify("AnyPass!1", $"v1.600000.{validSalt}.{shortKey}"));
+    }
 }

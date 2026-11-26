@@ -31,7 +31,10 @@ internal static class PasswordHasherService
         }
 
         var parts = encodedHash.Split('.');
-        if (parts.Length != 4 || parts[0] != "v1" || !int.TryParse(parts[1], out var iterations))
+        if (parts.Length != 4 ||
+            parts[0] != "v1" ||
+            !int.TryParse(parts[1], out var iterations) ||
+            iterations is < 310_000 or > 1_000_000)
         {
             return false;
         }
@@ -40,7 +43,12 @@ internal static class PasswordHasherService
         {
             var salt = Convert.FromBase64String(parts[2]);
             var expected = Convert.FromBase64String(parts[3]);
-            var actual = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, expected.Length);
+            if (salt.Length != SaltSize || expected.Length != KeySize)
+            {
+                return false;
+            }
+
+            var actual = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, KeySize);
             return CryptographicOperations.FixedTimeEquals(actual, expected);
         }
         catch (FormatException)
