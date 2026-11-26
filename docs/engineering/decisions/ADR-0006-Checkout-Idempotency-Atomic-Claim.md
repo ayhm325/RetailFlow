@@ -52,7 +52,48 @@ Recommend adopting an atomic `CheckoutRequests` claim protocol (keeping `Status:
      - If `Status == Failed` -> either return deterministic failure or allow retry only if explicitly marked retryable by policy.
    - **Step 3 (Execute Checkout Transaction):** Within a single SQL Server transaction (`Serializable` or `READ COMMITTED` with `InventoryItem` atomic conditional `UPDATE` / `RowVersion`), validate stock, decrement/reserve inventory (`IN-01`, `IN-02`), create `Order`, and update `CheckoutRequests` to `Status = Completed, OrderId = order.Id`. On unhandled failure before commit, mark `CheckoutRequests.Status = Failed` in a separate cleanup scope so the key does not stay stuck `InProgress`.
 
-## 7. Consequences
+## 7. Sequence, Failure Windows & Lease Recovery (`RF-REV-003`)
+
+```mermaid
+sequenceDiagram
+    participant C as Customer Client
+    participant API as Checkout Endpoint
+    participant DB as SQL Server (CheckoutRequests + Orders + Inventory)
+    C->>API: POST /checkout (Idempotency-Key, Payload)
+    API->>DB: INSERT CheckoutRequests (Status=InProgress, RequestHash, ExpiresAtUtc)
+    alt Unique Constraint Violation (2601/2627)
+        API->>DB: SELECT existing CheckoutRequest
+        alt RequestHash mismatch
+            API-->>C: 422 Unprocessable Entity (ProblemDetails)
+        else Status == InProgress
+            API-->>C: 409 Conflict (ProblemDetails)
+        else Status == Completed
+            API-->>C: 200 OK (Deterministic OrderDto Replay)
+        end
+    else Claim Inserted
+        API->>DB: Validate Store/Zone, Reserve Inventory, INSERT Order, Clear Cart, UPDATE Claim=Completed
+        alt Transaction Commit Succeeds
+            API-->>C: 201 Created (OrderDto)
+        else Business/Concurrency Failure
+            API->>DB: UPDATE Claim=Failed
+            API-->>C: 400 / 409 ProblemDetails
+        end
+    end
+```
+
+### 7.1 Failure & Recovery Matrix (At-Most-Once Order Creation & Idempotent Replay)
+Note: RetailFlow guarantees **at-most-once order creation and inventory reservation** per `(StoreId, CustomerId, IdempotencyKey)` plus **deterministic response replay**, not generic "exactly-once" side-effect execution across process crashes.
+
+| Failure Window / Scenario | Handling & Recovery |
+|---|---|
+| 1. Claim inserted & committed; app crashes before checkout | Claim stays `InProgress` until lease expiry (`InProgressLeaseSeconds`, e.g. 60s–120s); concurrent retries receive `409 Conflict`; expired stale `InProgress` rows require atomic conditional reclaim (`UPDATE ... SET Status=InProgress, ExpiresAtUtc=@New WHERE Id=@Id AND Status=InProgress AND ExpiresAtUtc <= @Now`) — *recovery worker not yet implemented*. |
+| 2. Checkout business validation or `RowVersion` fails | Claim is marked `Failed` in cleanup; retry with same key returns deterministic failure (non-retryable) or requires a fresh `Idempotency-Key`. |
+| 3. Order + Inventory written; app crashes before claim marked `Completed` | Because Order creation, Inventory reservation, Cart clear, and `CheckoutRequest.MarkCompleted` execute in a single `SaveChangesAsync()` transaction, SQL Server rolls back all four atomically on crash before commit. |
+| 4. Concurrent duplicate while first is executing | Second request hits `UX_CheckoutRequests_StoreId_CustomerId_IdempotencyKey` (`2601`/`2627`), reads `InProgress`, and returns `409 Conflict`. |
+| 5. Retry with different payload | `RequestHash` (SHA-256) mismatch returns `422 Unprocessable Entity` (`ProblemDetails`). |
+| 6. Replay by unauthorized actor / cross-tenant | Key is scoped to `(StoreId, CustomerId, IdempotencyKey)` and protected by `TenantClaimMatchEndpointFilter`, preventing cross-store or cross-customer replay. |
+
+## 8. Consequences
 - **Positive:** Eliminates duplicate orders under concurrency without external locking services; enforces tenant/customer scoping at the index level.
 - **Negative:** Requires a short initial claim commit plus cleanup handling on unexpected process crash (mitigated by `ExpiresAtUtc` / stale `InProgress` recovery).
 - **Follow-on work:** Remove `MultipleActiveResultSets=True` (`AUD-03`) from Product Host write connection strings if savepoints are used.

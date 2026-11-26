@@ -78,3 +78,14 @@
 - Implemented: `Cart`/`CartItem`/`Order`/`OrderItem`/`OrderStatusHistory`/`CheckoutRequest`/`AppUser`/`SessionTicket` + 2 EF Core migrations (`AddCartOrdersAndCheckoutIdempotency`, `AddIdentityAndSessionTickets`); `CartService`, `CheckoutService` (atomic `CheckoutRequests` claim), `OrderService` (`OD-001` expiry sweep, `OD-002` `Pending`-only cancel, `ADR-0005` transitions), `AuthService` (PBKDF2-SHA256), `SqlSessionTicketStore`, `X-CSRF` middleware, and `AuthEndpoints`/`MerchantEndpoints`/`CustomerOrderEndpoints`/`PlatformAdminEndpoints`.
 - Added Tests: `OrderDomainTests.cs` (3 unit tests) + `EndToEndCommerceAuthIntegrationTests.cs` (2 full end-to-end SQL/HTTP tests).
 - Verified: `dotnet build RetailFlow.slnx --configuration Release --no-restore` (`0` warnings, `0` errors), `dotnet test RetailFlow.slnx --configuration Release --no-build` (`9/9` unit + `65/65` integration pass).
+
+## 2026-11-26 — Corrective Engineering Mission (`RF-REV-001`–`RF-REV-010`, Local Uncommitted)
+- Type: Independent Corrective Review, Security Hardening, Domain Invariants & Documentation Reconciliation on `feature/public-store-catalog-read` (at `37f80f5`, local-only, no commit/push).
+- Fixes:
+  - `RF-REV-001`: Replaced cross-job `prepare` masked `GITHUB_OUTPUT` in `.github/workflows/ci.yml` with single-job ephemeral Docker SQL Server container + masked `$GITHUB_ENV`.
+  - `RF-REV-002` / `RF-REV-008`: Migrated `OWASP-ASVS-Security-Mapping.md` to OWASP ASVS 5.0.0 (`REF-11`) and downgraded `API9:2023` to `Partially Implemented & Partially Verified`.
+  - `RF-REV-003` / `RF-REV-004`: Expanded `ADR-0005` (full transition tables, cross-state invariants, refund policy marked `Pending Owner Decision`) and `ADR-0006` (Mermaid sequence diagram, 6-window failure/recovery matrix, stale-lease reclaim specification).
+  - `RF-REV-005`: Partitioned `RateLimiter` by `store:{slug}:ip:{ip}` for store routes (preventing cross-store quota sharing behind shared NAT) and added cross-store rate-limit + `Retry-After` test.
+  - `RF-REV-006`: Removed `InitialStatus` from `CreateStoreCommand`; `PlatformStoreService.CreateStoreAsync` enforces `StoreStatus.PendingApproval`.
+  - `RF-REV-007`: Added `http`/`https` absolute URI, length (`1000`/`250`), and `SortOrder >= 0` validation to `ProductImage.Create`, plus archived-product guard in `MerchantCatalogService`.
+  - `RF-REV-009` / `RF-REV-010`: Reconciled `NFR-Register.csv`, `Testing-and-Verification.md`, `CURRENT-STATE.md`, `AI-HANDOFF.md`, `FINAL-IMPLEMENTATION-REPORT.md`, and created `Audit-Identifier-Crosswalk.md`.

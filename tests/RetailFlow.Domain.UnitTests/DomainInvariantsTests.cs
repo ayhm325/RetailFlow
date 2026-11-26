@@ -230,4 +230,37 @@ public sealed class DomainInvariantsTests
         Assert.Throws<ArgumentException>(() =>
             zone.UpdateFee(1.2345m, settings, Jod));
     }
+
+    [Fact]
+    public void Store_InvalidRepeatedOrForbiddenLifecycleTransitions_Throw()
+    {
+        var pending = Store.Create(Guid.NewGuid(), "Pending", "pending", StoreType.OnlineOnly, StoreStatus.PendingApproval, DateTimeOffset.UtcNow);
+        Assert.Throws<InvalidOperationException>(() => pending.Suspend());
+
+        pending.Reject();
+        Assert.Equal(StoreStatus.Rejected, pending.Status);
+        Assert.Throws<InvalidOperationException>(() => pending.Approve());
+        Assert.Throws<InvalidOperationException>(() => pending.Reject());
+
+        var active = Store.Create(Guid.NewGuid(), "Active", "active", StoreType.OnlineOnly, StoreStatus.PendingApproval, DateTimeOffset.UtcNow);
+        active.Approve();
+        Assert.Throws<InvalidOperationException>(() => active.Approve());
+    }
+
+    [Fact]
+    public void ProductImage_EnforcesHttpHttpsUrlLengthAltTextAndNonNegativeSortOrder()
+    {
+        var storeId = Guid.NewGuid();
+        var productId = Guid.NewGuid();
+
+        var valid = ProductImage.Create(Guid.NewGuid(), storeId, productId, " https://cdn.example/img.jpg ", 0, "  Front view  ");
+        Assert.Equal("https://cdn.example/img.jpg", valid.ImageUrl);
+        Assert.Equal("Front view", valid.AltText);
+
+        Assert.Throws<ArgumentException>(() => ProductImage.Create(Guid.NewGuid(), storeId, productId, "javascript:alert(1)"));
+        Assert.Throws<ArgumentException>(() => ProductImage.Create(Guid.NewGuid(), storeId, productId, "/relative/path.png"));
+        Assert.Throws<ArgumentException>(() => ProductImage.Create(Guid.NewGuid(), storeId, productId, "https://cdn.example/" + new string('a', 1000)));
+        Assert.Throws<ArgumentException>(() => ProductImage.Create(Guid.NewGuid(), storeId, productId, "https://cdn.example/a.png", 0, new string('b', 251)));
+        Assert.Throws<ArgumentOutOfRangeException>(() => ProductImage.Create(Guid.NewGuid(), storeId, productId, "https://cdn.example/a.png", -1));
+    }
 }

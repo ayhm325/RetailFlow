@@ -11,8 +11,7 @@ public sealed record CreateStoreCommand(
     bool DeliveryEnabled,
     bool PickupEnabled,
     string? PublicAddress = null,
-    string? FulfillmentAddress = null,
-    StoreStatus InitialStatus = StoreStatus.PendingApproval);
+    string? FulfillmentAddress = null);
 
 public sealed record PlatformStoreDto(
     Guid Id,

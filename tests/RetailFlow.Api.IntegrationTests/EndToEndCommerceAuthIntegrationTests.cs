@@ -107,17 +107,22 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
 
             using var createStoreAResp = await adminClient.PostAsJsonAsync(
                 "/api/platform/stores",
-                new CreateStoreCommand("Roast A", $"roast-a-{suffix}", StoreType.Physical, "JOD", "Asia/Amman", true, true, "Amman", "Dock A", StoreStatus.PendingApproval));
+                new CreateStoreCommand("Roast A", $"roast-a-{suffix}", StoreType.Physical, "JOD", "Asia/Amman", true, true, "Amman", "Dock A"));
             Assert.Equal(HttpStatusCode.Created, createStoreAResp.StatusCode);
             var storeA = await createStoreAResp.Content.ReadFromJsonAsync<PlatformStoreDto>(JsonOptions);
             storeAId = storeA!.Id;
+            Assert.Equal(StoreStatus.PendingApproval, storeA.Status);
 
             using var createStoreBResp = await adminClient.PostAsJsonAsync(
                 "/api/platform/stores",
-                new CreateStoreCommand("Roast B", $"roast-b-{suffix}", StoreType.OnlineOnly, "JOD", "Asia/Amman", true, false, null, "Dock B", StoreStatus.Active));
+                new CreateStoreCommand("Roast B", $"roast-b-{suffix}", StoreType.OnlineOnly, "JOD", "Asia/Amman", true, false, null, "Dock B"));
             Assert.Equal(HttpStatusCode.Created, createStoreBResp.StatusCode);
             var storeB = await createStoreBResp.Content.ReadFromJsonAsync<PlatformStoreDto>(JsonOptions);
             storeBId = storeB!.Id;
+            Assert.Equal(StoreStatus.PendingApproval, storeB.Status);
+
+            using var approveBResp = await adminClient.PostAsync($"/api/platform/stores/{storeB.Id}/approve", null);
+            Assert.Equal(HttpStatusCode.NoContent, approveBResp.StatusCode);
 
             using var approveResp = await adminClient.PostAsync($"/api/platform/stores/{storeA.Id}/approve", null);
             Assert.Equal(HttpStatusCode.NoContent, approveResp.StatusCode);

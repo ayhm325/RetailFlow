@@ -56,7 +56,29 @@ Recommend adopting three orthogonal state models on the `Order` aggregate (keepi
    - `OrderStatus == Completed` requires `FulfillmentStatus in { Delivered, PickedUp }` AND `PaymentStatus == Collected`.
    - `PaymentStatus == Collected` requires `OrderStatus == Confirmed` and `FulfillmentStatus in { Delivered, PickedUp }` (for COD).
 
-## 7. Consequences
+## 7. Complete State Transition & Cross-State Invariant Model (`RF-REV-004`)
+
+### 7.1 `OrderStatus` Transitions
+| From | Action | To | Actor | Preconditions | Inventory & Payment Side Effects | Audit |
+|---|---|---|---|---|---|---|
+| *(Initial)* | `Order.Create` | `Pending` | `Customer` | Active store, valid items/totals (`MNY-01`) | `InventoryItem.Reserve(qty)` (`OD-001` 15-min expiry); `PaymentStatus=Pending` | `OrderStatusHistory` |
+| `Pending` | `Confirm` | `Confirmed` | `MerchantOwner` | Store `StoreId` match | Reservation retained | `OrderStatusHistory` |
+| `Pending` | `Reject` | `Rejected` *(Terminal)* | `MerchantOwner` | Non-empty `reason` | `InventoryItem.ReleaseReservation(qty)`; `FulfillmentStatus=Cancelled`; `PaymentStatus=Voided` | `OrderStatusHistory` |
+| `Pending` | `CancelByCustomer` | `Cancelled` *(Terminal)* | `Customer` | Owning `CustomerId`, `OrderStatus == Pending` (`OD-002`) | `InventoryItem.ReleaseReservation(qty)`; `FulfillmentStatus=Cancelled`; `PaymentStatus=Voided` | `OrderStatusHistory` |
+| `Pending` / `Confirmed` | `CancelByMerchantOrTimeout` | `Cancelled` *(Terminal)* | `MerchantOwner` / `System` | `FulfillmentStatus` not `Delivered`/`PickedUp` | `InventoryItem.ReleaseReservation(qty)`; `FulfillmentStatus=Cancelled`; `PaymentStatus=Voided` | `OrderStatusHistory` |
+| `Confirmed` | `CollectCodPayment` | `Completed` *(Terminal)* | `MerchantOwner` | `FulfillmentStatus in {Delivered, PickedUp}` & `PaymentStatus == Pending` | `InventoryItem.CommitReservation(qty)` (`OnHand -= qty`, `Reserved -= qty`); `PaymentStatus=Collected` | `OrderStatusHistory` |
+
+### 7.2 `FulfillmentStatus` (Delivery vs Pickup) & Cross-State Invariants
+- **Delivery path:** `Unfulfilled -> Preparing -> OutForDelivery -> Delivered` (or `OutForDelivery -> Failed`).
+- **Pickup path:** `Unfulfilled -> Preparing -> ReadyForPickup -> PickedUp`.
+- **Forbidden Cross-State Combinations:**
+  1. Cancellation before fulfillment (`Pending` -> `Cancelled`): allowed for Customer (`OD-002`) and Merchant/Timeout; releases stock.
+  2. Customer cancellation after fulfillment begins (`Confirmed` / `Preparing`+): **Rejected** (`409 Conflict` per `OD-002`).
+  3. Cancellation after COD collection (`PaymentStatus == Collected` / `OrderStatus == Completed`): **Prohibited in current state machine**; any future post-delivery return/refund workflow is **Pending Owner Decision** (do not invent a refund policy).
+  4. `OrderStatus == Completed` with `PaymentStatus != Collected` or `FulfillmentStatus not in {Delivered, PickedUp}`: **Rejected**.
+  5. `PaymentStatus == Collected` with `OrderStatus != Confirmed` or `FulfillmentStatus not in {Delivered, PickedUp}`: **Rejected**.
+
+## 8. Consequences
 - **Positive:** Eliminates ambiguous states, supports Delivery and Pickup uniformly, and enables clean unit testing of every transition matrix cell.
 - **Negative:** Slightly more columns and check constraints on `Orders` and `OrderStatusHistories`.
 - **Follow-on work:** Bind `OD-002` cutoff rule to the `OrderStatus`/`FulfillmentStatus` guard once PO approves.

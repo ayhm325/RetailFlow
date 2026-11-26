@@ -1,6 +1,6 @@
 # RetailFlow — Final Implementation & Verification Report
 
-**Report Date:** `2026-11-26` | **Branch:** `feature/public-store-catalog-read` | **Starting Commit:** `a18dade6dc1f4bbd99b92ac046b13a705b8681c6` (local uncommitted implementation working tree)
+**Report Date:** `2026-11-26` | **Branch:** `feature/public-store-catalog-read` | **Verified Commit:** `37f80f537b62cf21a6d50c1885124013406e9914` + local corrective pass (`RF-REV-001`–`RF-REV-010`)
 
 ---
 
@@ -56,8 +56,8 @@ Executed an evidence-driven engineering implementation and verification pass acr
 
 ## 13. Testing Results
 - **Release Build:** `dotnet build RetailFlow.slnx --configuration Release --no-restore` -> **Succeeded** (`0 Warning(s), 0 Error(s)`).
-- **Domain Unit Tests:** `RetailFlow.Domain.UnitTests` -> **6 / 6 Passed** (`0 Failed, 0 Skipped`, `43 ms`).
-- **SQL Server Integration Tests:** `RetailFlow.Api.IntegrationTests` -> **57 / 57 Passed** (`0 Failed, 0 Skipped`, `6 s`).
+- **Domain Unit Tests:** `RetailFlow.Domain.UnitTests` -> **11 / 11 Passed** (`0 Failed, 0 Skipped`).
+- **SQL Server Integration Tests:** `RetailFlow.Api.IntegrationTests` -> **65 / 65 Passed** (`0 Failed, 0 Skipped`).
 - **Gate 1 Validator:** `scripts/validate-gate1-baseline.ps1` -> **PASS** (`911` checks, `0` failures).
 - **Operating Memory Validator:** `tools/validate_operating_memory.py` -> **VALIDATION PASSED** (`7 rules, 7 skills`).
 

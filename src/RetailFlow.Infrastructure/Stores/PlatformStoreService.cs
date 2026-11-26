@@ -33,7 +33,7 @@ public sealed class PlatformStoreService : IPlatformStoreService
             command.Name,
             command.Slug,
             command.StoreType,
-            command.InitialStatus,
+            StoreStatus.PendingApproval,
             DateTimeOffset.UtcNow);
 
         var settings = StoreSettings.Create(

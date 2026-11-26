@@ -108,16 +108,21 @@ public sealed class OwaspApiSecurityIntegrationTests : IClassFixture<CatalogSqlT
             AllowAutoRedirect = false
         });
 
-        // First two API requests succeed (or 404 for unknown slug, still permitted through limiter)
-        using var r1 = await client.GetAsync("/api/stores/nonexistent-rate-1");
-        using var r2 = await client.GetAsync("/api/stores/nonexistent-rate-2");
+        // First two requests to store-a succeed (or 404 for unknown slug, still permitted through limiter)
+        using var r1 = await client.GetAsync("/api/stores/store-rate-a/catalog/categories");
+        using var r2 = await client.GetAsync("/api/stores/store-rate-a/catalog/products");
         Assert.Equal(HttpStatusCode.NotFound, r1.StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, r2.StatusCode);
 
-        // Third API request is throttled with 429 ProblemDetails
-        using var r3 = await client.GetAsync("/api/stores/nonexistent-rate-3");
+        // Third request to store-a is throttled with 429 ProblemDetails + Retry-After
+        using var r3 = await client.GetAsync("/api/stores/store-rate-a");
         Assert.Equal(HttpStatusCode.TooManyRequests, r3.StatusCode);
         Assert.Equal("application/problem+json", r3.Content.Headers.ContentType?.MediaType);
+        Assert.True(r3.Headers.TryGetValues("Retry-After", out _));
+
+        // Separate store-b from the same IP does NOT share store-a's quota (RF-REV-005)
+        using var rOtherStore = await client.GetAsync("/api/stores/store-rate-b");
+        Assert.Equal(HttpStatusCode.NotFound, rOtherStore.StatusCode);
 
         // Health probes remain exempt from rate limiting
         using var health = await client.GetAsync("/health/live");

@@ -219,12 +219,18 @@ public sealed class MerchantCatalogService : IMerchantCatalogService
     {
         ArgumentNullException.ThrowIfNull(command);
 
-        var productExists = await _dbContext.Products
-            .AnyAsync(p => p.Id == productId && p.StoreId == storeId, cancellationToken);
+        var product = await _dbContext.Products
+            .AsNoTracking()
+            .SingleOrDefaultAsync(p => p.Id == productId && p.StoreId == storeId, cancellationToken);
 
-        if (!productExists)
+        if (product is null)
         {
             return null;
+        }
+
+        if (product.Status == ProductStatus.Archived)
+        {
+            throw new InvalidOperationException("Cannot add images to an archived product.");
         }
 
         var image = ProductImage.Create(

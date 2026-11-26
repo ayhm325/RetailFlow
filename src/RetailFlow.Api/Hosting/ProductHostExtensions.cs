@@ -104,7 +104,8 @@ public static class ProductHostExtensions
                         return RateLimitPartition.GetNoLimiter("health");
                     }
 
-                    var partitionKey = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                    var ip = httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                    var partitionKey = BuildRateLimitPartitionKey(httpContext.Request.Path, ip);
                     return RateLimitPartition.GetFixedWindowLimiter(
                         partitionKey,
                         _ => new FixedWindowRateLimiterOptions
@@ -384,6 +385,21 @@ public static class ProductHostExtensions
 
             return ValidateOptionsResult.Success;
         }
+    }
+
+    private static string BuildRateLimitPartitionKey(PathString path, string ip)
+    {
+        if (path.StartsWithSegments("/api/stores", StringComparison.OrdinalIgnoreCase))
+        {
+            var segments = path.Value?.Split('/', StringSplitOptions.RemoveEmptyEntries);
+            if (segments is { Length: >= 3 })
+            {
+                var normalizedSlug = segments[2].Trim().ToLowerInvariant();
+                return $"store:{normalizedSlug}:ip:{ip}";
+            }
+        }
+
+        return $"global:ip:{ip}";
     }
 
     private sealed class RateLimitingOptions

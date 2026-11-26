@@ -1309,8 +1309,7 @@ public sealed class PublicStoreCatalogIntegrationTests : IClassFixture<CatalogSq
                     DeliveryEnabled: true,
                     PickupEnabled: true,
                     PublicAddress: "Amman Blvd",
-                    FulfillmentAddress: "Dock 7",
-                    InitialStatus: StoreStatus.PendingApproval),
+                    FulfillmentAddress: "Dock 7"),
                 CancellationToken.None);
             createdStoreId = created.Id;
 
