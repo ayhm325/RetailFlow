@@ -32,10 +32,12 @@
 
 ## 3. Authorization and tenant boundary
 
-- Policies مسجلة: Customer, MerchantOwner, PlatformAdmin.
+- Policies مسجلة: `Customer`, `MerchantOwner`, `PlatformAdminEnrollment` (يتطلب دور `PlatformAdmin` فقط لإتمام التسجيل الأولي لـ MFA)، و`PlatformAdmin` (يتطلب دور `PlatformAdmin` + `mfa_enrolled=true` + `amr=mfa` عند تفعيل `PlatformSecurity:RequireAdminMfa`).
+- فصل **حالة الحساب** عن **مستوى توثيق الجلسة**: `RetailFlowClaimsPrincipalFactory` يصدر `mfa_enrolled` فقط من حالة قاعدة البيانات (`TwoFactorEnabled` وحالة `Enabled` أو `ReplacementPending`) ولا يصدر `amr=mfa` تلقائياً؛ يُصدر `amr=mfa` فقط عبر `AuthService.SignInSessionAsync` بعد نجاح TOTP أو Recovery Code أو تفعيل MFA، ويحافظ `SecurityStampValidatorOptions.OnRefreshingPrincipal` (`ValidationInterval = TimeSpan.Zero`) على `amr=mfa` فقط إذا كانت الجلسة الأصلية تحمله بالفعل وبقي الحساب مسجلاً بـ MFA.
+- تفعيل MFA أو استبدال أداة المصادقة أو تعطيلها أو إعادة توليد Recovery Codes يحدّث `SecurityStamp` ويبطل بقية الجلسات على الخادم في `SessionTickets` (`SqlSessionTicketStore`).
 - Customer endpoints تتطلب Customer ثم resolve store ثم match `store_id` claim.
 - Merchant endpoints تتطلب MerchantOwner ثم resolve store ثم match `store_id` claim.
-- Platform endpoints تتطلب PlatformAdmin.
+- Platform admin endpoints (`/api/platform/stores/*` وعمليات إدارة MFA بعد التسجيل) تتطلب `PlatformAdmin`.
 - الخدمات نفسها تقيد البيانات باستخدام StoreId.
 
 يجب إجراء مراجعة BOLA لكل endpoint يتعامل مع GUID من العميل، وعدم الاكتفاء بوجود role claim.
@@ -73,6 +75,7 @@
 
 `SessionTickets.Value` تخزن serialized ticket في SQL Server. لا يظهر في `SqlSessionTicketStore` تشفير إضافي مخصص لقيمة العمود. احمِ database access والنسخ الاحتياطية، وراجع حماية Data Protection keys. لا يوجد cleanup worker ظاهر في Product Host للسجلات المنتهية.
 
-## 9. نطاق غير مثبت
+## 9. قيود ونطاق غير مثبت
 
-لم يظهر في Product Host: MFA، password reset، email verification، account lockout/risk-based throttling، session listing/revoke device، refresh token، payment gateway security، audit logging مركزي، CSP/Permissions-Policy، أو سياسة CORS صريحة.
+- التوثيق الثنائي الحالي يعتمد على RFC 6238 TOTP وRecovery Codes أحادية الاستخدام؛ **TOTP ليس مقاوماً للتصيد (Phishing-resistant)** لعدم توفر WebAuthn/FIDO2 Passkeys حالياً (راجع NIST SP 800-63B-4 عند اعتماد مستوى AAL2 الكامل).
+- لم يظهر في Product Host: Passkeys/FIDO2، واجهة عرض/إدارة الأجهزة النشطة للمستخدم، payment gateway security (COD فقط)، أو CSP/Permissions-Policy/CORS صريحة لـ SPA منفصل.

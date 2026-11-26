@@ -71,6 +71,24 @@ public static class ProductHostExtensions
         services.Configure<SecurityStampValidatorOptions>(options =>
         {
             options.ValidationInterval = TimeSpan.Zero;
+            options.OnRefreshingPrincipal = context =>
+            {
+                var currentHadMfa = context.CurrentPrincipal?.HasClaim("amr", "mfa") == true;
+                var newIsEnrolled = string.Equals(
+                    context.NewPrincipal?.FindFirstValue("mfa_enrolled"),
+                    "true",
+                    StringComparison.Ordinal);
+
+                if (currentHadMfa &&
+                    newIsEnrolled &&
+                    context.NewPrincipal?.Identity is ClaimsIdentity newIdentity &&
+                    !newIdentity.HasClaim("amr", "mfa"))
+                {
+                    newIdentity.AddClaim(new Claim("amr", "mfa"));
+                }
+
+                return Task.CompletedTask;
+            };
         });
 
         services.AddAuthorizationBuilder()

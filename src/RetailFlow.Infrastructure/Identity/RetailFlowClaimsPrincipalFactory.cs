@@ -42,12 +42,12 @@ public sealed class RetailFlowClaimsPrincipalFactory
             identity.AddClaim(new Claim("store_id", user.StoreId.Value.ToString()));
         }
 
-        identity.AddClaim(new Claim("mfa_enrolled", user.TwoFactorEnabled ? "true" : "false"));
-        if (user.TwoFactorEnabled)
-        {
-            identity.AddClaim(new Claim("amr", "mfa"));
-        }
+        var mfaEnrolled = user.TwoFactorEnabled &&
+                          user.MfaEnrollmentStatus is MfaEnrollmentStatus.Enabled or MfaEnrollmentStatus.ReplacementPending;
+        identity.AddClaim(new Claim("mfa_enrolled", mfaEnrolled ? "true" : "false"));
 
+        // Never emit amr=mfa from account state alone; amr=mfa is a per-session assurance claim
+        // issued only after MFA verification in that session.
         return identity;
     }
 }

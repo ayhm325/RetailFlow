@@ -1,6 +1,9 @@
 using System.Data;
 using System.Globalization;
+using System.Security.Claims;
 using System.Text.Encodings.Web;
+
+using Microsoft.AspNetCore.Authentication;
 
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Http;
@@ -636,7 +639,7 @@ public sealed class AuthService : IAuthService
 
         if (_httpContextAccessor.HttpContext is not null)
         {
-            await _signInManager.RefreshSignInAsync(user);
+            await SignInSessionAsync(user, isPersistent: true, mfaVerifiedInSession: true, revokeOtherSessions: true);
         }
 
         _logger.LogInformation("Audit: MfaEnabled UserId={UserId}", user.Id);
@@ -704,6 +707,11 @@ public sealed class AuthService : IAuthService
             user.ProtectedPendingAuthenticatorKey = null;
             user.MfaPendingExpiresAtUtc = null;
             await _userManager.UpdateAsync(user);
+            return null;
+        }
+
+        if (user.MfaLockoutEndUtc.HasValue && user.MfaLockoutEndUtc.Value > now)
+        {
             return null;
         }
 
@@ -844,11 +852,17 @@ public sealed class AuthService : IAuthService
             return null;
         }
 
+        var currentHadMfa = _httpContextAccessor.HttpContext?.User?.HasClaim("amr", "mfa") == true;
         await _userManager.UpdateSecurityStampAsync(user);
         var codes = await _userManager.GenerateNewTwoFactorRecoveryCodesAsync(user, 10);
         if (codes is null)
         {
             return null;
+        }
+
+        if (_httpContextAccessor.HttpContext is not null)
+        {
+            await SignInSessionAsync(user, isPersistent: true, mfaVerifiedInSession: currentHadMfa, revokeOtherSessions: true);
         }
 
         _logger.LogInformation("Audit: MfaRecoveryCodesRegenerated UserId={UserId}", user.Id);
@@ -902,6 +916,7 @@ public sealed class AuthService : IAuthService
         await PersistTransparentRehashIfNeededAsync(user, storedHash, command.Password, cancellationToken);
 
         var mfaRequiredForPlatform = role == AppRole.PlatformAdmin && _platformSecurityOptions.RequireAdminMfa;
+        var mfaVerifiedInSession = false;
 
         if (user.TwoFactorEnabled)
         {
@@ -962,13 +977,15 @@ public sealed class AuthService : IAuthService
                 var lockedAfterFailure = user.MfaLockoutEndUtc.HasValue && user.MfaLockoutEndUtc.Value > now;
                 return new AuthSignInResult(lockedAfterFailure ? AuthSignInOutcome.LockedOut : AuthSignInOutcome.RequiresTwoFactor);
             }
+
+            mfaVerifiedInSession = true;
         }
         else if (mfaRequiredForPlatform)
         {
             // PlatformAdmin without MFA receives a restricted enrollment-only session (cannot access /api/platform/stores/*).
             if (_httpContextAccessor.HttpContext is not null)
             {
-                await _signInManager.SignInAsync(user, isPersistent: false);
+                await SignInSessionAsync(user, isPersistent: false, mfaVerifiedInSession: false);
             }
 
             return new AuthSignInResult(
@@ -978,12 +995,29 @@ public sealed class AuthService : IAuthService
 
         if (_httpContextAccessor.HttpContext is not null)
         {
-            await _signInManager.SignInAsync(user, isPersistent: true);
+            await SignInSessionAsync(user, isPersistent: true, mfaVerifiedInSession);
         }
 
         return new AuthSignInResult(
             AuthSignInOutcome.Succeeded,
             new AuthenticatedUserDto(user.Id, user.StoreId, user.Email!, user.DisplayName, role));
+    }
+
+    private Task SignInSessionAsync(
+        RetailFlowIdentityUser user,
+        bool isPersistent,
+        bool mfaVerifiedInSession,
+        bool revokeOtherSessions = false)
+    {
+        var props = new AuthenticationProperties { IsPersistent = isPersistent };
+        if (revokeOtherSessions)
+        {
+            props.Items["rf_revoke_other_sessions"] = "true";
+        }
+
+        return mfaVerifiedInSession
+            ? _signInManager.SignInWithClaimsAsync(user, props, [new Claim("amr", "mfa")])
+            : _signInManager.SignInAsync(user, props);
     }
 
     private async Task<bool> VerifyStepUpCredentialsAsync(
