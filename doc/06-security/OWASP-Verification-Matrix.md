@@ -6,8 +6,8 @@
 |---|---|---|---|
 | Authentication | Cookie auth, PBKDF2-HMAC-SHA512 (`RetailFlowPasswordHasher`), `PlatformAdmin` mandatory TOTP MFA (`RequireAdminMfa=true`), replay protection, lockout (`5`/`15m`), single-use recovery codes | Verified (Code + SQL Tests; TOTP only) | تقييم إضافة WebAuthn/Passkeys لمقاومة Phishing (NIST AAL2) وتفعيل SMTP الإنتاجي |
 | Session management | `__Host-` secure HttpOnly Lax cookie + `SqlSessionTicketStore` (idle/absolute timeout) + per-session `amr=mfa` + `ValidationInterval=Zero` + server-side ticket revocation | Verified (SQL Tests) | إضافة background cleanup للـ expired `SessionTickets` ومراقبة الأداء |
-| Authorization | `PlatformAdmin` (`mfa_enrolled=true`, `amr=mfa`) vs `PlatformAdminEnrollment`, role policies, tenant `store_id` claim match filters | Verified (Covered Routes) | مراجعة دورية لأي endpoints جديدة وإتمام اختبارات BOLA لكل nested ID |
-| BOLA / API1 | tenant-scoped service queries + integration tests | Tested for covered cases | وسّع الاختبارات لكل route وnested identifier |
+| Authorization | `PlatformAdmin` (`mfa_enrolled=true`, `amr=mfa`) vs `PlatformAdminEnrollment`, role policies, tenant `store_id` claim match filters, BFLA matrix | Verified (`AuthorizationAndTenantIsolationTests`, `PlatformAdminMfaHardeningTests`) | مراجعة دورية لأي endpoints جديدة |
+| BOLA / API1 & BOPLA / API3 | tenant-scoped & customer-scoped queries, positional command records, SQL Server tests for nested IDs & over-posting | Verified (`AuthorizationAndTenantIsolationTests`, `OwaspApiSecurityIntegrationTests`) | توسيع التغطية عند إضافة أي endpoints أو DTOs جديدة |
 | CSRF | `X-CSRF: 1` on authenticated unsafe methods | Partial / Review Required | استخدم token/Origin defense مضبوطاً، اختبر login and cross-site requests |
 | API resource consumption / API4 | global fixed-window rate limiter | Partial | سياسات أكثر دقة للـ auth/checkout/search وbody/size limits |
 | Security misconfiguration / API8 | HSTS, HTTPS redirect, host filtering, security headers | Partial | إعداد production `AllowedHosts`, proxy trust, CORS, CSP as applicable |
