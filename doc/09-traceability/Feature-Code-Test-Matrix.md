@@ -18,7 +18,7 @@
 | OBS-016 | Customer orders | Customer order routes | `OrderService`, `Order`, `OrderStateConflictException`, `OrderConcurrencyConflictException`, `RetailFlowExceptionHandler` | Orders/Items/History | `EndToEndCommerceAuthIntegrationTests`, `OrderLifecycleConflictTests`, `OrderDomainTests` |
 | OBS-017 | Merchant order actions | Merchant order routes | `OrderService`, `Order`, `OrderStateConflictException`, `OrderConcurrencyConflictException`, `RetailFlowExceptionHandler` | Orders/Items/History/Inventory | `EndToEndCommerceAuthIntegrationTests`, `OrderLifecycleConflictTests`, `CartAndOrderValidationTests`, `OrderDomainTests` |
 | OBS-018 | Health/OpenAPI | Host endpoints | `DatabaseReadinessHealthCheck` | SQL connection | `ProductHostIntegrationTests`, `PublicStoreCatalogIntegrationTests` |
-| OBS-019 | Security controls | Host middleware | `ProductHostExtensions` | n/a | `OwaspApiSecurityIntegrationTests`, ProductHost tests |
+| OBS-019 | Security controls & AuthZ/BOLA | Host middleware, endpoint filters, scoped services | `ProductHostExtensions`, `TenantClaimMatchEndpointFilter`, `ScopedUserStore` | `AspNetUsers`, `Stores`, `Orders`, `Products` | `AuthorizationAndTenantIsolationTests`, `OwaspApiSecurityIntegrationTests`, `ProductHostIntegrationTests` |
 
 ## Coverage interpretation
 

@@ -38,9 +38,8 @@
 - Customer endpoints تتطلب Customer ثم resolve store ثم match `store_id` claim.
 - Merchant endpoints تتطلب MerchantOwner ثم resolve store ثم match `store_id` claim.
 - Platform admin endpoints (`/api/platform/stores/*` وعمليات إدارة MFA بعد التسجيل) تتطلب `PlatformAdmin`.
-- الخدمات نفسها تقيد البيانات باستخدام StoreId.
-
-يجب إجراء مراجعة BOLA لكل endpoint يتعامل مع GUID من العميل، وعدم الاكتفاء بوجود role claim.
+- Services نفسها تقيد البيانات باستخدام StoreId (+ `CustomerId` في السلة وطلبات العميل).
+- تم التحقق من مصفوفة BFLA (Customer/MerchantOwner/PlatformAdmin) وBOLA عبر المتاجر وداخل نفس المتجر والمعرّفات المتداخلة (`zoneId`, `categoryId`, `productId`, `imageId`, `orderId`) وBOPLA (`AuthorizationAndTenantIsolationTests` على SQL Server).
 
 ## 4. CSRF behavior الملحوظ
 
