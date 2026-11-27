@@ -181,4 +181,26 @@ public sealed class OrderDomainTests
         Assert.Equal(0, item.Reserved);
         Assert.Equal(3, item.OnHand);
     }
+
+    [Fact]
+    public void InventoryItem_SetOnHand_EnforcesNonNegativeAndReservedFloor()
+    {
+        var item = InventoryItem.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), onHand: 10, reserved: 4);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => item.SetOnHand(-1));
+        Assert.Equal(10, item.OnHand);
+        Assert.Equal(4, item.Reserved);
+
+        var belowEx = Assert.Throws<InventoryOnHandBelowReservedException>(() => item.SetOnHand(3));
+        Assert.Equal(item.Id, belowEx.InventoryItemId);
+        Assert.Equal(item.ProductId, belowEx.ProductId);
+        Assert.Equal(3, belowEx.RequestedOnHand);
+        Assert.Equal(4, belowEx.ReservedQuantity);
+        Assert.Equal(10, item.OnHand);
+        Assert.Equal(4, item.Reserved);
+
+        item.SetOnHand(12);
+        Assert.Equal(12, item.OnHand);
+        Assert.Equal(4, item.Reserved);
+    }
 }

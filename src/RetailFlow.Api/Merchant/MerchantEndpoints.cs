@@ -129,10 +129,29 @@ public static class MerchantEndpoints
         group.MapPut("/products/{productId:guid}/inventory", async Task<IResult> (
             Guid productId,
             SetInventoryRequest request,
+            HttpContext httpContext,
             IStoreRequestContextAccessor accessor,
             IMerchantCatalogService catalogService,
             CancellationToken ct) =>
         {
+            if (request.OnHand < 0)
+            {
+                return TypedResults.ValidationProblem(
+                    errors: new Dictionary<string, string[]>
+                    {
+                        ["OnHand"] = ["OnHand cannot be negative."]
+                    },
+                    detail: "One or more validation errors occurred.",
+                    instance: httpContext.Request.Path,
+                    title: "Validation Failed",
+                    type: "about:blank",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["code"] = "validation_error",
+                        ["traceId"] = System.Diagnostics.Activity.Current?.Id ?? httpContext.TraceIdentifier
+                    });
+            }
+
             var ok = await catalogService.SetInventoryOnHandAsync(accessor.Current!.StoreId, productId, request.OnHand, ct);
             return ok ? TypedResults.NoContent() : TypedResults.NotFound();
         });

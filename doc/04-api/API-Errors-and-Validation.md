@@ -7,11 +7,11 @@
 | 200 | نجاح قراءة أو عملية تُرجع DTO |
 | 201 | إنشاء Customer/Store/Product/Order أو موارد أخرى |
 | 204 | نجاح update/delete/action بدون body |
-| 400 | query validation أو checkout validation |
+| 400 | query validation أو checkout validation أو inventory negative `OnHand` (`validation_error`) |
 | 401 | بيانات دخول غير صحيحة أو مستخدم غير مصادق |
 | 403 | Authorization أو tenant mismatch أو CSRF marker missing |
 | 404 | متجر غير نشط/غير موجود أو مورد لا يخص المتجر |
-| 409 | Checkout in progress / concurrency or order state conflict (`checkout_concurrent_in_flight`, `checkout_concurrency_conflict`, `cart_concurrency_conflict`, `order_state_conflict`, `order_concurrency_conflict`) |
+| 409 | Checkout in progress / concurrency, order state, or inventory conflict (`checkout_concurrent_in_flight`, `checkout_concurrency_conflict`, `cart_concurrency_conflict`, `order_state_conflict`, `order_concurrency_conflict`, `inventory_reservation_conflict`, `inventory_concurrency_conflict`) |
 | 412 | فشل شرط `If-Match` على Cart (`cart_concurrency_conflict`) |
 | 422 | Idempotency key reused with a different request hash (`checkout_payload_mismatch`) أو فشل قاعدة عمل في Checkout (`checkout_business_rule_failed`) |
 | 429 | Rate limit exceeded |

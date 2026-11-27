@@ -22,6 +22,7 @@
 | GAP-016 | **Deferred — Documented Decision** | الدفع COD فقط في MVP (لا بوابة دفع إلكتروني ولا Refund) | `Order.cs`, `ADR-0005` | قرار منتج معتمد للـ MVP |
 | GAP-017 | **Verified — Tests Passed** | `StoreSettings.FulfillmentAddress` مستبعد من `PublicStoreIdentityDto` ومختبر | `PublicCatalogQueryService.cs` + `PublicStoreCatalogIntegrationTests` | تم التحقق محلياً |
 | GAP-018 | **Open** | لا توجد اختبارات حمل/أداء (k6/NBomber) لقياس P95/P99 وCookie DB lookup وCheckout concurrency | `doc/07-quality/Testing-Strategy.md` | مطلوب قبل الإطلاق الإنتاجي |
+| AUD-002 | **Verified — Tests Passed** | تعديل المخزون (`SetInventoryOnHandAsync`) يميز `InventoryOnHandBelowReservedException` (`409 inventory_reservation_conflict`) و`InventoryConcurrencyConflictException` (`409 inventory_concurrency_conflict`) مع تحقق `OnHand < 0` (`400 validation_error`) دون كشف `500` أو فقدان تحديثات `RowVersion` | `InventoryItem.cs`, `MerchantCatalogService.cs`, `MerchantEndpoints.cs`, `RetailFlowExceptionHandler.cs`, `InventoryAdjustmentTests`, `OrderDomainTests`, `DomainInvariantsTests` | تم التحقق محلياً على SQL Server (`5/5` integration + `13/13` unit) |
 
 ## قرارات مالك المنتج المفتوحة والملاحظات البرمجية المؤجلة
 
