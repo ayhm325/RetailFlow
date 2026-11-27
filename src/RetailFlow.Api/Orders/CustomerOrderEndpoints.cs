@@ -42,6 +42,24 @@ public static class CustomerOrderEndpoints
             ICartService cartService,
             CancellationToken ct) =>
         {
+            if (command.Quantity <= 0)
+            {
+                return TypedResults.ValidationProblem(
+                    errors: new Dictionary<string, string[]>
+                    {
+                        ["Quantity"] = ["Quantity must be greater than zero."]
+                    },
+                    detail: "One or more validation errors occurred.",
+                    instance: request.Path,
+                    title: "Validation Failed",
+                    type: "about:blank",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["code"] = "validation_error",
+                        ["traceId"] = System.Diagnostics.Activity.Current?.Id ?? request.HttpContext.TraceIdentifier
+                    });
+            }
+
             var customerId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
             var expectedVersion = ParseIfMatchVersion(request);
             try
@@ -49,6 +67,20 @@ public static class CustomerOrderEndpoints
                 var cart = await cartService.UpsertItemAsync(accessor.Current!.StoreId, customerId, command, ct, expectedVersion);
                 SetCartETag(response, cart.Version);
                 return TypedResults.Ok(cart);
+            }
+            catch (CartProductUnavailableException)
+            {
+                return TypedResults.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Product Unavailable",
+                    detail: "The requested product is unavailable.",
+                    type: "about:blank",
+                    instance: request.Path,
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["code"] = "product_unavailable",
+                        ["traceId"] = System.Diagnostics.Activity.Current?.Id ?? request.HttpContext.TraceIdentifier
+                    });
             }
             catch (CartConcurrencyConflictException ex)
             {

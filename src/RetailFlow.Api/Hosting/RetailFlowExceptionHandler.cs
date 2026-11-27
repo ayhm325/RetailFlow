@@ -5,7 +5,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
+using RetailFlow.Application.Catalog;
 using RetailFlow.Application.Orders;
+using RetailFlow.Domain.Inventory;
 using RetailFlow.Domain.Orders;
 
 namespace RetailFlow.Api.Hosting;
@@ -60,6 +62,32 @@ public sealed class RetailFlowExceptionHandler : IExceptionHandler
                 "Conflict",
                 "The order or its inventory changed while the operation was in progress. Refresh the order and retry if appropriate.",
                 "order_concurrency_conflict",
+                traceId,
+                isWarning: true);
+        }
+
+        if (exception is InventoryOnHandBelowReservedException)
+        {
+            return await WriteProblemDetailsAsync(
+                httpContext,
+                exception,
+                StatusCodes.Status409Conflict,
+                "Conflict",
+                "The requested on-hand quantity cannot be lower than the currently reserved quantity.",
+                "inventory_reservation_conflict",
+                traceId,
+                isWarning: true);
+        }
+
+        if (exception is InventoryConcurrencyConflictException)
+        {
+            return await WriteProblemDetailsAsync(
+                httpContext,
+                exception,
+                StatusCodes.Status409Conflict,
+                "Conflict",
+                "Inventory changed while the update was in progress. Refresh the inventory and retry.",
+                "inventory_concurrency_conflict",
                 traceId,
                 isWarning: true);
         }

@@ -182,8 +182,8 @@ public sealed class DomainInvariantsTests
         Assert.Equal(4, item.OnHand);
         Assert.Equal(0, item.Available);
 
-        Assert.Throws<InvalidOperationException>(() => item.SetOnHand(3));
-        Assert.Throws<InvalidOperationException>(() => item.AdjustOnHand(-1));
+        Assert.Throws<InventoryOnHandBelowReservedException>(() => item.SetOnHand(3));
+        Assert.Throws<InventoryOnHandBelowReservedException>(() => item.AdjustOnHand(-1));
         Assert.Throws<ArgumentOutOfRangeException>(() => item.SetOnHand(-1));
     }
 

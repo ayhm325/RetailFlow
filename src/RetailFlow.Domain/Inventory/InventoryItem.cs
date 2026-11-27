@@ -87,8 +87,7 @@ public sealed class InventoryItem
 
         if (newOnHand < Reserved)
         {
-            throw new InvalidOperationException(
-                $"OnHand ({newOnHand}) cannot be less than Reserved ({Reserved}).");
+            throw new InventoryOnHandBelowReservedException(Id, ProductId, newOnHand, Reserved);
         }
 
         OnHand = newOnHand;
