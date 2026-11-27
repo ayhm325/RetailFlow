@@ -220,11 +220,12 @@ public sealed class OrderLifecycleConflictTests : IClassFixture<CatalogSqlTestFi
 
         using var document = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
         var root = document.RootElement;
+        Assert.Equal("about:blank", root.GetProperty("type").GetString());
+        Assert.Equal("Conflict", root.GetProperty("title").GetString());
         Assert.Equal(409, root.GetProperty("status").GetInt32());
         Assert.Equal(expectedCode, root.GetProperty("code").GetString());
         Assert.Equal(expectedInstance, root.GetProperty("instance").GetString());
         Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("traceId").GetString()));
-        Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("title").GetString()));
         Assert.False(string.IsNullOrWhiteSpace(root.GetProperty("detail").GetString()));
     }
 

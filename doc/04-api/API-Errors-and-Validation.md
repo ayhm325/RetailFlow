@@ -22,7 +22,7 @@
 
 Product Host يسجل `AddProblemDetails`. في Production يمر عبر `UseExceptionHandler()`، ويحوّل RateLimiter وبعض المسارات أخطاءها إلى ProblemDetails. بعض handlers تبني `TypedResults.Problem` أو `ValidationProblem` مباشرة.
 
-تُحوَّل استثناءات تعارض دورة حياة الطلب (`OrderStateConflictException` -> `order_state_conflict` و`OrderConcurrencyConflictException` -> `order_concurrency_conflict`) مركزياً عبر `RetailFlowExceptionHandler` إلى `409 Conflict` بصيغة ProblemDetails، بينما تبقى الاستثناءات غير المتوقعة الأخرى `500`/`503`. يُنصح باختبار كل مسار ورصد status codes الفعلية من `WebApplicationFactory`.
+تُحوَّل استثناءات تعارض دورة حياة الطلب (`OrderStateConflictException` -> `order_state_conflict` و`OrderConcurrencyConflictException` -> `order_concurrency_conflict`) مركزياً عبر `RetailFlowExceptionHandler` إلى `409 Conflict` بصيغة RFC 9457 ProblemDetails (`type: "about:blank"`, `title: "Conflict"`, `code`, `detail`, `instance`, `traceId`)، بينما تبقى الاستثناءات غير المتوقعة الأخرى `500`/`503`. يُنصح باختبار كل مسار ورصد status codes الفعلية من `WebApplicationFactory`.
 
 ## Validation sources
 
