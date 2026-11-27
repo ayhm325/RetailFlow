@@ -11,7 +11,7 @@
 | 401 | بيانات دخول غير صحيحة أو مستخدم غير مصادق |
 | 403 | Authorization أو tenant mismatch أو CSRF marker missing |
 | 404 | متجر غير نشط/غير موجود أو مورد لا يخص المتجر |
-| 409 | Checkout in progress / concurrency conflict (`checkout_concurrent_in_flight`, `checkout_concurrency_conflict`, `cart_concurrency_conflict`) |
+| 409 | Checkout in progress / concurrency or order state conflict (`checkout_concurrent_in_flight`, `checkout_concurrency_conflict`, `cart_concurrency_conflict`, `order_state_conflict`, `order_concurrency_conflict`) |
 | 412 | فشل شرط `If-Match` على Cart (`cart_concurrency_conflict`) |
 | 422 | Idempotency key reused with a different request hash (`checkout_payload_mismatch`) أو فشل قاعدة عمل في Checkout (`checkout_business_rule_failed`) |
 | 429 | Rate limit exceeded |
@@ -22,7 +22,7 @@
 
 Product Host يسجل `AddProblemDetails`. في Production يمر عبر `UseExceptionHandler()`، ويحوّل RateLimiter وبعض المسارات أخطاءها إلى ProblemDetails. بعض handlers تبني `TypedResults.Problem` أو `ValidationProblem` مباشرة.
 
-لا تفترض أن كل exception في كل Service يتم تحويله إلى نفس response shape؛ أمثلة الـ merchant endpoints لا تحتوي معالجة موحدة محلية لجميع Domain exceptions. يجب اختبار كل مسار ورسم status codes الفعلية من WebApplicationFactory.
+تُحوَّل استثناءات تعارض دورة حياة الطلب (`OrderStateConflictException` -> `order_state_conflict` و`OrderConcurrencyConflictException` -> `order_concurrency_conflict`) مركزياً عبر `RetailFlowExceptionHandler` إلى `409 Conflict` بصيغة RFC 9457 ProblemDetails (`type: "about:blank"`, `title: "Conflict"`, `code`, `detail`, `instance`, `traceId`)، بينما تبقى الاستثناءات غير المتوقعة الأخرى `500`/`503`. يُنصح باختبار كل مسار ورصد status codes الفعلية من `WebApplicationFactory`.
 
 ## Validation sources
 

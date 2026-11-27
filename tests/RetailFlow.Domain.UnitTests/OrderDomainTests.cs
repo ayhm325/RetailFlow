@@ -44,15 +44,15 @@ public sealed class OrderDomainTests
         Assert.Equal(now.AddMinutes(15), order.ReservationExpiresAtUtc); // OD-001
 
         // Cannot advance fulfillment or collect COD before Confirm
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<OrderStateConflictException>(() =>
             order.AdvanceFulfillment(merchantId, "MerchantOwner", FulfillmentStatus.Preparing, now.AddMinutes(1)));
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<OrderStateConflictException>(() =>
             order.CollectCodPayment(merchantId, "MerchantOwner", now.AddMinutes(1)));
 
         order.Confirm(merchantId, "MerchantOwner", now.AddMinutes(1));
 
         // OD-002: Customer cannot self-cancel after Pending
-        Assert.Throws<InvalidOperationException>(() =>
+        Assert.Throws<OrderStateConflictException>(() =>
             order.CancelByCustomer(customerId, "Changed mind", now.AddMinutes(2)));
 
         order.AdvanceFulfillment(merchantId, "MerchantOwner", FulfillmentStatus.Preparing, now.AddMinutes(2));
@@ -90,14 +90,76 @@ public sealed class OrderDomainTests
             null,
             now);
 
-        Assert.Throws<InvalidOperationException>(() =>
+        var wrongCustomerEx = Assert.Throws<InvalidOperationException>(() =>
             order.CancelByCustomer(Guid.NewGuid(), "Wrong actor", now.AddMinutes(1)));
+        Assert.IsNotType<OrderStateConflictException>(wrongCustomerEx);
 
         order.CancelByCustomer(customerId, "No longer needed", now.AddMinutes(1));
 
         Assert.Equal(OrderStatus.Cancelled, order.OrderStatus);
         Assert.Equal(FulfillmentStatus.Cancelled, order.FulfillmentStatus);
         Assert.Equal(PaymentStatus.Voided, order.PaymentStatus);
+    }
+
+    [Fact]
+    public void Order_InvalidStateTransitions_ThrowOrderStateConflictException()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var store = Store.Create(Guid.NewGuid(), "Roastery", "roastery", StoreType.Physical, StoreStatus.Active, now);
+        var settings = StoreSettings.Create(Guid.NewGuid(), store, Jod, "Asia/Amman", deliveryEnabled: true, pickupEnabled: true);
+        var orderId = Guid.NewGuid();
+        var customerId = Guid.NewGuid();
+        var merchantId = Guid.NewGuid();
+
+        var order = Order.Create(
+            orderId,
+            store,
+            settings,
+            Jod,
+            customerId,
+            "ORD-1003",
+            FulfillmentMode.Delivery,
+            [OrderItem.Create(Guid.NewGuid(), store.Id, orderId, Guid.NewGuid(), "Beans", "BN-1", 10.000m, 1, Jod)],
+            2.000m,
+            Guid.NewGuid(),
+            "West Amman",
+            "Rainbow St 10",
+            now);
+
+        order.Confirm(merchantId, "MerchantOwner", now.AddMinutes(1));
+
+        // Duplicate Confirm
+        Assert.Throws<OrderStateConflictException>(() =>
+            order.Confirm(merchantId, "MerchantOwner", now.AddMinutes(2)));
+
+        // Reject after Confirm
+        Assert.Throws<OrderStateConflictException>(() =>
+            order.Reject(merchantId, "MerchantOwner", "Out of stock", now.AddMinutes(2)));
+
+        // Invalid fulfillment transition (skipping Preparing / wrong mode)
+        Assert.Throws<OrderStateConflictException>(() =>
+            order.AdvanceFulfillment(merchantId, "MerchantOwner", FulfillmentStatus.Delivered, now.AddMinutes(2)));
+        Assert.Throws<OrderStateConflictException>(() =>
+            order.AdvanceFulfillment(merchantId, "MerchantOwner", FulfillmentStatus.ReadyForPickup, now.AddMinutes(2)));
+
+        // Collect COD before Delivered/PickedUp
+        order.AdvanceFulfillment(merchantId, "MerchantOwner", FulfillmentStatus.Preparing, now.AddMinutes(2));
+        Assert.Throws<OrderStateConflictException>(() =>
+            order.CollectCodPayment(merchantId, "MerchantOwner", now.AddMinutes(3)));
+
+        // Complete delivery and collect COD
+        order.AdvanceFulfillment(merchantId, "MerchantOwner", FulfillmentStatus.OutForDelivery, now.AddMinutes(4));
+        order.AdvanceFulfillment(merchantId, "MerchantOwner", FulfillmentStatus.Delivered, now.AddMinutes(5));
+
+        // Cannot cancel after Delivered
+        Assert.Throws<OrderStateConflictException>(() =>
+            order.CancelByMerchantOrTimeout(merchantId, "MerchantOwner", "Too late", now.AddMinutes(6)));
+
+        order.CollectCodPayment(merchantId, "MerchantOwner", now.AddMinutes(6));
+
+        // Duplicate COD collection (OrderStatus is Completed, PaymentStatus is Collected)
+        Assert.Throws<OrderStateConflictException>(() =>
+            order.CollectCodPayment(merchantId, "MerchantOwner", now.AddMinutes(7)));
     }
 
     [Fact]

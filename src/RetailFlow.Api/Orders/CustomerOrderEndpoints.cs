@@ -194,15 +194,8 @@ public static class CustomerOrderEndpoints
             }
 
             var customerId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            try
-            {
-                var order = await orderService.CancelByCustomerAsync(accessor.Current!.StoreId, customerId, orderId, request?.Reason, ct);
-                return order is null ? TypedResults.NotFound() : TypedResults.Ok(order);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return TypedResults.Problem(statusCode: StatusCodes.Status409Conflict, title: "Cancellation Not Allowed", detail: ex.Message);
-            }
+            var order = await orderService.CancelByCustomerAsync(accessor.Current!.StoreId, customerId, orderId, request?.Reason, ct);
+            return order is null ? TypedResults.NotFound() : TypedResults.Ok(order);
         });
 
         return app;

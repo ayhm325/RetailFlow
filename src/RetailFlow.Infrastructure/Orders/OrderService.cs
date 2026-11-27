@@ -99,7 +99,7 @@ public sealed class OrderService : IOrderService
 
         order.CancelByCustomer(customerId, reason, _timeProvider.GetUtcNow());
         await ReleaseOrderReservationsAsync(order, cancellationToken);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await SaveOrderChangesAsync(storeId, orderId, nameof(CancelByCustomerAsync), cancellationToken);
 
         return Map(order);
     }
@@ -135,7 +135,7 @@ public sealed class OrderService : IOrderService
         }
 
         order.Confirm(actorUserId, "MerchantOwner", _timeProvider.GetUtcNow());
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await SaveOrderChangesAsync(storeId, orderId, nameof(ConfirmOrderAsync), cancellationToken);
         return Map(order);
     }
 
@@ -159,7 +159,7 @@ public sealed class OrderService : IOrderService
 
         order.Reject(actorUserId, "MerchantOwner", reason, _timeProvider.GetUtcNow());
         await ReleaseOrderReservationsAsync(order, cancellationToken);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await SaveOrderChangesAsync(storeId, orderId, nameof(RejectOrderAsync), cancellationToken);
 
         return Map(order);
     }
@@ -183,7 +183,7 @@ public sealed class OrderService : IOrderService
         }
 
         order.AdvanceFulfillment(actorUserId, "MerchantOwner", nextStatus, _timeProvider.GetUtcNow());
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await SaveOrderChangesAsync(storeId, orderId, nameof(AdvanceFulfillmentAsync), cancellationToken);
         return Map(order);
     }
 
@@ -206,7 +206,7 @@ public sealed class OrderService : IOrderService
 
         order.CollectCodPayment(actorUserId, "MerchantOwner", _timeProvider.GetUtcNow());
         await CommitOrderReservationsAsync(order, cancellationToken);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        await SaveOrderChangesAsync(storeId, orderId, nameof(CollectCodPaymentAsync), cancellationToken);
 
         return Map(order);
     }
@@ -393,6 +393,34 @@ public sealed class OrderService : IOrderService
             totalCount,
             totalPages,
             orders.Select(Map).ToList());
+    }
+
+    private async Task SaveOrderChangesAsync(
+        Guid storeId,
+        Guid orderId,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _dbContext.ChangeTracker.Clear();
+
+            _logger.LogWarning(
+                ex,
+                "OrderConcurrencyConflict StoreId={StoreId} OrderId={OrderId} Operation={Operation}",
+                storeId,
+                orderId,
+                operation);
+
+            throw new OrderConcurrencyConflictException(
+                orderId,
+                operation,
+                ex);
+        }
     }
 
     private static async Task ReleaseOrderReservationsAsync(

@@ -5,6 +5,9 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 
+using RetailFlow.Application.Orders;
+using RetailFlow.Domain.Orders;
+
 namespace RetailFlow.Api.Hosting;
 
 /// <summary>
@@ -34,17 +37,80 @@ public sealed class RetailFlowExceptionHandler : IExceptionHandler
         }
 
         var traceId = Activity.Current?.Id ?? httpContext.TraceIdentifier;
+
+        if (exception is OrderStateConflictException)
+        {
+            return await WriteProblemDetailsAsync(
+                httpContext,
+                exception,
+                StatusCodes.Status409Conflict,
+                "Conflict",
+                "The requested operation is not valid for the current order state. Refresh the order and try again.",
+                "order_state_conflict",
+                traceId,
+                isWarning: true);
+        }
+
+        if (exception is OrderConcurrencyConflictException)
+        {
+            return await WriteProblemDetailsAsync(
+                httpContext,
+                exception,
+                StatusCodes.Status409Conflict,
+                "Conflict",
+                "The order or its inventory changed while the operation was in progress. Refresh the order and retry if appropriate.",
+                "order_concurrency_conflict",
+                traceId,
+                isWarning: true);
+        }
+
         var isTransientDb = IsTransientDatabaseFailure(exception);
         var status = isTransientDb ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status500InternalServerError;
         var code = isTransientDb ? "service_unavailable" : "internal_server_error";
 
-        _logger.LogError(
+        return await WriteProblemDetailsAsync(
+            httpContext,
             exception,
-            "Unhandled exception mapped to HTTP {StatusCode} Code={ErrorCode} TraceId={TraceId} Path={Path}.",
             status,
+            isTransientDb ? "Service Temporarily Unavailable" : "An unexpected error occurred",
+            isTransientDb
+                ? "A required dependency is temporarily unavailable. Please retry shortly."
+                : "An unexpected internal error occurred while processing the request.",
             code,
             traceId,
-            httpContext.Request.Path);
+            isWarning: false);
+    }
+
+    private async ValueTask<bool> WriteProblemDetailsAsync(
+        HttpContext httpContext,
+        Exception exception,
+        int status,
+        string title,
+        string detail,
+        string code,
+        string traceId,
+        bool isWarning)
+    {
+        if (isWarning)
+        {
+            _logger.LogWarning(
+                exception,
+                "Handled conflict exception mapped to HTTP {StatusCode} Code={ErrorCode} TraceId={TraceId} Path={Path}.",
+                status,
+                code,
+                traceId,
+                httpContext.Request.Path);
+        }
+        else
+        {
+            _logger.LogError(
+                exception,
+                "Unhandled exception mapped to HTTP {StatusCode} Code={ErrorCode} TraceId={TraceId} Path={Path}.",
+                status,
+                code,
+                traceId,
+                httpContext.Request.Path);
+        }
 
         httpContext.Response.StatusCode = status;
         var problemDetailsService = httpContext.RequestServices.GetService<IProblemDetailsService>();
@@ -56,11 +122,10 @@ public sealed class RetailFlowExceptionHandler : IExceptionHandler
                 Exception = exception,
                 ProblemDetails = new ProblemDetails
                 {
+                    Type = "about:blank",
                     Status = status,
-                    Title = isTransientDb ? "Service Temporarily Unavailable" : "An unexpected error occurred",
-                    Detail = isTransientDb
-                        ? "A required dependency is temporarily unavailable. Please retry shortly."
-                        : "An unexpected internal error occurred while processing the request.",
+                    Title = title,
+                    Detail = detail,
                     Instance = httpContext.Request.Path,
                     Extensions =
                     {
