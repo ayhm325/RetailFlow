@@ -105,7 +105,7 @@ public sealed class CartService : ICartService
 
         if (!productValid)
         {
-            throw new InvalidOperationException("Product is unavailable or does not belong to this store.");
+            throw new CartProductUnavailableException();
         }
 
         var hasExpectedVersion = !string.IsNullOrWhiteSpace(expectedVersion) &&

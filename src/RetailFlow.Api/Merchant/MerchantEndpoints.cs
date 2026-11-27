@@ -11,7 +11,7 @@ namespace RetailFlow.Api.Merchant;
 public static class MerchantEndpoints
 {
     public sealed record SetInventoryRequest(int OnHand);
-    public sealed record RejectOrderRequest(string Reason);
+    public sealed record RejectOrderRequest(string? Reason);
     public sealed record AdvanceFulfillmentRequest(FulfillmentStatus NextStatus);
 
     public static WebApplication MapMerchantEndpoints(this WebApplication app)
@@ -208,11 +208,30 @@ public static class MerchantEndpoints
         group.MapPost("/orders/{orderId:guid}/reject", async Task<IResult> (
             Guid orderId,
             RejectOrderRequest request,
+            HttpContext httpContext,
             ClaimsPrincipal user,
             IStoreRequestContextAccessor accessor,
             IOrderService orderService,
             CancellationToken ct) =>
         {
+            if (string.IsNullOrWhiteSpace(request.Reason))
+            {
+                return TypedResults.ValidationProblem(
+                    errors: new Dictionary<string, string[]>
+                    {
+                        ["Reason"] = ["Rejection reason is required."]
+                    },
+                    detail: "One or more validation errors occurred.",
+                    instance: httpContext.Request.Path,
+                    title: "Validation Failed",
+                    type: "about:blank",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["code"] = "validation_error",
+                        ["traceId"] = System.Diagnostics.Activity.Current?.Id ?? httpContext.TraceIdentifier
+                    });
+            }
+
             var actorId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
             var order = await orderService.RejectOrderAsync(accessor.Current!.StoreId, actorId, orderId, request.Reason, ct);
             return order is null ? TypedResults.NotFound() : TypedResults.Ok(order);
