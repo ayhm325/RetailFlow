@@ -7,11 +7,11 @@
 | 200 | نجاح قراءة أو عملية تُرجع DTO |
 | 201 | إنشاء Customer/Store/Product/Order أو موارد أخرى |
 | 204 | نجاح update/delete/action بدون body |
-| 400 | query validation أو checkout validation |
+| 400 | query validation، checkout validation، inventory negative `OnHand`، cart `Quantity <= 0`، أو merchant order reject `Reason` الفارغ (`validation_error`) |
 | 401 | بيانات دخول غير صحيحة أو مستخدم غير مصادق |
 | 403 | Authorization أو tenant mismatch أو CSRF marker missing |
-| 404 | متجر غير نشط/غير موجود أو مورد لا يخص المتجر |
-| 409 | Checkout in progress / concurrency or order state conflict (`checkout_concurrent_in_flight`, `checkout_concurrency_conflict`, `cart_concurrency_conflict`, `order_state_conflict`, `order_concurrency_conflict`) |
+| 404 | متجر غير نشط/غير موجود، مورد لا يخص المتجر، أو منتج غير متاح في السلة (`product_unavailable`) |
+| 409 | Checkout in progress / concurrency, order state, or inventory conflict (`checkout_concurrent_in_flight`, `checkout_concurrency_conflict`, `cart_concurrency_conflict`, `order_state_conflict`, `order_concurrency_conflict`, `inventory_reservation_conflict`, `inventory_concurrency_conflict`) |
 | 412 | فشل شرط `If-Match` على Cart (`cart_concurrency_conflict`) |
 | 422 | Idempotency key reused with a different request hash (`checkout_payload_mismatch`) أو فشل قاعدة عمل في Checkout (`checkout_business_rule_failed`) |
 | 429 | Rate limit exceeded |
@@ -28,7 +28,8 @@ Product Host يسجل `AddProblemDetails`. في Production يمر عبر `UseExc
 
 - Catalog query validation: page>=1، pageSize 1..50، search<=100، sort من allowlist.
 - Product domain: اسم مطلوب، سعر غير سالب، عملة/دقة مبلغ صحيحة، CategoryId غير فارغ.
-- Cart: quantity > 0.
+- Cart: `quantity > 0` (يرد Endpoint بـ `400 validation_error` قبل استدعاء الخدمة)، وتوحيد عدم توفر المنتج أو انتمائه لمتجر آخر بـ `404 product_unavailable`.
+- Merchant order rejection: التحقق من `Reason` (`string.IsNullOrWhiteSpace`) في Endpoint قبل البحث عن الطلب (`400 validation_error` تسبق `404`/`409`).
 - Checkout: `Idempotency-Key` مطلوب وبحد أقصى 128 حرفاً.
 - ProductImage: absolute HTTP/HTTPS URL وحدود طول.
 - Store/DeliveryZone: قيود على الحقول والرسوم والعملات ونوع المتجر.

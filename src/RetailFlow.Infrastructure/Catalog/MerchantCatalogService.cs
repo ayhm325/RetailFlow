@@ -207,7 +207,19 @@ public sealed class MerchantCatalogService : IMerchantCatalogService
         }
 
         inventory.SetOnHand(onHand);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex) when (ex.Entries.Count > 0 && ex.Entries.All(e => e.Entity is InventoryItem))
+        {
+            throw new InventoryConcurrencyConflictException(
+                storeId,
+                productId,
+                nameof(SetInventoryOnHandAsync),
+                ex);
+        }
+
         return true;
     }
 
