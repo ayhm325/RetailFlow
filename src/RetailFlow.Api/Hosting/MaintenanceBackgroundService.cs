@@ -1,6 +1,9 @@
+using System.Diagnostics;
+
 using Microsoft.EntityFrameworkCore;
 
 using RetailFlow.Application.Orders;
+using RetailFlow.Domain.Orders;
 using RetailFlow.Infrastructure.Persistence;
 
 namespace RetailFlow.Api.Hosting;
@@ -12,6 +15,8 @@ namespace RetailFlow.Api.Hosting;
 public sealed class MaintenanceBackgroundService : BackgroundService
 {
     private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(1);
+    public const int CheckoutCleanupBatchSize = 500;
+    public const int MaxCheckoutCleanupBatchesPerSweep = 10;
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly TimeProvider _timeProvider;
@@ -56,9 +61,7 @@ public sealed class MaintenanceBackgroundService : BackgroundService
             async sp =>
             {
                 var db = sp.GetRequiredService<RetailFlowDbContext>();
-                return await db.CheckoutRequests
-                    .Where(r => r.ExpiresAtUtc <= now)
-                    .ExecuteDeleteAsync(cancellationToken);
+                return await DeleteExpiredCheckoutRequestsAsync(db, now, cancellationToken);
             },
             cancellationToken);
 
@@ -102,5 +105,58 @@ public sealed class MaintenanceBackgroundService : BackgroundService
             _logger.LogError(ex, "Maintenance task {TaskName} failed.", taskName);
             return 0;
         }
+    }
+
+    private async Task<int> DeleteExpiredCheckoutRequestsAsync(
+        RetailFlowDbContext db,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var sw = Stopwatch.StartNew();
+        var totalDeleted = 0;
+        var batchesExecuted = 0;
+
+        for (var batch = 0; batch < MaxCheckoutCleanupBatchesPerSweep; batch++)
+        {
+            var candidateIds = await db.CheckoutRequests
+                .AsNoTracking()
+                .Where(r => r.ExpiresAtUtc <= now &&
+                            (r.Status != CheckoutRequestStatus.InProgress || r.LeaseExpiresAtUtc <= now))
+                .OrderBy(r => r.ExpiresAtUtc)
+                .ThenBy(r => r.Id)
+                .Select(r => r.Id)
+                .Take(CheckoutCleanupBatchSize)
+                .ToListAsync(cancellationToken);
+
+            if (candidateIds.Count == 0)
+            {
+                break;
+            }
+
+            var deleted = await db.CheckoutRequests
+                .Where(r => candidateIds.Contains(r.Id) &&
+                            r.ExpiresAtUtc <= now &&
+                            (r.Status != CheckoutRequestStatus.InProgress || r.LeaseExpiresAtUtc <= now))
+                .ExecuteDeleteAsync(cancellationToken);
+
+            totalDeleted += deleted;
+            batchesExecuted++;
+
+            if (candidateIds.Count < CheckoutCleanupBatchSize)
+            {
+                break;
+            }
+        }
+
+        if (totalDeleted > 0 || batchesExecuted > 0)
+        {
+            _logger.LogInformation(
+                "CheckoutRequests cleanup completed: TotalDeleted={TotalDeleted}, BatchesExecuted={BatchesExecuted}, ElapsedMs={ElapsedMs}",
+                totalDeleted,
+                batchesExecuted,
+                sw.ElapsedMilliseconds);
+        }
+
+        return totalDeleted;
     }
 }

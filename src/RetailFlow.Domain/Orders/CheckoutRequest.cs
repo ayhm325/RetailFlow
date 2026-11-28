@@ -8,6 +8,7 @@ public sealed class CheckoutRequest
 {
     public static readonly TimeSpan DefaultLeaseDuration = TimeSpan.FromSeconds(60);
     public static readonly TimeSpan DefaultRetentionDuration = TimeSpan.FromHours(24);
+    public static readonly TimeSpan LeaseRecoveryRetentionGrace = TimeSpan.FromMinutes(5);
 
     private CheckoutRequest()
     {

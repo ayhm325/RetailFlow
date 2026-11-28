@@ -13,7 +13,7 @@
 | 404 | متجر غير نشط/غير موجود، مورد لا يخص المتجر، أو منتج غير متاح في السلة (`product_unavailable`) |
 | 409 | Checkout in progress / concurrency, order state, or inventory conflict (`checkout_concurrent_in_flight`, `checkout_concurrency_conflict`, `cart_concurrency_conflict`, `order_state_conflict`, `order_concurrency_conflict`, `inventory_reservation_conflict`, `inventory_concurrency_conflict`) |
 | 412 | فشل شرط `If-Match` على Cart (`cart_concurrency_conflict`) |
-| 422 | Idempotency key reused with a different request hash (`checkout_payload_mismatch`) أو فشل قاعدة عمل في Checkout (`checkout_business_rule_failed`) |
+| 422 | Idempotency key reused with a different request hash during the active retention window (`checkout_payload_mismatch`) أو فشل قاعدة عمل في Checkout (`checkout_business_rule_failed`) |
 | 429 | Rate limit exceeded |
 | 500 | خطأ خادم داخلي معقم عبر `RetailFlowExceptionHandler` (`internal_server_error` + `traceId`) |
 | 503 | readiness dependency unavailable أو عطل قاعدة بيانات مؤقت (`service_unavailable`) |
@@ -30,7 +30,7 @@ Product Host يسجل `AddProblemDetails`. في Production يمر عبر `UseExc
 - Product domain: اسم مطلوب، سعر غير سالب، عملة/دقة مبلغ صحيحة، CategoryId غير فارغ.
 - Cart: `quantity > 0` (يرد Endpoint بـ `400 validation_error` قبل استدعاء الخدمة)، وتوحيد عدم توفر المنتج أو انتمائه لمتجر آخر بـ `404 product_unavailable`.
 - Merchant order rejection: التحقق من `Reason` (`string.IsNullOrWhiteSpace`) في Endpoint قبل البحث عن الطلب (`400 validation_error` تسبق `404`/`409`).
-- Checkout: `Idempotency-Key` مطلوب وبحد أقصى 128 حرفاً.
+- Checkout: `Idempotency-Key` مطلوب وبحد أقصى 128 حرفاً. يحتفظ المفتاح المكتمل بسجل Idempotency لمدة 24 ساعة من وقت الاكتمال (`CompletedAtUtc + 24h`)، بينما يرتبط احتفاظ `Failed` ببداية المطالبة/الاسترداد الأخير (مع مهلة `LeaseRecoveryRetentionGrace = 5m` عند استرداد Lease منتهٍ). بعد انتهاء نافذة الاحتفاظ (ومع عدم وجود Lease نشط)، يُسترد السجل ذرياً (Atomic Reclaim) في خطوة واحدة كعملية جديدة (`201 Created`).
 - ProductImage: absolute HTTP/HTTPS URL وحدود طول.
 - Store/DeliveryZone: قيود على الحقول والرسوم والعملات ونوع المتجر.
 
