@@ -499,7 +499,7 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
             Assert.False(await db.CheckoutRequests.AsNoTracking().AnyAsync(r => r.Id == expiredClaim.Id));
             Assert.False(await db.SessionTickets.AsNoTracking().AnyAsync(t => t.Key == expiredTicket.Key));
 
-            // GAP-003: Expired CheckoutRequest key is cleared and reusable on direct duplicate lookup
+            // AUD-004: Expired CheckoutRequest key is atomically reclaimed in 1 step (not 400 ValidationFailed)
             var expiredReuse = CheckoutRequest.Claim(Guid.NewGuid(), store.Id, customerId, $"reuse-key-{suffix}", new string('B', 64), DateTimeOffset.UtcNow.AddHours(-25));
             db.CheckoutRequests.Add(expiredReuse);
             await db.SaveChangesAsync();
@@ -512,8 +512,11 @@ public sealed class EndToEndCommerceAuthIntegrationTests : IClassFixture<Catalog
                 $"reuse-key-{suffix}",
                 new CheckoutCommand(FulfillmentMode.Pickup, null, null),
                 CancellationToken.None);
-            Assert.Equal(CheckoutOutcomeStatus.ValidationFailed, reuseResult.Status);
-            Assert.False(await db.CheckoutRequests.AsNoTracking().AnyAsync(r => r.Id == expiredReuse.Id));
+            // Cart is empty for this test customer -> BusinessRuleFailed (422), and persisted row ID was reclaimed & marked Failed (not deleted)
+            Assert.Equal(CheckoutOutcomeStatus.BusinessRuleFailed, reuseResult.Status);
+            var reclaimedReuse = await db.CheckoutRequests.AsNoTracking().SingleAsync(r => r.Id == expiredReuse.Id);
+            Assert.Equal(CheckoutRequestStatus.Failed, reclaimedReuse.Status);
+            Assert.NotEqual(expiredReuse.ClaimToken, reclaimedReuse.ClaimToken);
         }
         finally
         {

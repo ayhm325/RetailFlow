@@ -185,9 +185,9 @@ public sealed class AuditPhasesIntegrationTests : IClassFixture<CatalogSqlTestFi
             var checkout1 = scope1.ServiceProvider.GetRequiredService<ICheckoutService>();
             var checkout2 = scope2.ServiceProvider.GetRequiredService<ICheckoutService>();
 
-            // A. Phase 3: Expired CheckoutRequest 3-step lifecycle (First clears, Second creates 1 Order, Third replays)
+            // A. AUD-004: Expired CheckoutRequest is atomically reclaimed in 1 step (First creates 1 Order on existing ID, Second replays)
             await cartSvc.UpsertItemAsync(store.Id, customerId, new UpsertCartItemCommand(prod.Id, 2), CancellationToken.None);
-            var expiredKey = $"exp-3step-{suffix}";
+            var expiredKey = $"exp-reclaim-{suffix}";
             var expiredClaim = CheckoutRequest.Claim(Guid.NewGuid(), store.Id, customerId, expiredKey, new string('C', 64), now.AddHours(-25));
             await using (var db = _fixture.CreateDbContext())
             {
@@ -197,15 +197,20 @@ public sealed class AuditPhasesIntegrationTests : IClassFixture<CatalogSqlTestFi
 
             var cmd = new CheckoutCommand(FulfillmentMode.Pickup, null, null);
             var firstAttempt = await checkout1.CheckoutAsync(store.Id, customerId, expiredKey, cmd, CancellationToken.None);
-            Assert.Equal(CheckoutOutcomeStatus.ValidationFailed, firstAttempt.Status);
+            Assert.Equal(CheckoutOutcomeStatus.Created, firstAttempt.Status);
+            Assert.NotNull(firstAttempt.Order);
 
             var secondAttempt = await checkout1.CheckoutAsync(store.Id, customerId, expiredKey, cmd, CancellationToken.None);
-            Assert.Equal(CheckoutOutcomeStatus.Created, secondAttempt.Status);
-            Assert.NotNull(secondAttempt.Order);
+            Assert.Equal(CheckoutOutcomeStatus.Replayed, secondAttempt.Status);
+            Assert.Equal(firstAttempt.Order!.Id, secondAttempt.Order!.Id);
 
-            var thirdAttempt = await checkout1.CheckoutAsync(store.Id, customerId, expiredKey, cmd, CancellationToken.None);
-            Assert.Equal(CheckoutOutcomeStatus.Replayed, thirdAttempt.Status);
-            Assert.Equal(secondAttempt.Order!.Id, thirdAttempt.Order!.Id);
+            await using (var db = _fixture.CreateDbContext())
+            {
+                var reclaimedRow = await db.CheckoutRequests.AsNoTracking().SingleAsync(r => r.StoreId == store.Id && r.IdempotencyKey == expiredKey);
+                Assert.Equal(expiredClaim.Id, reclaimedRow.Id);
+                Assert.Equal(CheckoutRequestStatus.Completed, reclaimedRow.Status);
+                Assert.Equal(firstAttempt.Order.Id, reclaimedRow.OrderId);
+            }
 
             // B. Phase 2: Stale InProgress lease (crashed worker) is atomically reclaimed and creates 1 Order
             await cartSvc.UpsertItemAsync(store.Id, customerId, new UpsertCartItemCommand(prod.Id, 3), CancellationToken.None);

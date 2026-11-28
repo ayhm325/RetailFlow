@@ -17,6 +17,8 @@
 | `20261126101201_AddIdentityMfaHardeningFields` | حقول حالة MFA في `AspNetUsers` (`MfaEnrollmentStatus`, `MfaPendingExpiresAtUtc`, `ProtectedPendingAuthenticatorKey`, `MfaFailedAttempts`, `MfaLockoutEndUtc`, `LastUsedTotpTimeStep`) |
 | `20261126112151_AddCartAndCartItemRowVersion` | إضافة أعمدة `RowVersion` على `Carts` و`CartItems` للتزامن التفاؤلي |
 | `20261126113905_AddSessionTicketAbsoluteLifetime` | إضافة `CreatedAtUtc` و`AbsoluteExpiresAtUtc` وفهرس انتهاء مطلق على `SessionTickets` |
+| `20261127233914_AddFailedDeliveryLifecycleAndInventoryAudit` | إضافة `FulfillmentAttempts`, `FulfillmentAttemptItems`, `InventoryAdjustments` وحقول `Order.Version`/`InventoryReservationStatus` |
+| `20261128001900_AddFulfillmentAttemptItemConcurrencyToken` | إضافة عمود `RowVersion` (`rowversion`) إلى `FulfillmentAttemptItems` للتزامن التفاؤلي |
 
 كل migration لها Designer file، ويوجد `RetailFlowDbContextModelSnapshot.cs`.
 
@@ -49,6 +51,7 @@ dotnet ef database update \
 5. نفّذ integration tests على نسخة SQL Server مماثلة لبيئة التشغيل.
 6. افحص lock duration والفهارس وأثر عمليات ALTER TABLE الكبيرة.
 7. لا تستخدم `EnsureCreated` كبديل عن migrations في المسار الإنتاجي.
+8. الجداول التي تحتوي Filtered Unique Indexes (`UX_FulfillmentAttempts_*`, `UX_InventoryAdjustments_OrderItem_WriteOff`, `UX_Products_StoreId_Sku` وغيرها) تتطلب `SET QUOTED_IDENTIFIER ON` على الجلسة: هذا مضمون افتراضياً عبر `Microsoft.Data.SqlClient` / `dotnet ef database update`، أما عند تشغيل سكريبتات SQL يدوياً عبر `sqlcmd` فيجب تمرير الراية `-I`.
 
 ## نقطة تشغيلية
 

@@ -12,6 +12,7 @@ public sealed class Order
 
     private readonly List<OrderItem> _items = [];
     private readonly List<OrderStatusHistory> _history = [];
+    private readonly List<FulfillmentAttempt> _fulfillmentAttempts = [];
 
     private Order()
     {
@@ -38,10 +39,40 @@ public sealed class Order
     public string? CancellationReason { get; private set; }
     public DateTimeOffset CreatedAtUtc { get; private set; }
     public DateTimeOffset ReservationExpiresAtUtc { get; private set; }
+    public int Version { get; private set; }
     public byte[] RowVersion { get; private set; }
 
     public IReadOnlyCollection<OrderItem> Items => _items;
     public IReadOnlyCollection<OrderStatusHistory> History => _history;
+    public IReadOnlyCollection<FulfillmentAttempt> FulfillmentAttempts => _fulfillmentAttempts;
+
+    public OrderReservationSummary ReservationSummary
+    {
+        get
+        {
+            if (_items.Count == 0)
+            {
+                return OrderReservationSummary.Settled;
+            }
+
+            if (_items.All(i => i.ReservationStatus == InventoryReservationStatus.Active))
+            {
+                return OrderReservationSummary.Active;
+            }
+
+            if (_items.All(i => i.ReservationStatus == InventoryReservationStatus.ReturnPending))
+            {
+                return OrderReservationSummary.ReturnPending;
+            }
+
+            if (_items.All(i => i.ReservationStatus is InventoryReservationStatus.Released or InventoryReservationStatus.Committed or InventoryReservationStatus.WrittenOff))
+            {
+                return OrderReservationSummary.Settled;
+            }
+
+            return OrderReservationSummary.PartiallyResolved;
+        }
+    }
 
     public static Order Create(
         Guid id,
@@ -165,6 +196,7 @@ public sealed class Order
 
         var prevOrder = OrderStatus;
         OrderStatus = OrderStatus.Confirmed;
+        Version++;
         RecordHistory(actorUserId, actorRole, prevOrder, OrderStatus, FulfillmentStatus, FulfillmentStatus, "Order confirmed", occurredAtUtc);
     }
 
@@ -186,6 +218,11 @@ public sealed class Order
         FulfillmentStatus = FulfillmentStatus.Cancelled;
         PaymentStatus = PaymentStatus.Voided;
         CancellationReason = reason.Trim();
+        foreach (var item in _items)
+        {
+            item.MarkReleased();
+        }
+        Version++;
         RecordHistory(actorUserId, actorRole, prevOrder, OrderStatus, prevFulfillment, FulfillmentStatus, CancellationReason, occurredAtUtc);
     }
 
@@ -210,6 +247,11 @@ public sealed class Order
         FulfillmentStatus = FulfillmentStatus.Cancelled;
         PaymentStatus = PaymentStatus.Voided;
         CancellationReason = string.IsNullOrWhiteSpace(reason) ? "Cancelled by customer" : reason.Trim();
+        foreach (var item in _items)
+        {
+            item.MarkReleased();
+        }
+        Version++;
         RecordHistory(customerId, "Customer", prevOrder, OrderStatus, prevFulfillment, FulfillmentStatus, CancellationReason, occurredAtUtc);
     }
 
@@ -231,6 +273,61 @@ public sealed class Order
         FulfillmentStatus = FulfillmentStatus.Cancelled;
         PaymentStatus = PaymentStatus.Voided;
         CancellationReason = string.IsNullOrWhiteSpace(reason) ? "Cancelled" : reason.Trim();
+
+        var activeAttempt = _fulfillmentAttempts.SingleOrDefault(a => a.IsActive);
+        if (activeAttempt is not null)
+        {
+            if (activeAttempt.Status == FulfillmentAttemptStatus.Prepared)
+            {
+                activeAttempt.MarkAbandoned();
+            }
+            else if (activeAttempt.Status == FulfillmentAttemptStatus.Dispatched)
+            {
+                activeAttempt.MarkCancelled(occurredAtUtc);
+            }
+        }
+
+        var latestFailedOrCancelled = _fulfillmentAttempts
+            .Where(a => a.Status is FulfillmentAttemptStatus.Failed or FulfillmentAttemptStatus.Cancelled)
+            .OrderByDescending(a => a.AttemptNumber ?? 0)
+            .ThenByDescending(a => a.PreparedAtUtc)
+            .FirstOrDefault();
+
+        foreach (var item in _items)
+        {
+            if (item.ReservationStatus is InventoryReservationStatus.Released or InventoryReservationStatus.Committed or InventoryReservationStatus.WrittenOff)
+            {
+                continue;
+            }
+
+            if (prevFulfillment is FulfillmentStatus.Unfulfilled or FulfillmentStatus.Preparing or FulfillmentStatus.ReadyForPickup)
+            {
+                item.MarkReleased();
+            }
+            else if (prevFulfillment == FulfillmentStatus.OutForDelivery)
+            {
+                item.MarkReturnPending();
+            }
+            else if (prevFulfillment == FulfillmentStatus.Failed)
+            {
+                var attemptItem = latestFailedOrCancelled?.Items.SingleOrDefault(ai => ai.OrderItemId == item.Id);
+                if (item.ReservationStatus == InventoryReservationStatus.Active &&
+                    attemptItem?.ReturnDisposition == ReturnDisposition.Restockable)
+                {
+                    item.MarkReleased();
+                }
+                else if (attemptItem?.ReturnDisposition is ReturnDisposition.Damaged or ReturnDisposition.Lost)
+                {
+                    item.MarkWrittenOff();
+                }
+                else
+                {
+                    item.MarkReturnPending();
+                }
+            }
+        }
+
+        Version++;
         RecordHistory(actorUserId, actorRole, prevOrder, OrderStatus, prevFulfillment, FulfillmentStatus, CancellationReason, occurredAtUtc);
     }
 
@@ -258,8 +355,47 @@ public sealed class Order
                 $"Invalid fulfillment transition '{FulfillmentStatus}' -> '{nextStatus}' for mode '{FulfillmentMode}'.");
         }
 
+        if (FulfillmentMode == FulfillmentMode.Delivery && nextStatus == FulfillmentStatus.Failed)
+        {
+            RecordDeliveryFailure(actorUserId, actorRole, DeliveryFailureReasonCode.LegacyUnknown, "Fulfillment -> Failed", occurredAtUtc);
+            return;
+        }
+
+        if (FulfillmentMode == FulfillmentMode.Delivery)
+        {
+            if (nextStatus == FulfillmentStatus.Preparing)
+            {
+                var initialAttempt = FulfillmentAttempt.CreatePrepared(
+                    Guid.NewGuid(),
+                    StoreId,
+                    Id,
+                    _items,
+                    occurredAtUtc);
+                _fulfillmentAttempts.Add(initialAttempt);
+            }
+            else if (nextStatus == FulfillmentStatus.OutForDelivery)
+            {
+                var preparedAttempt = _fulfillmentAttempts.SingleOrDefault(a => a.IsActive && a.Status == FulfillmentAttemptStatus.Prepared)
+                    ?? throw new OrderStateConflictException("No active Prepared delivery attempt exists to dispatch.");
+                var nextAttemptNumber = _fulfillmentAttempts.Count(a => a.AttemptNumber.HasValue) + 1;
+                if (nextAttemptNumber > 3)
+                {
+                    throw new OrderStateConflictException("Maximum physical delivery attempts (3) exceeded.");
+                }
+
+                preparedAttempt.MarkDispatched(nextAttemptNumber, occurredAtUtc);
+            }
+            else if (nextStatus == FulfillmentStatus.Delivered)
+            {
+                var dispatchedAttempt = _fulfillmentAttempts.SingleOrDefault(a => a.IsActive && a.Status == FulfillmentAttemptStatus.Dispatched)
+                    ?? throw new OrderStateConflictException("No active Dispatched delivery attempt exists to mark Delivered.");
+                dispatchedAttempt.MarkDelivered(occurredAtUtc);
+            }
+        }
+
         var prevFulfillment = FulfillmentStatus;
         FulfillmentStatus = nextStatus;
+        Version++;
         RecordHistory(actorUserId, actorRole, OrderStatus, OrderStatus, prevFulfillment, nextStatus, $"Fulfillment -> {nextStatus}", occurredAtUtc);
     }
 
@@ -284,7 +420,225 @@ public sealed class Order
         var prevOrder = OrderStatus;
         PaymentStatus = PaymentStatus.Collected;
         OrderStatus = OrderStatus.Completed;
+        foreach (var item in _items)
+        {
+            item.MarkCommitted();
+        }
+        Version++;
         RecordHistory(actorUserId, actorRole, prevOrder, OrderStatus, FulfillmentStatus, FulfillmentStatus, "COD payment collected; order completed", occurredAtUtc);
+    }
+
+    public void RecordDeliveryFailure(
+        Guid actorUserId,
+        string actorRole,
+        DeliveryFailureReasonCode reasonCode,
+        string? note,
+        DateTimeOffset occurredAtUtc)
+    {
+        if (OrderStatus != OrderStatus.Confirmed || FulfillmentMode != FulfillmentMode.Delivery || FulfillmentStatus != FulfillmentStatus.OutForDelivery)
+        {
+            throw new OrderStateConflictException(
+                $"Cannot record delivery failure from OrderStatus='{OrderStatus}', FulfillmentMode='{FulfillmentMode}', FulfillmentStatus='{FulfillmentStatus}'.");
+        }
+
+        var activeAttempt = _fulfillmentAttempts.SingleOrDefault(a => a.IsActive && a.Status == FulfillmentAttemptStatus.Dispatched)
+            ?? throw new OrderStateConflictException("No active Dispatched delivery attempt exists.");
+
+        activeAttempt.MarkFailed(reasonCode, note, occurredAtUtc);
+        foreach (var item in _items)
+        {
+            item.MarkReturnPending();
+        }
+
+        var prevFulfillment = FulfillmentStatus;
+        FulfillmentStatus = FulfillmentStatus.Failed;
+        Version++;
+        RecordHistory(actorUserId, actorRole, OrderStatus, OrderStatus, prevFulfillment, FulfillmentStatus, $"Fulfillment -> Failed ({reasonCode})", occurredAtUtc);
+    }
+
+    public void ResolveDeliveryCorrection(
+        Guid actorUserId,
+        string actorRole,
+        string resolutionNote,
+        DateTimeOffset occurredAtUtc)
+    {
+        if (OrderStatus != OrderStatus.Confirmed || FulfillmentStatus != FulfillmentStatus.Failed)
+        {
+            throw new OrderStateConflictException(
+                $"Cannot resolve delivery correction from OrderStatus='{OrderStatus}', FulfillmentStatus='{FulfillmentStatus}'.");
+        }
+
+        var latestFailed = _fulfillmentAttempts
+            .Where(a => a.Status == FulfillmentAttemptStatus.Failed)
+            .OrderByDescending(a => a.AttemptNumber ?? 0)
+            .FirstOrDefault()
+            ?? throw new OrderStateConflictException("No failed delivery attempt found.");
+
+        if (!latestFailed.RecordCorrection(actorUserId, resolutionNote, occurredAtUtc))
+        {
+            return;
+        }
+
+        Version++;
+        RecordHistory(actorUserId, actorRole, OrderStatus, OrderStatus, FulfillmentStatus, FulfillmentStatus, $"Delivery correction resolved: {resolutionNote.Trim()}", occurredAtUtc);
+    }
+
+    public FulfillmentAttempt RetryDelivery(
+        Guid actorUserId,
+        string actorRole,
+        DateTimeOffset occurredAtUtc,
+        string? idempotencyKey = null,
+        string? requestHash = null)
+    {
+        if (OrderStatus != OrderStatus.Confirmed || FulfillmentMode != FulfillmentMode.Delivery || FulfillmentStatus != FulfillmentStatus.Failed)
+        {
+            throw new OrderStateConflictException(
+                $"Cannot retry delivery from OrderStatus='{OrderStatus}', FulfillmentMode='{FulfillmentMode}', FulfillmentStatus='{FulfillmentStatus}'.");
+        }
+
+        if (_fulfillmentAttempts.Any(a => a.IsActive))
+        {
+            throw new OrderStateConflictException("An active delivery attempt already exists.");
+        }
+
+        var latestFailed = _fulfillmentAttempts
+            .Where(a => a.Status == FulfillmentAttemptStatus.Failed)
+            .OrderByDescending(a => a.AttemptNumber ?? 0)
+            .FirstOrDefault()
+            ?? throw new OrderStateConflictException("No failed delivery attempt found to retry.");
+
+        if (latestFailed.FailureCategory == DeliveryFailureCategory.NonRecoverable)
+        {
+            throw new OrderStateConflictException("Cannot retry a NonRecoverable delivery failure.");
+        }
+
+        if (latestFailed.FailureCategory == DeliveryFailureCategory.RequiresCorrection && latestFailed.ResolvedAtUtc is null)
+        {
+            throw new OrderStateConflictException("Cannot retry a RequiresCorrection delivery failure before correction is resolved.");
+        }
+
+        if (_fulfillmentAttempts.Count(a => a.AttemptNumber.HasValue) >= 3)
+        {
+            throw new OrderStateConflictException("Maximum physical delivery attempts (3) reached.");
+        }
+
+        if (_items.Any(i => i.ReservationStatus != InventoryReservationStatus.Active))
+        {
+            throw new OrderStateConflictException("Cannot retry delivery until all order items have Active inventory reservations.");
+        }
+
+        var attempt = FulfillmentAttempt.CreatePrepared(
+            Guid.NewGuid(),
+            StoreId,
+            Id,
+            _items,
+            occurredAtUtc,
+            idempotencyKey,
+            requestHash);
+
+        _fulfillmentAttempts.Add(attempt);
+        var prevFulfillment = FulfillmentStatus;
+        FulfillmentStatus = FulfillmentStatus.Preparing;
+        Version++;
+        RecordHistory(actorUserId, actorRole, OrderStatus, OrderStatus, prevFulfillment, FulfillmentStatus, "Delivery retry prepared", occurredAtUtc);
+
+        return attempt;
+    }
+
+    public void ResolveInventoryDisposition(
+        Guid actorUserId,
+        string actorRole,
+        Guid fulfillmentAttemptId,
+        IReadOnlyList<(Guid OrderItemId, ReturnDisposition Disposition, string? Note)> dispositions,
+        DateTimeOffset occurredAtUtc)
+    {
+        ArgumentNullException.ThrowIfNull(dispositions);
+        if (dispositions.Count == 0)
+        {
+            throw new ArgumentException("At least one item disposition is required.", nameof(dispositions));
+        }
+
+        var attempt = _fulfillmentAttempts.SingleOrDefault(a => a.Id == fulfillmentAttemptId)
+            ?? throw new OrderStateConflictException($"FulfillmentAttempt '{fulfillmentAttemptId}' was not found on order '{Id}'.");
+
+        if (attempt.Status is not (FulfillmentAttemptStatus.Failed or FulfillmentAttemptStatus.Cancelled))
+        {
+            throw new OrderStateConflictException($"Cannot resolve inventory disposition for attempt in status '{attempt.Status}'.");
+        }
+
+        var seenIds = new HashSet<Guid>();
+        foreach (var (orderItemId, _, _) in dispositions)
+        {
+            if (!seenIds.Add(orderItemId))
+            {
+                throw new ArgumentException($"Duplicate OrderItemId '{orderItemId}' in disposition request.", nameof(dispositions));
+            }
+        }
+
+        var isReplay = true;
+        foreach (var (orderItemId, disposition, _) in dispositions)
+        {
+            if (disposition is not (ReturnDisposition.Restockable or ReturnDisposition.Damaged or ReturnDisposition.Lost))
+            {
+                throw new ArgumentOutOfRangeException(nameof(dispositions), "Disposition must be Restockable, Damaged, or Lost.");
+            }
+
+            var attemptItem = attempt.Items.SingleOrDefault(i => i.OrderItemId == orderItemId)
+                ?? throw new ArgumentException($"OrderItemId '{orderItemId}' does not belong to FulfillmentAttempt '{fulfillmentAttemptId}'.", nameof(dispositions));
+
+            if (attemptItem.ReturnDisposition == ReturnDisposition.Pending)
+            {
+                isReplay = false;
+            }
+            else if (attemptItem.ReturnDisposition != disposition)
+            {
+                throw new OrderStateConflictException(
+                    $"Attempt item '{orderItemId}' already resolved as '{attemptItem.ReturnDisposition}'; cannot change to '{disposition}'.");
+            }
+        }
+
+        if (isReplay)
+        {
+            return;
+        }
+
+        foreach (var (orderItemId, disposition, note) in dispositions)
+        {
+            var attemptItem = attempt.Items.Single(i => i.OrderItemId == orderItemId);
+            if (attemptItem.ReturnDisposition == disposition)
+            {
+                continue;
+            }
+
+            attemptItem.ApplyDisposition(disposition, actorUserId, note, occurredAtUtc);
+
+            var orderItem = _items.Single(i => i.Id == orderItemId);
+            if (OrderStatus == OrderStatus.Confirmed)
+            {
+                if (disposition == ReturnDisposition.Restockable)
+                {
+                    orderItem.MarkActive();
+                }
+                else
+                {
+                    orderItem.MarkReturnPending();
+                }
+            }
+            else if (OrderStatus == OrderStatus.Cancelled)
+            {
+                if (disposition == ReturnDisposition.Restockable)
+                {
+                    orderItem.MarkReleased();
+                }
+                else
+                {
+                    orderItem.MarkWrittenOff();
+                }
+            }
+        }
+
+        Version++;
+        RecordHistory(actorUserId, actorRole, OrderStatus, OrderStatus, FulfillmentStatus, FulfillmentStatus, "Inventory disposition resolved", occurredAtUtc);
     }
 
     private void RecordHistory(
@@ -328,6 +682,7 @@ public sealed class OrderItem
     public decimal UnitPrice { get; private set; }
     public int Quantity { get; private set; }
     public decimal LineTotal { get; private set; }
+    public InventoryReservationStatus ReservationStatus { get; private set; }
 
     public static OrderItem Create(
         Guid id,
@@ -359,9 +714,16 @@ public sealed class OrderItem
             Sku = string.IsNullOrWhiteSpace(sku) ? null : sku.Trim(),
             UnitPrice = unitPrice,
             Quantity = quantity,
-            LineTotal = unitPrice * quantity
+            LineTotal = unitPrice * quantity,
+            ReservationStatus = InventoryReservationStatus.Active
         };
     }
+
+    internal void MarkActive() => ReservationStatus = InventoryReservationStatus.Active;
+    internal void MarkReturnPending() => ReservationStatus = InventoryReservationStatus.ReturnPending;
+    internal void MarkReleased() => ReservationStatus = InventoryReservationStatus.Released;
+    internal void MarkCommitted() => ReservationStatus = InventoryReservationStatus.Committed;
+    internal void MarkWrittenOff() => ReservationStatus = InventoryReservationStatus.WrittenOff;
 }
 
 public sealed class OrderStatusHistory

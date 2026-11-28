@@ -66,6 +66,34 @@ public sealed class RetailFlowExceptionHandler : IExceptionHandler
                 isWarning: true);
         }
 
+        if (exception is OrderPreconditionException preconditionEx)
+        {
+            return await WriteProblemDetailsAsync(
+                httpContext,
+                exception,
+                preconditionEx.IsMissingPrecondition
+                    ? StatusCodes.Status428PreconditionRequired
+                    : StatusCodes.Status412PreconditionFailed,
+                preconditionEx.IsMissingPrecondition ? "Precondition Required" : "Precondition Failed",
+                preconditionEx.Message,
+                preconditionEx.IsMissingPrecondition ? "precondition_required" : "order_precondition_failed",
+                traceId,
+                isWarning: true);
+        }
+
+        if (exception is OrderIdempotencyPayloadMismatchException)
+        {
+            return await WriteProblemDetailsAsync(
+                httpContext,
+                exception,
+                StatusCodes.Status422UnprocessableEntity,
+                "Idempotency Key Payload Mismatch",
+                exception.Message,
+                "order_retry_payload_mismatch",
+                traceId,
+                isWarning: true);
+        }
+
         if (exception is InventoryOnHandBelowReservedException)
         {
             return await WriteProblemDetailsAsync(

@@ -12,7 +12,15 @@ public static class MerchantEndpoints
 {
     public sealed record SetInventoryRequest(int OnHand);
     public sealed record RejectOrderRequest(string? Reason);
-    public sealed record AdvanceFulfillmentRequest(FulfillmentStatus NextStatus);
+    public sealed record AdvanceFulfillmentRequest(
+        FulfillmentStatus NextStatus,
+        DeliveryFailureReasonCode? FailureReasonCode = null,
+        string? FailureNote = null);
+    public sealed record ResolveDeliveryCorrectionRequest(string? ResolutionNote);
+    public sealed record RetryDeliveryRequest(string? Note = null);
+    public sealed record CancelMerchantOrderRequest(string? Reason);
+    public sealed record OrderItemDispositionRequest(Guid OrderItemId, ReturnDisposition Disposition, string? Note = null);
+    public sealed record ResolveInventoryDispositionRequest(Guid FulfillmentAttemptId, IReadOnlyList<OrderItemDispositionRequest>? Items);
 
     public static WebApplication MapMerchantEndpoints(this WebApplication app)
     {
@@ -193,8 +201,22 @@ public static class MerchantEndpoints
             return TypedResults.Ok(orders);
         });
 
+        group.MapGet("/orders/{orderId:guid}", async Task<IResult> (
+            Guid orderId,
+            HttpResponse response,
+            IStoreRequestContextAccessor accessor,
+            IOrderService orderService,
+            CancellationToken ct) =>
+        {
+            var order = await orderService.GetMerchantOrderByIdAsync(accessor.Current!.StoreId, orderId, ct);
+            if (order is null) return TypedResults.NotFound();
+            SetOrderETag(response, order.Version);
+            return TypedResults.Ok(order);
+        });
+
         group.MapPost("/orders/{orderId:guid}/confirm", async Task<IResult> (
             Guid orderId,
+            HttpResponse response,
             ClaimsPrincipal user,
             IStoreRequestContextAccessor accessor,
             IOrderService orderService,
@@ -202,13 +224,16 @@ public static class MerchantEndpoints
         {
             var actorId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
             var order = await orderService.ConfirmOrderAsync(accessor.Current!.StoreId, actorId, orderId, ct);
-            return order is null ? TypedResults.NotFound() : TypedResults.Ok(order);
+            if (order is null) return TypedResults.NotFound();
+            SetOrderETag(response, order.Version);
+            return TypedResults.Ok(order);
         });
 
         group.MapPost("/orders/{orderId:guid}/reject", async Task<IResult> (
             Guid orderId,
             RejectOrderRequest request,
             HttpContext httpContext,
+            HttpResponse response,
             ClaimsPrincipal user,
             IStoreRequestContextAccessor accessor,
             IOrderService orderService,
@@ -216,42 +241,49 @@ public static class MerchantEndpoints
         {
             if (string.IsNullOrWhiteSpace(request.Reason))
             {
-                return TypedResults.ValidationProblem(
-                    errors: new Dictionary<string, string[]>
-                    {
-                        ["Reason"] = ["Rejection reason is required."]
-                    },
-                    detail: "One or more validation errors occurred.",
-                    instance: httpContext.Request.Path,
-                    title: "Validation Failed",
-                    type: "about:blank",
-                    extensions: new Dictionary<string, object?>
-                    {
-                        ["code"] = "validation_error",
-                        ["traceId"] = System.Diagnostics.Activity.Current?.Id ?? httpContext.TraceIdentifier
-                    });
+                return ValidationError(httpContext, "Reason", "Rejection reason is required.");
             }
 
             var actorId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
             var order = await orderService.RejectOrderAsync(accessor.Current!.StoreId, actorId, orderId, request.Reason, ct);
-            return order is null ? TypedResults.NotFound() : TypedResults.Ok(order);
+            if (order is null) return TypedResults.NotFound();
+            SetOrderETag(response, order.Version);
+            return TypedResults.Ok(order);
         });
 
         group.MapPost("/orders/{orderId:guid}/fulfillment", async Task<IResult> (
             Guid orderId,
             AdvanceFulfillmentRequest request,
+            HttpContext httpContext,
+            HttpResponse response,
             ClaimsPrincipal user,
             IStoreRequestContextAccessor accessor,
             IOrderService orderService,
             CancellationToken ct) =>
         {
+            if (request.NextStatus == FulfillmentStatus.Failed &&
+                (!request.FailureReasonCode.HasValue || !Enum.IsDefined(request.FailureReasonCode.Value)))
+            {
+                return ValidationError(httpContext, "FailureReasonCode", "A valid FailureReasonCode is required when marking delivery Failed.");
+            }
+
             var actorId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
-            var order = await orderService.AdvanceFulfillmentAsync(accessor.Current!.StoreId, actorId, orderId, request.NextStatus, ct);
-            return order is null ? TypedResults.NotFound() : TypedResults.Ok(order);
+            var order = await orderService.AdvanceFulfillmentAsync(
+                accessor.Current!.StoreId,
+                actorId,
+                orderId,
+                request.NextStatus,
+                ct,
+                request.FailureReasonCode,
+                request.FailureNote);
+            if (order is null) return TypedResults.NotFound();
+            SetOrderETag(response, order.Version);
+            return TypedResults.Ok(order);
         });
 
         group.MapPost("/orders/{orderId:guid}/collect-payment", async Task<IResult> (
             Guid orderId,
+            HttpResponse response,
             ClaimsPrincipal user,
             IStoreRequestContextAccessor accessor,
             IOrderService orderService,
@@ -259,10 +291,155 @@ public static class MerchantEndpoints
         {
             var actorId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
             var order = await orderService.CollectCodPaymentAsync(accessor.Current!.StoreId, actorId, orderId, ct);
-            return order is null ? TypedResults.NotFound() : TypedResults.Ok(order);
+            if (order is null) return TypedResults.NotFound();
+            SetOrderETag(response, order.Version);
+            return TypedResults.Ok(order);
+        });
+
+        group.MapPost("/orders/{orderId:guid}/delivery/correction", async Task<IResult> (
+            Guid orderId,
+            ResolveDeliveryCorrectionRequest request,
+            HttpContext httpContext,
+            HttpRequest httpRequest,
+            HttpResponse response,
+            ClaimsPrincipal user,
+            IStoreRequestContextAccessor accessor,
+            IOrderService orderService,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.ResolutionNote))
+            {
+                return ValidationError(httpContext, "ResolutionNote", "Resolution note is required.");
+            }
+
+            var actorId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var order = await orderService.ResolveDeliveryCorrectionAsync(accessor.Current!.StoreId, actorId, orderId, request.ResolutionNote, ParseIfMatchVersion(httpRequest), ct);
+            if (order is null) return TypedResults.NotFound();
+            SetOrderETag(response, order.Version);
+            return TypedResults.Ok(order);
+        });
+
+        group.MapPost("/orders/{orderId:guid}/delivery/retry", async Task<IResult> (
+            Guid orderId,
+            RetryDeliveryRequest? request,
+            HttpContext httpContext,
+            HttpRequest httpRequest,
+            HttpResponse response,
+            ClaimsPrincipal user,
+            IStoreRequestContextAccessor accessor,
+            IOrderService orderService,
+            CancellationToken ct) =>
+        {
+            var key = httpRequest.Headers["Idempotency-Key"].FirstOrDefault();
+            if (string.IsNullOrWhiteSpace(key) || key.Trim().Length > 128)
+            {
+                return ValidationError(httpContext, "Idempotency-Key", "Idempotency-Key header is required and must be at most 128 characters.");
+            }
+
+            var actorId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var order = await orderService.RetryDeliveryAsync(accessor.Current!.StoreId, actorId, orderId, key, request?.Note, ParseIfMatchVersion(httpRequest), ct);
+            if (order is null) return TypedResults.NotFound();
+            SetOrderETag(response, order.Version);
+            return TypedResults.Ok(order);
+        });
+
+        group.MapPost("/orders/{orderId:guid}/cancel", async Task<IResult> (
+            Guid orderId,
+            CancelMerchantOrderRequest request,
+            HttpContext httpContext,
+            HttpRequest httpRequest,
+            HttpResponse response,
+            ClaimsPrincipal user,
+            IStoreRequestContextAccessor accessor,
+            IOrderService orderService,
+            CancellationToken ct) =>
+        {
+            if (string.IsNullOrWhiteSpace(request.Reason))
+            {
+                return ValidationError(httpContext, "Reason", "Cancellation reason is required.");
+            }
+
+            var actorId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var order = await orderService.CancelByMerchantAsync(accessor.Current!.StoreId, actorId, orderId, request.Reason, ParseIfMatchVersion(httpRequest), ct);
+            if (order is null) return TypedResults.NotFound();
+            SetOrderETag(response, order.Version);
+            return TypedResults.Ok(order);
+        });
+
+        group.MapPost("/orders/{orderId:guid}/inventory-disposition/resolve", async Task<IResult> (
+            Guid orderId,
+            ResolveInventoryDispositionRequest request,
+            HttpContext httpContext,
+            HttpRequest httpRequest,
+            HttpResponse response,
+            ClaimsPrincipal user,
+            IStoreRequestContextAccessor accessor,
+            IOrderService orderService,
+            CancellationToken ct) =>
+        {
+            if (request.FulfillmentAttemptId == Guid.Empty)
+            {
+                return ValidationError(httpContext, "FulfillmentAttemptId", "FulfillmentAttemptId is required.");
+            }
+
+            if (request.Items is null || request.Items.Count == 0)
+            {
+                return ValidationError(httpContext, "Items", "At least one item disposition is required.");
+            }
+
+            var seen = new HashSet<Guid>();
+            foreach (var item in request.Items)
+            {
+                if (item.OrderItemId == Guid.Empty || !seen.Add(item.OrderItemId))
+                {
+                    return ValidationError(httpContext, "Items", "Each item must have a unique non-empty OrderItemId.");
+                }
+
+                if (item.Disposition is not (ReturnDisposition.Restockable or ReturnDisposition.Damaged or ReturnDisposition.Lost))
+                {
+                    return ValidationError(httpContext, "Items", "Disposition must be Restockable, Damaged, or Lost.");
+                }
+            }
+
+            var actorId = Guid.Parse(user.FindFirstValue(ClaimTypes.NameIdentifier)!);
+            var cmds = request.Items.Select(i => new OrderItemDispositionCommand(i.OrderItemId, i.Disposition, i.Note)).ToList();
+            var order = await orderService.ResolveInventoryDispositionAsync(accessor.Current!.StoreId, actorId, orderId, request.FulfillmentAttemptId, cmds, ParseIfMatchVersion(httpRequest), ct);
+            if (order is null) return TypedResults.NotFound();
+            SetOrderETag(response, order.Version);
+            return TypedResults.Ok(order);
         });
 
         return app;
+    }
+
+    private static IResult ValidationError(HttpContext httpContext, string field, string message) =>
+        TypedResults.ValidationProblem(
+            errors: new Dictionary<string, string[]> { [field] = [message] },
+            detail: "One or more validation errors occurred.",
+            instance: httpContext.Request.Path,
+            title: "Validation Failed",
+            type: "about:blank",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = "validation_error",
+                ["traceId"] = System.Diagnostics.Activity.Current?.Id ?? httpContext.TraceIdentifier
+            });
+
+    private static void SetOrderETag(HttpResponse response, string version)
+    {
+        if (!string.IsNullOrWhiteSpace(version))
+        {
+            response.Headers.ETag = $"\"{version}\"";
+        }
+    }
+
+    private static string? ParseIfMatchVersion(HttpRequest request)
+    {
+        var raw = request.Headers.IfMatch.FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        var trimmed = raw.Trim();
+        if (trimmed.StartsWith("W/", StringComparison.OrdinalIgnoreCase)) trimmed = trimmed[2..].Trim();
+        return trimmed.Trim('"');
     }
 }
 

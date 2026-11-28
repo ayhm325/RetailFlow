@@ -48,7 +48,38 @@ public sealed record OrderItemDto(
     string? Sku,
     decimal UnitPrice,
     int Quantity,
-    decimal LineTotal);
+    decimal LineTotal,
+    InventoryReservationStatus ReservationStatus = InventoryReservationStatus.Active,
+    Guid OrderItemId = default);
+
+public sealed record FulfillmentAttemptItemDto(
+    Guid Id,
+    Guid OrderItemId,
+    Guid ProductId,
+    int Quantity,
+    ReturnDisposition ReturnDisposition,
+    DateTimeOffset? ReturnedAtUtc,
+    DateTimeOffset? ResolvedAtUtc,
+    Guid? ResolvedByUserId,
+    string? ResolutionNote);
+
+public sealed record FulfillmentAttemptDto(
+    Guid Id,
+    int? AttemptNumber,
+    FulfillmentAttemptStatus Status,
+    bool IsActive,
+    DateTimeOffset PreparedAtUtc,
+    DateTimeOffset? DispatchedAtUtc,
+    DateTimeOffset? DeliveredAtUtc,
+    DateTimeOffset? FailedAtUtc,
+    DateTimeOffset? CancelledAtUtc,
+    DeliveryFailureReasonCode? FailureReasonCode,
+    DeliveryFailureCategory? FailureCategory,
+    string? FailureNote,
+    DateTimeOffset? ResolvedAtUtc,
+    Guid? ResolvedByUserId,
+    string? ResolutionNote,
+    IReadOnlyList<FulfillmentAttemptItemDto> Items);
 
 public sealed record OrderDto(
     Guid Id,
@@ -69,7 +100,34 @@ public sealed record OrderDto(
     string? CancellationReason,
     DateTimeOffset CreatedAtUtc,
     DateTimeOffset ReservationExpiresAtUtc,
-    IReadOnlyList<OrderItemDto> Items);
+    IReadOnlyList<OrderItemDto> Items,
+    OrderReservationSummary ReservationSummary = OrderReservationSummary.Active,
+    string Version = "",
+    IReadOnlyList<FulfillmentAttemptDto>? FulfillmentAttempts = null);
+
+public sealed record OrderItemDispositionCommand(
+    Guid OrderItemId,
+    ReturnDisposition Disposition,
+    string? Note);
+
+public sealed class OrderPreconditionException : Exception
+{
+    public bool IsMissingPrecondition { get; }
+
+    public OrderPreconditionException(string message, bool isMissingPrecondition, Exception? innerException = null)
+        : base(message, innerException)
+    {
+        IsMissingPrecondition = isMissingPrecondition;
+    }
+}
+
+public sealed class OrderIdempotencyPayloadMismatchException : Exception
+{
+    public OrderIdempotencyPayloadMismatchException(string message)
+        : base(message)
+    {
+    }
+}
 
 public sealed class CartConcurrencyConflictException : Exception
 {
@@ -114,10 +172,15 @@ public interface IOrderService
     Task<OrderDto?> CancelByCustomerAsync(Guid storeId, Guid customerId, Guid orderId, string? reason, CancellationToken cancellationToken);
 
     Task<PagedOrdersResponse> GetMerchantOrdersAsync(Guid storeId, int page = 1, int pageSize = 20, CancellationToken cancellationToken = default);
+    Task<OrderDto?> GetMerchantOrderByIdAsync(Guid storeId, Guid orderId, CancellationToken cancellationToken);
     Task<OrderDto?> ConfirmOrderAsync(Guid storeId, Guid actorUserId, Guid orderId, CancellationToken cancellationToken);
     Task<OrderDto?> RejectOrderAsync(Guid storeId, Guid actorUserId, Guid orderId, string reason, CancellationToken cancellationToken);
-    Task<OrderDto?> AdvanceFulfillmentAsync(Guid storeId, Guid actorUserId, Guid orderId, FulfillmentStatus nextStatus, CancellationToken cancellationToken);
+    Task<OrderDto?> AdvanceFulfillmentAsync(Guid storeId, Guid actorUserId, Guid orderId, FulfillmentStatus nextStatus, CancellationToken cancellationToken, DeliveryFailureReasonCode? failureReasonCode = null, string? failureNote = null);
     Task<OrderDto?> CollectCodPaymentAsync(Guid storeId, Guid actorUserId, Guid orderId, CancellationToken cancellationToken);
+    Task<OrderDto?> ResolveDeliveryCorrectionAsync(Guid storeId, Guid actorUserId, Guid orderId, string resolutionNote, string? expectedVersion, CancellationToken cancellationToken);
+    Task<OrderDto?> RetryDeliveryAsync(Guid storeId, Guid actorUserId, Guid orderId, string idempotencyKey, string? note, string? expectedVersion, CancellationToken cancellationToken);
+    Task<OrderDto?> CancelByMerchantAsync(Guid storeId, Guid actorUserId, Guid orderId, string reason, string? expectedVersion, CancellationToken cancellationToken);
+    Task<OrderDto?> ResolveInventoryDispositionAsync(Guid storeId, Guid actorUserId, Guid orderId, Guid fulfillmentAttemptId, IReadOnlyList<OrderItemDispositionCommand> items, string? expectedVersion, CancellationToken cancellationToken);
 
     Task<int> ReleaseExpiredReservationsAsync(DateTimeOffset utcNow, CancellationToken cancellationToken);
 }

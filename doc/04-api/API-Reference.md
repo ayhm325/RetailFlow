@@ -77,9 +77,14 @@ Group: `/api/stores/{slug}/merchant`، يتطلب `MerchantOwner` ثم Store res
 | POST | `/products/{productId}/images` | إضافة صورة |
 | DELETE | `/products/{productId}/images/{imageId}` | حذف صورة |
 | GET | `/orders` | قائمة طلبات المتجر |
+| GET | `/orders/{orderId}` | تفاصيل طلب المتجر متضمنة محاولات التوصيل (`FulfillmentAttempts`) و`ETag` |
 | POST | `/orders/{orderId}/confirm` | تأكيد طلب |
 | POST | `/orders/{orderId}/reject` | رفض طلب |
-| POST | `/orders/{orderId}/fulfillment` | دفع FulfillmentStatus للانتقال التالي |
+| POST | `/orders/{orderId}/fulfillment` | دفع FulfillmentStatus للانتقال التالي (بما في ذلك تسجيل فشل التوصيل `Failed`) |
+| POST | `/orders/{orderId}/delivery/correction` | معالجة تصحيح بيانات التوصيل (`DeliveryCorrection`) |
+| POST | `/orders/{orderId}/delivery/retry` | إعادة جدولة محاولة توصيل جديدة (`RetryIdempotencyKey`) |
+| POST | `/orders/{orderId}/cancel` | إلغاء طلب من التاجر قبل أو بعد الشحن مع `CancellationReason` |
+| POST | `/orders/{orderId}/inventory-disposition/resolve` | تسوية تصرف المخزون لعناصر محاولة توصيل (`FulfillmentAttemptId`) |
 | POST | `/orders/{orderId}/collect-payment` | تحصيل COD |
 
 ## 5. Customer commerce API

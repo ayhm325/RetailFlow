@@ -1480,6 +1480,9 @@ public sealed class CatalogSqlTestFixture : IAsyncLifetime
         }
 
         await using var db = CreateDbContext();
+        await db.InventoryAdjustments.Where(x => storeIds.Contains(x.StoreId)).ExecuteDeleteAsync();
+        await db.FulfillmentAttemptItems.Where(x => storeIds.Contains(x.StoreId)).ExecuteDeleteAsync();
+        await db.FulfillmentAttempts.Where(x => storeIds.Contains(x.StoreId)).ExecuteDeleteAsync();
         await db.OrderStatusHistories.Where(x => storeIds.Contains(x.StoreId)).ExecuteDeleteAsync();
         await db.OrderItems.Where(x => storeIds.Contains(x.StoreId)).ExecuteDeleteAsync();
         await db.Orders.Where(x => storeIds.Contains(x.StoreId)).ExecuteDeleteAsync();
