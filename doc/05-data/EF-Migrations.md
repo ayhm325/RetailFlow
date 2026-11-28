@@ -17,6 +17,8 @@
 | `20261126101201_AddIdentityMfaHardeningFields` | حقول حالة MFA في `AspNetUsers` (`MfaEnrollmentStatus`, `MfaPendingExpiresAtUtc`, `ProtectedPendingAuthenticatorKey`, `MfaFailedAttempts`, `MfaLockoutEndUtc`, `LastUsedTotpTimeStep`) |
 | `20261126112151_AddCartAndCartItemRowVersion` | إضافة أعمدة `RowVersion` على `Carts` و`CartItems` للتزامن التفاؤلي |
 | `20261126113905_AddSessionTicketAbsoluteLifetime` | إضافة `CreatedAtUtc` و`AbsoluteExpiresAtUtc` وفهرس انتهاء مطلق على `SessionTickets` |
+| `20261127233914_AddFailedDeliveryLifecycleAndInventoryAudit` | إضافة `FulfillmentAttempts`, `FulfillmentAttemptItems`, `InventoryAdjustments` وحقول `Order.Version`/`InventoryReservationStatus` |
+| `20261128001900_AddFulfillmentAttemptItemConcurrencyToken` | إضافة عمود `RowVersion` (`rowversion`) إلى `FulfillmentAttemptItems` للتزامن التفاؤلي |
 
 كل migration لها Designer file، ويوجد `RetailFlowDbContextModelSnapshot.cs`.
 

@@ -458,6 +458,69 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                     b.ToTable("SessionTickets", (string)null);
                 });
 
+            modelBuilder.Entity("RetailFlow.Domain.Inventory.InventoryAdjustment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ActorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FulfillmentAttemptItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset>("OccurredAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<int>("OnHandDelta")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OperationType")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OrderItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("ReasonCode")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ReservedDelta")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("StoreId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("StoreId", "FulfillmentAttemptItemId");
+
+                    b.HasIndex("StoreId", "OrderItemId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_InventoryAdjustments_OrderItem_WriteOff")
+                        .HasFilter("[OperationType] IN (1, 2)");
+
+                    b.HasIndex("StoreId", "ProductId");
+
+                    b.HasIndex("StoreId", "OrderId", "OrderItemId");
+
+                    b.ToTable("InventoryAdjustments", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_InventoryAdjustments_Deltas_Negative", "[OnHandDelta] < 0 AND [ReservedDelta] < 0 AND [OnHandDelta] = [ReservedDelta]");
+
+                            t.HasCheckConstraint("CK_InventoryAdjustments_OperationType", "[OperationType] IN (1, 2)");
+                        });
+                });
+
             modelBuilder.Entity("RetailFlow.Domain.Inventory.InventoryItem", b =>
                 {
                     b.Property<Guid>("Id")
@@ -626,6 +689,167 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         });
                 });
 
+            modelBuilder.Entity("RetailFlow.Domain.Orders.FulfillmentAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("AttemptNumber")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("CancelledAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<DateTimeOffset?>("DeliveredAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<DateTimeOffset?>("DispatchedAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<DateTimeOffset?>("FailedAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<int?>("FailureCategory")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FailureNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("FailureReasonCode")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("PreparedAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("ResolvedAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<Guid?>("ResolvedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RetryIdempotencyKey")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("RetryRequestHash")
+                        .HasColumnType("char(64)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("StoreId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("StoreId", "OrderId", "Id")
+                        .HasName("AK_FulfillmentAttempts_StoreId_OrderId_Id");
+
+                    b.HasIndex("StoreId", "OrderId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_FulfillmentAttempts_StoreId_OrderId_Active")
+                        .HasFilter("[IsActive] = 1");
+
+                    b.HasIndex("StoreId", "OrderId", "AttemptNumber")
+                        .IsUnique()
+                        .HasDatabaseName("UX_FulfillmentAttempts_StoreId_OrderId_AttemptNumber")
+                        .HasFilter("[AttemptNumber] IS NOT NULL");
+
+                    b.HasIndex("StoreId", "OrderId", "RetryIdempotencyKey")
+                        .IsUnique()
+                        .HasDatabaseName("UX_FulfillmentAttempts_StoreId_OrderId_RetryIdempotencyKey")
+                        .HasFilter("[RetryIdempotencyKey] IS NOT NULL");
+
+                    b.ToTable("FulfillmentAttempts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_FulfillmentAttempts_AttemptNumber", "[AttemptNumber] IS NULL OR ([AttemptNumber] >= 1 AND [AttemptNumber] <= 3)");
+
+                            t.HasCheckConstraint("CK_FulfillmentAttempts_FailureCategory", "[FailureCategory] IS NULL OR [FailureCategory] IN (1, 2, 3)");
+
+                            t.HasCheckConstraint("CK_FulfillmentAttempts_IsActive_Status", "([IsActive] = 1 AND [Status] IN (1, 2)) OR ([IsActive] = 0 AND [Status] IN (3, 4, 5, 6))");
+
+                            t.HasCheckConstraint("CK_FulfillmentAttempts_Status", "[Status] IN (1, 2, 3, 4, 5, 6)");
+                        });
+                });
+
+            modelBuilder.Entity("RetailFlow.Domain.Orders.FulfillmentAttemptItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("FulfillmentAttemptId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OrderId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OrderItemId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProductId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Quantity")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ResolutionNote")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTimeOffset?>("ResolvedAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<Guid?>("ResolvedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ReturnDisposition")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("ReturnedAtUtc")
+                        .HasColumnType("datetimeoffset(3)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid>("StoreId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasAlternateKey("StoreId", "Id")
+                        .HasName("AK_FulfillmentAttemptItems_StoreId_Id");
+
+                    b.HasIndex("StoreId", "FulfillmentAttemptId", "OrderItemId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_FulfillmentAttemptItems_Attempt_OrderItem");
+
+                    b.HasIndex("StoreId", "OrderId", "FulfillmentAttemptId");
+
+                    b.HasIndex("StoreId", "OrderId", "OrderItemId");
+
+                    b.ToTable("FulfillmentAttemptItems", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_FulfillmentAttemptItems_Quantity_Positive", "[Quantity] > 0");
+
+                            t.HasCheckConstraint("CK_FulfillmentAttemptItems_ReturnDisposition", "[ReturnDisposition] IN (0, 1, 2, 3, 4)");
+
+                            t.HasCheckConstraint("CK_FulfillmentAttemptItems_ReturnedAtUtc_Semantics", "(([ReturnDisposition] IN (2, 3) AND [ReturnedAtUtc] IS NOT NULL) OR ([ReturnDisposition] IN (0, 1, 4) AND [ReturnedAtUtc] IS NULL))");
+                        });
+                });
+
             modelBuilder.Entity("RetailFlow.Domain.Orders.Order", b =>
                 {
                     b.Property<Guid>("Id")
@@ -697,6 +921,11 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         .HasPrecision(19, 4)
                         .HasColumnType("decimal(19,4)");
 
+                    b.Property<int>("Version")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(0);
+
                     b.HasKey("Id");
 
                     b.HasAlternateKey("StoreId", "Id")
@@ -748,6 +977,12 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                     b.Property<int>("Quantity")
                         .HasColumnType("int");
 
+                    b.Property<int>("ReservationStatus")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1)
+                        .HasColumnName("InventoryReservationStatus");
+
                     b.Property<string>("Sku")
                         .HasMaxLength(64)
                         .HasColumnType("nvarchar(64)");
@@ -761,10 +996,16 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("StoreId", "OrderId");
+                    b.HasAlternateKey("StoreId", "Id")
+                        .HasName("AK_OrderItems_StoreId_Id");
+
+                    b.HasAlternateKey("StoreId", "OrderId", "Id")
+                        .HasName("AK_OrderItems_StoreId_OrderId_Id");
 
                     b.ToTable("OrderItems", null, t =>
                         {
+                            t.HasCheckConstraint("CK_OrderItems_InventoryReservationStatus", "[InventoryReservationStatus] IN (1, 2, 3, 4, 5)");
+
                             t.HasCheckConstraint("CK_OrderItems_Prices_NonNegative", "[UnitPrice] >= 0 AND [LineTotal] >= 0");
 
                             t.HasCheckConstraint("CK_OrderItems_Quantity_Positive", "[Quantity] > 0");
@@ -1157,6 +1398,36 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                         .HasConstraintName("FK_DeliveryZones_Stores_StoreId");
                 });
 
+            modelBuilder.Entity("RetailFlow.Domain.Inventory.InventoryAdjustment", b =>
+                {
+                    b.HasOne("RetailFlow.Domain.Orders.FulfillmentAttemptItem", null)
+                        .WithMany()
+                        .HasForeignKey("StoreId", "FulfillmentAttemptItemId")
+                        .HasPrincipalKey("StoreId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("RetailFlow.Domain.Orders.Order", null)
+                        .WithMany()
+                        .HasForeignKey("StoreId", "OrderId")
+                        .HasPrincipalKey("StoreId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RetailFlow.Domain.Catalog.Product", null)
+                        .WithMany()
+                        .HasForeignKey("StoreId", "ProductId")
+                        .HasPrincipalKey("StoreId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RetailFlow.Domain.Orders.OrderItem", null)
+                        .WithMany()
+                        .HasForeignKey("StoreId", "OrderId", "OrderItemId")
+                        .HasPrincipalKey("StoreId", "OrderId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("RetailFlow.Domain.Inventory.InventoryItem", b =>
                 {
                     b.HasOne("RetailFlow.Domain.Catalog.Product", null)
@@ -1192,6 +1463,33 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                     b.HasOne("RetailFlow.Domain.Stores.Store", null)
                         .WithMany()
                         .HasForeignKey("StoreId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("RetailFlow.Domain.Orders.FulfillmentAttempt", b =>
+                {
+                    b.HasOne("RetailFlow.Domain.Orders.Order", null)
+                        .WithMany("FulfillmentAttempts")
+                        .HasForeignKey("StoreId", "OrderId")
+                        .HasPrincipalKey("StoreId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("RetailFlow.Domain.Orders.FulfillmentAttemptItem", b =>
+                {
+                    b.HasOne("RetailFlow.Domain.Orders.FulfillmentAttempt", null)
+                        .WithMany("Items")
+                        .HasForeignKey("StoreId", "OrderId", "FulfillmentAttemptId")
+                        .HasPrincipalKey("StoreId", "OrderId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("RetailFlow.Domain.Orders.OrderItem", null)
+                        .WithMany()
+                        .HasForeignKey("StoreId", "OrderId", "OrderItemId")
+                        .HasPrincipalKey("StoreId", "OrderId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
                 });
@@ -1262,8 +1560,15 @@ namespace RetailFlow.Infrastructure.Persistence.Migrations
                     b.Navigation("Items");
                 });
 
+            modelBuilder.Entity("RetailFlow.Domain.Orders.FulfillmentAttempt", b =>
+                {
+                    b.Navigation("Items");
+                });
+
             modelBuilder.Entity("RetailFlow.Domain.Orders.Order", b =>
                 {
+                    b.Navigation("FulfillmentAttempts");
+
                     b.Navigation("History");
 
                     b.Navigation("Items");

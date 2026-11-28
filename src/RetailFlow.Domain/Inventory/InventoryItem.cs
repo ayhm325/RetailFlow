@@ -147,4 +147,21 @@ public sealed class InventoryItem
         Reserved -= quantity;
         OnHand -= quantity;
     }
+
+    public void WriteOffReservation(int quantity)
+    {
+        if (quantity <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(quantity), "Write-off quantity must be positive.");
+        }
+
+        if (Reserved < quantity || OnHand < quantity)
+        {
+            throw new InvalidOperationException(
+                $"Cannot write off {quantity} units (OnHand={OnHand}, Reserved={Reserved}).");
+        }
+
+        Reserved -= quantity;
+        OnHand -= quantity;
+    }
 }

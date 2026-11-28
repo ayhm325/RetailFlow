@@ -51,7 +51,7 @@ erDiagram
 - Check constraints لحالة Store/Order/Product وبعض القيم غير السالبة والكميات.
 - `decimal(19,4)` للأسعار والإجماليات ورسوم التوصيل.
 - `datetimeoffset(3)` أو precision 3 للتواريخ الزمنية في أغلب الجداول.
-- SQL Server `rowversion` على `InventoryItem`, `Order`, `Cart`, و`CartItem` (وفق EF configurations).
+- SQL Server `rowversion` على `InventoryItem`, `Order`, `Cart`, `CartItem`, و`FulfillmentAttemptItem` (Shadow Property في EF configurations).
 - `Restrict` delete behavior في علاقات أساسية لتجنب الحذف المتسلسل غير المقصود.
 
 ## 5. Concurrency

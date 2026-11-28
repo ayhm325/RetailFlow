@@ -1,11 +1,15 @@
 using System.Data;
+using System.Security.Cryptography;
+using System.Text.Json;
 
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 using RetailFlow.Application.Orders;
+using RetailFlow.Domain.Inventory;
 using RetailFlow.Domain.Orders;
 using RetailFlow.Infrastructure.Persistence;
 
@@ -117,6 +121,22 @@ public sealed class OrderService : IOrderService
         return await ExecutePagedOrderQueryAsync(baseQuery, page, pageSize, cancellationToken);
     }
 
+    public async Task<OrderDto?> GetMerchantOrderByIdAsync(
+        Guid storeId,
+        Guid orderId,
+        CancellationToken cancellationToken)
+    {
+        var order = await _dbContext.Orders
+            .AsNoTracking()
+            .Include(o => o.Items)
+            .Include(o => o.FulfillmentAttempts)
+            .ThenInclude(a => a.Items)
+            .AsSplitQuery()
+            .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
+
+        return order is null ? null : Map(order);
+    }
+
     public async Task<OrderDto?> ConfirmOrderAsync(
         Guid storeId,
         Guid actorUserId,
@@ -126,6 +146,8 @@ public sealed class OrderService : IOrderService
         var order = await _dbContext.Orders
             .Include(o => o.Items)
             .Include(o => o.History)
+            .Include(o => o.FulfillmentAttempts)
+            .ThenInclude(a => a.Items)
             .AsSplitQuery()
             .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
 
@@ -149,6 +171,8 @@ public sealed class OrderService : IOrderService
         var order = await _dbContext.Orders
             .Include(o => o.Items)
             .Include(o => o.History)
+            .Include(o => o.FulfillmentAttempts)
+            .ThenInclude(a => a.Items)
             .AsSplitQuery()
             .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
 
@@ -169,11 +193,15 @@ public sealed class OrderService : IOrderService
         Guid actorUserId,
         Guid orderId,
         FulfillmentStatus nextStatus,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DeliveryFailureReasonCode? failureReasonCode = null,
+        string? failureNote = null)
     {
         var order = await _dbContext.Orders
             .Include(o => o.Items)
             .Include(o => o.History)
+            .Include(o => o.FulfillmentAttempts)
+            .ThenInclude(a => a.Items)
             .AsSplitQuery()
             .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
 
@@ -182,7 +210,29 @@ public sealed class OrderService : IOrderService
             return null;
         }
 
-        order.AdvanceFulfillment(actorUserId, "MerchantOwner", nextStatus, _timeProvider.GetUtcNow());
+        if (nextStatus == FulfillmentStatus.Preparing &&
+            order.OrderStatus == OrderStatus.Confirmed &&
+            order.FulfillmentStatus == FulfillmentStatus.Preparing &&
+            (order.FulfillmentMode == FulfillmentMode.Pickup ||
+             (order.FulfillmentAttempts.Count == 1 && order.FulfillmentAttempts.Single().Status == FulfillmentAttemptStatus.Prepared)))
+        {
+            return Map(order);
+        }
+
+        if (order.FulfillmentMode == FulfillmentMode.Delivery && nextStatus == FulfillmentStatus.Failed)
+        {
+            if (!failureReasonCode.HasValue || !Enum.IsDefined(failureReasonCode.Value))
+            {
+                throw new ArgumentException("A valid FailureReasonCode is required when marking delivery Failed.", nameof(failureReasonCode));
+            }
+
+            order.RecordDeliveryFailure(actorUserId, "MerchantOwner", failureReasonCode.Value, failureNote, _timeProvider.GetUtcNow());
+        }
+        else
+        {
+            order.AdvanceFulfillment(actorUserId, "MerchantOwner", nextStatus, _timeProvider.GetUtcNow());
+        }
+
         await SaveOrderChangesAsync(storeId, orderId, nameof(AdvanceFulfillmentAsync), cancellationToken);
         return Map(order);
     }
@@ -196,6 +246,8 @@ public sealed class OrderService : IOrderService
         var order = await _dbContext.Orders
             .Include(o => o.Items)
             .Include(o => o.History)
+            .Include(o => o.FulfillmentAttempts)
+            .ThenInclude(a => a.Items)
             .AsSplitQuery()
             .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
 
@@ -208,6 +260,250 @@ public sealed class OrderService : IOrderService
         await CommitOrderReservationsAsync(order, cancellationToken);
         await SaveOrderChangesAsync(storeId, orderId, nameof(CollectCodPaymentAsync), cancellationToken);
 
+        return Map(order);
+    }
+
+    public async Task<OrderDto?> ResolveDeliveryCorrectionAsync(
+        Guid storeId,
+        Guid actorUserId,
+        Guid orderId,
+        string resolutionNote,
+        string? expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        var order = await LoadOrderAggregateAsync(storeId, orderId, cancellationToken);
+        if (order is null)
+        {
+            return null;
+        }
+
+        EnsureExpectedVersion(order, expectedVersion);
+        order.ResolveDeliveryCorrection(actorUserId, "MerchantOwner", resolutionNote, _timeProvider.GetUtcNow());
+        await SaveOrderChangesAsync(storeId, orderId, nameof(ResolveDeliveryCorrectionAsync), cancellationToken, requirePreconditionOnConcurrency: true);
+        return Map(order);
+    }
+
+    public async Task<OrderDto?> RetryDeliveryAsync(
+        Guid storeId,
+        Guid actorUserId,
+        Guid orderId,
+        string idempotencyKey,
+        string? note,
+        string? expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(idempotencyKey) || idempotencyKey.Trim().Length > 128)
+        {
+            throw new ArgumentException("Idempotency-Key header is required and must be at most 128 characters.", nameof(idempotencyKey));
+        }
+
+        var normalizedKey = idempotencyKey.Trim();
+        var requestHash = ComputeRetryRequestHash(storeId, orderId, note);
+
+        var order = await LoadOrderAggregateAsync(storeId, orderId, cancellationToken);
+        if (order is null)
+        {
+            return null;
+        }
+
+        // Replay lookup BEFORE If-Match evaluation (lost-response retry may carry old ETag)
+        var existingAttempt = order.FulfillmentAttempts
+            .SingleOrDefault(a => string.Equals(a.RetryIdempotencyKey, normalizedKey, StringComparison.Ordinal));
+        if (existingAttempt is not null)
+        {
+            if (!string.Equals(existingAttempt.RetryRequestHash, requestHash, StringComparison.Ordinal))
+            {
+                throw new OrderIdempotencyPayloadMismatchException(
+                    "Idempotency-Key was already used with a different delivery retry payload.");
+            }
+
+            return Map(order);
+        }
+
+        EnsureExpectedVersion(order, expectedVersion);
+        order.RetryDelivery(actorUserId, "MerchantOwner", _timeProvider.GetUtcNow(), normalizedKey, requestHash);
+
+        try
+        {
+            await _dbContext.SaveChangesAsync(cancellationToken);
+            return Map(order);
+        }
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException || IsRetryIdempotencyUniqueViolation(ex) || IsActiveAttemptUniqueViolation(ex))
+        {
+            _dbContext.ChangeTracker.Clear();
+
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var freshDb = scope.ServiceProvider.GetRequiredService<RetailFlowDbContext>();
+            var freshOrder = await freshDb.Orders
+                .AsNoTracking()
+                .Include(o => o.Items)
+                .Include(o => o.FulfillmentAttempts)
+                .ThenInclude(a => a.Items)
+                .AsSplitQuery()
+                .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
+
+            if (freshOrder is not null)
+            {
+                var winnerAttempt = freshOrder.FulfillmentAttempts
+                    .SingleOrDefault(a => string.Equals(a.RetryIdempotencyKey, normalizedKey, StringComparison.Ordinal));
+                if (winnerAttempt is not null)
+                {
+                    if (!string.Equals(winnerAttempt.RetryRequestHash, requestHash, StringComparison.Ordinal))
+                    {
+                        throw new OrderIdempotencyPayloadMismatchException(
+                            "Idempotency-Key was already used with a different delivery retry payload.");
+                    }
+
+                    return Map(freshOrder);
+                }
+            }
+
+            if (ex is DbUpdateConcurrencyException || IsActiveAttemptUniqueViolation(ex))
+            {
+                throw new OrderPreconditionException(
+                    "The order version does not match the current server state. Refresh the order and retry.",
+                    isMissingPrecondition: false,
+                    ex);
+            }
+
+            throw new OrderConcurrencyConflictException(orderId, nameof(RetryDeliveryAsync), ex);
+        }
+    }
+
+    public async Task<OrderDto?> CancelByMerchantAsync(
+        Guid storeId,
+        Guid actorUserId,
+        Guid orderId,
+        string reason,
+        string? expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            throw new ArgumentException("Cancellation reason is required.", nameof(reason));
+        }
+
+        var normalizedReason = reason.Trim();
+        var order = await LoadOrderAggregateAsync(storeId, orderId, cancellationToken);
+        if (order is null)
+        {
+            return null;
+        }
+
+        // Replay lookup BEFORE If-Match evaluation
+        if (order.OrderStatus == OrderStatus.Cancelled)
+        {
+            var cancelledByMerchant = order.History.Any(h =>
+                h.ToOrderStatus == OrderStatus.Cancelled &&
+                h.FromOrderStatus != OrderStatus.Cancelled &&
+                string.Equals(h.ActorRole, "MerchantOwner", StringComparison.Ordinal));
+
+            if (cancelledByMerchant && string.Equals(order.CancellationReason, normalizedReason, StringComparison.Ordinal))
+            {
+                return Map(order);
+            }
+
+            throw new OrderStateConflictException("Order is already cancelled with a different reason or actor.");
+        }
+
+        EnsureExpectedVersion(order, expectedVersion);
+
+        var priorStatuses = order.Items.ToDictionary(i => i.Id, i => i.ReservationStatus);
+        var now = _timeProvider.GetUtcNow();
+        order.CancelByMerchantOrTimeout(actorUserId, "MerchantOwner", normalizedReason, now);
+
+        var latestFailed = order.FulfillmentAttempts
+            .Where(a => a.Status == FulfillmentAttemptStatus.Failed)
+            .OrderByDescending(a => a.AttemptNumber ?? 0)
+            .ThenByDescending(a => a.PreparedAtUtc)
+            .FirstOrDefault();
+
+        await ApplyOrderItemInventoryEffectsAsync(
+            order,
+            priorStatuses,
+            latestFailed,
+            actorUserId,
+            now,
+            cancellationToken);
+
+        await SaveOrderChangesAsync(storeId, orderId, nameof(CancelByMerchantAsync), cancellationToken, requirePreconditionOnConcurrency: true);
+        return Map(order);
+    }
+
+    public async Task<OrderDto?> ResolveInventoryDispositionAsync(
+        Guid storeId,
+        Guid actorUserId,
+        Guid orderId,
+        Guid fulfillmentAttemptId,
+        IReadOnlyList<OrderItemDispositionCommand> items,
+        string? expectedVersion,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(items);
+        if (items.Count == 0)
+        {
+            throw new ArgumentException("At least one item disposition is required.", nameof(items));
+        }
+
+        var order = await LoadOrderAggregateAsync(storeId, orderId, cancellationToken);
+        if (order is null)
+        {
+            return null;
+        }
+
+        var attempt = order.FulfillmentAttempts.SingleOrDefault(a => a.Id == fulfillmentAttemptId);
+        if (attempt is null)
+        {
+            return null;
+        }
+
+        // Per-attempt replay check BEFORE If-Match evaluation
+        var isReplay = true;
+        foreach (var itemCmd in items)
+        {
+            if (itemCmd.Disposition is not (ReturnDisposition.Restockable or ReturnDisposition.Damaged or ReturnDisposition.Lost))
+            {
+                throw new ArgumentOutOfRangeException(nameof(items), "Disposition must be Restockable, Damaged, or Lost.");
+            }
+
+            var attemptItem = attempt.Items.SingleOrDefault(ai => ai.OrderItemId == itemCmd.OrderItemId)
+                ?? throw new ArgumentException($"OrderItemId '{itemCmd.OrderItemId}' does not belong to FulfillmentAttempt '{fulfillmentAttemptId}'.", nameof(items));
+
+            if (attemptItem.ReturnDisposition == ReturnDisposition.Pending)
+            {
+                isReplay = false;
+            }
+            else if (attemptItem.ReturnDisposition != itemCmd.Disposition)
+            {
+                throw new OrderStateConflictException(
+                    $"Attempt item '{itemCmd.OrderItemId}' already resolved as '{attemptItem.ReturnDisposition}'; cannot change to '{itemCmd.Disposition}'.");
+            }
+        }
+
+        if (isReplay)
+        {
+            return Map(order);
+        }
+
+        EnsureExpectedVersion(order, expectedVersion);
+
+        var priorStatuses = order.Items.ToDictionary(i => i.Id, i => i.ReservationStatus);
+        var now = _timeProvider.GetUtcNow();
+        var domainDispositions = items
+            .Select(i => (i.OrderItemId, i.Disposition, i.Note))
+            .ToList();
+
+        order.ResolveInventoryDisposition(actorUserId, "MerchantOwner", fulfillmentAttemptId, domainDispositions, now);
+
+        await ApplyOrderItemInventoryEffectsAsync(
+            order,
+            priorStatuses,
+            attempt,
+            actorUserId,
+            now,
+            cancellationToken);
+
+        await SaveOrderChangesAsync(storeId, orderId, nameof(ResolveInventoryDispositionAsync), cancellationToken, requirePreconditionOnConcurrency: true);
         return Map(order);
     }
 
@@ -399,7 +695,8 @@ public sealed class OrderService : IOrderService
         Guid storeId,
         Guid orderId,
         string operation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool requirePreconditionOnConcurrency = false)
     {
         try
         {
@@ -416,12 +713,162 @@ public sealed class OrderService : IOrderService
                 orderId,
                 operation);
 
+            if (requirePreconditionOnConcurrency && ex.Entries.Any(e => e.Entity is Order))
+            {
+                throw new OrderPreconditionException(
+                    "The order version does not match the current server state. Refresh the order and retry.",
+                    isMissingPrecondition: false,
+                    ex);
+            }
+
             throw new OrderConcurrencyConflictException(
                 orderId,
                 operation,
                 ex);
         }
+        catch (DbUpdateException ex) when (IsOrderLifecycleUniqueRace(ex))
+        {
+            _dbContext.ChangeTracker.Clear();
+
+            _logger.LogWarning(
+                ex,
+                "OrderConcurrencyConflict (UniqueIndexRace) StoreId={StoreId} OrderId={OrderId} Operation={Operation}",
+                storeId,
+                orderId,
+                operation);
+
+            if (requirePreconditionOnConcurrency)
+            {
+                throw new OrderPreconditionException(
+                    "The order version does not match the current server state. Refresh the order and retry.",
+                    isMissingPrecondition: false,
+                    ex);
+            }
+
+            throw new OrderConcurrencyConflictException(orderId, operation, ex);
+        }
     }
+
+    private static bool IsOrderLifecycleUniqueRace(DbUpdateException ex) =>
+        ex.InnerException is SqlException sqlEx &&
+        sqlEx.Number is 2601 or 2627 &&
+        (sqlEx.Message.Contains("UX_InventoryAdjustments_OrderItem_WriteOff", StringComparison.OrdinalIgnoreCase) ||
+         sqlEx.Message.Contains("UX_FulfillmentAttempts_StoreId_OrderId_Active", StringComparison.OrdinalIgnoreCase) ||
+         sqlEx.Message.Contains("UX_FulfillmentAttempts_StoreId_OrderId_AttemptNumber", StringComparison.OrdinalIgnoreCase));
+
+    private Task<Order?> LoadOrderAggregateAsync(Guid storeId, Guid orderId, CancellationToken cancellationToken) =>
+        _dbContext.Orders
+            .Include(o => o.Items)
+            .Include(o => o.History)
+            .Include(o => o.FulfillmentAttempts)
+            .ThenInclude(a => a.Items)
+            .AsSplitQuery()
+            .SingleOrDefaultAsync(o => o.StoreId == storeId && o.Id == orderId, cancellationToken);
+
+    private static void EnsureExpectedVersion(Order order, string? expectedVersion)
+    {
+        if (string.IsNullOrWhiteSpace(expectedVersion))
+        {
+            throw new OrderPreconditionException(
+                "If-Match header is required for this operation.",
+                isMissingPrecondition: true);
+        }
+
+        var currentVersion = EncodeVersion(order.RowVersion);
+        if (!string.Equals(currentVersion, expectedVersion.Trim(), StringComparison.Ordinal))
+        {
+            throw new OrderPreconditionException(
+                "The order version does not match the current server state. Refresh the order and retry.",
+                isMissingPrecondition: false);
+        }
+    }
+
+    private async Task ApplyOrderItemInventoryEffectsAsync(
+        Order order,
+        IReadOnlyDictionary<Guid, InventoryReservationStatus> priorStatuses,
+        FulfillmentAttempt? sourceAttempt,
+        Guid actorUserId,
+        DateTimeOffset occurredAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var changedItems = order.Items
+            .Where(i => priorStatuses.TryGetValue(i.Id, out var prev) &&
+                        prev != i.ReservationStatus &&
+                        i.ReservationStatus is InventoryReservationStatus.Released or InventoryReservationStatus.WrittenOff)
+            .ToList();
+
+        if (changedItems.Count == 0)
+        {
+            return;
+        }
+
+        var productIds = changedItems.Select(i => i.ProductId).Distinct().ToList();
+        var inventories = await _dbContext.InventoryItems
+            .Where(i => i.StoreId == order.StoreId && productIds.Contains(i.ProductId))
+            .ToDictionaryAsync(i => i.ProductId, cancellationToken);
+
+        foreach (var item in changedItems)
+        {
+            if (!inventories.TryGetValue(item.ProductId, out var inv))
+            {
+                throw new InvalidOperationException($"InventoryItem missing for StoreId={order.StoreId}, ProductId={item.ProductId}.");
+            }
+
+            if (item.ReservationStatus == InventoryReservationStatus.Released)
+            {
+                inv.ReleaseReservation(item.Quantity);
+            }
+            else if (item.ReservationStatus == InventoryReservationStatus.WrittenOff)
+            {
+                inv.WriteOffReservation(item.Quantity);
+                var attemptItem = sourceAttempt?.Items.SingleOrDefault(ai => ai.OrderItemId == item.Id);
+                var opType = attemptItem?.ReturnDisposition == ReturnDisposition.Lost
+                    ? InventoryAdjustmentOperationType.WriteOffLost
+                    : InventoryAdjustmentOperationType.WriteOffDamaged;
+
+                _dbContext.InventoryAdjustments.Add(InventoryAdjustment.CreateWriteOff(
+                    Guid.NewGuid(),
+                    order.StoreId,
+                    item.ProductId,
+                    order.Id,
+                    item.Id,
+                    attemptItem?.Id,
+                    opType,
+                    item.Quantity,
+                    sourceAttempt?.FailureReasonCode,
+                    actorUserId,
+                    occurredAtUtc,
+                    attemptItem?.ResolutionNote));
+            }
+        }
+    }
+
+    private static string EncodeVersion(byte[]? rowVersion) =>
+        rowVersion is { Length: > 0 } ? Convert.ToBase64String(rowVersion) : string.Empty;
+
+    private static string ComputeRetryRequestHash(Guid storeId, Guid orderId, string? note)
+    {
+        var canonical = JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            Operation = "order.delivery.retry.v1",
+            StoreId = storeId,
+            OrderId = orderId,
+            Note = note?.Trim() ?? string.Empty
+        });
+        return Convert.ToHexString(SHA256.HashData(canonical));
+    }
+
+    private static bool IsRetryIdempotencyUniqueViolation(Exception ex) =>
+        ex is DbUpdateException dbEx &&
+        dbEx.InnerException is SqlException sqlEx &&
+        sqlEx.Number is 2601 or 2627 &&
+        sqlEx.Message.Contains("UX_FulfillmentAttempts_StoreId_OrderId_RetryIdempotencyKey", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsActiveAttemptUniqueViolation(Exception ex) =>
+        ex is DbUpdateException dbEx &&
+        dbEx.InnerException is SqlException sqlEx &&
+        sqlEx.Number is 2601 or 2627 &&
+        sqlEx.Message.Contains("UX_FulfillmentAttempts_StoreId_OrderId_Active", StringComparison.OrdinalIgnoreCase);
 
     private static async Task ReleaseOrderReservationsAsync(
         RetailFlowDbContext dbContext,
@@ -487,5 +934,38 @@ public sealed class OrderService : IOrderService
                 i.Sku,
                 i.UnitPrice,
                 i.Quantity,
-                i.LineTotal)).ToList());
+                i.LineTotal,
+                i.ReservationStatus,
+                i.Id)).ToList(),
+            order.ReservationSummary,
+            EncodeVersion(order.RowVersion),
+            order.FulfillmentAttempts
+                .OrderBy(a => a.PreparedAtUtc)
+                .Select(a => new FulfillmentAttemptDto(
+                    a.Id,
+                    a.AttemptNumber,
+                    a.Status,
+                    a.IsActive,
+                    a.PreparedAtUtc,
+                    a.DispatchedAtUtc,
+                    a.DeliveredAtUtc,
+                    a.FailedAtUtc,
+                    a.CancelledAtUtc,
+                    a.FailureReasonCode,
+                    a.FailureCategory,
+                    a.FailureNote,
+                    a.ResolvedAtUtc,
+                    a.ResolvedByUserId,
+                    a.ResolutionNote,
+                    a.Items.Select(ai => new FulfillmentAttemptItemDto(
+                        ai.Id,
+                        ai.OrderItemId,
+                        ai.ProductId,
+                        ai.Quantity,
+                        ai.ReturnDisposition,
+                        ai.ReturnedAtUtc,
+                        ai.ResolvedAtUtc,
+                        ai.ResolvedByUserId,
+                        ai.ResolutionNote)).ToList()))
+                .ToList());
 }

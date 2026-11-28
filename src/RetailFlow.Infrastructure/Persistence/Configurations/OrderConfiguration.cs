@@ -41,7 +41,9 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
         builder.Property(x => x.CancellationReason).HasMaxLength(500);
         builder.Property(x => x.CreatedAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
         builder.Property(x => x.ReservationExpiresAtUtc).HasColumnType("datetimeoffset(3)").IsRequired();
+        builder.Property(x => x.Version).IsRequired().HasDefaultValue(0);
         builder.Property(x => x.RowVersion).IsRowVersion();
+        builder.Ignore(x => x.ReservationSummary);
 
         builder.HasIndex(x => new { x.StoreId, x.OrderNumber })
             .IsUnique()
@@ -71,6 +73,12 @@ internal sealed class OrderConfiguration : IEntityTypeConfiguration<Order>
             .HasForeignKey(x => new { x.StoreId, x.OrderId })
             .HasPrincipalKey(x => new { x.StoreId, x.Id })
             .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasMany(x => x.FulfillmentAttempts)
+            .WithOne()
+            .HasForeignKey(x => new { x.StoreId, x.OrderId })
+            .HasPrincipalKey(x => new { x.StoreId, x.Id })
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }
 
@@ -82,10 +90,14 @@ internal sealed class OrderItemConfiguration : IEntityTypeConfiguration<OrderIte
         {
             t.HasCheckConstraint("CK_OrderItems_Quantity_Positive", "[Quantity] > 0");
             t.HasCheckConstraint("CK_OrderItems_Prices_NonNegative", "[UnitPrice] >= 0 AND [LineTotal] >= 0");
+            t.HasCheckConstraint("CK_OrderItems_InventoryReservationStatus", "[InventoryReservationStatus] IN (1, 2, 3, 4, 5)");
         });
 
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.HasAlternateKey(x => new { x.StoreId, x.OrderId, x.Id }).HasName("AK_OrderItems_StoreId_OrderId_Id");
+        builder.HasAlternateKey(x => new { x.StoreId, x.Id }).HasName("AK_OrderItems_StoreId_Id");
+
         builder.Property(x => x.StoreId).IsRequired();
         builder.Property(x => x.OrderId).IsRequired();
         builder.Property(x => x.ProductId).IsRequired();
@@ -94,6 +106,11 @@ internal sealed class OrderItemConfiguration : IEntityTypeConfiguration<OrderIte
         builder.Property(x => x.UnitPrice).HasPrecision(19, 4).IsRequired();
         builder.Property(x => x.Quantity).IsRequired();
         builder.Property(x => x.LineTotal).HasPrecision(19, 4).IsRequired();
+        builder.Property(x => x.ReservationStatus)
+            .HasColumnName("InventoryReservationStatus")
+            .HasConversion<int>()
+            .IsRequired()
+            .HasDefaultValue(InventoryReservationStatus.Active);
     }
 }
 

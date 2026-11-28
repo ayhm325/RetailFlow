@@ -48,6 +48,12 @@ public sealed class RetailFlowDbContext
 
     public DbSet<OrderStatusHistory> OrderStatusHistories => Set<OrderStatusHistory>();
 
+    public DbSet<FulfillmentAttempt> FulfillmentAttempts => Set<FulfillmentAttempt>();
+
+    public DbSet<FulfillmentAttemptItem> FulfillmentAttemptItems => Set<FulfillmentAttemptItem>();
+
+    public DbSet<InventoryAdjustment> InventoryAdjustments => Set<InventoryAdjustment>();
+
     public DbSet<CheckoutRequest> CheckoutRequests => Set<CheckoutRequest>();
 
     public DbSet<SessionTicket> SessionTickets => Set<SessionTicket>();
